@@ -2,14 +2,7 @@
   --bg: #f4f3ef; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a65; --line: #e2e0d8;
   --accent: #0f6e56; --accent-bg: #e1f5ee; --warn: #854f0b; --warn-bg: #faeeda;
   --bad: #a32d2d; --bad-bg: #fcebeb; --btn: #1d1d1b; --btn-text: #ffffff;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a; --card: #1e2126; --text: #f1efe8; --muted: #a3a29b; --line: #30343b;
-    --accent: #5dcaa5; --accent-bg: #08392e; --warn: #fac775; --warn-bg: #3d2a08;
-    --bad: #f09595; --bad-bg: #4a1414; --btn: #f1efe8; --btn-text: #14161a;
-  }
+  color-scheme: light; /* always light, also when the phone is in dark mode (Stanley, 2026-11-10) */
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -230,7 +223,6 @@ div.att-open { cursor: default; }
 
 /* Charts (house data-viz rules: 2px lines, ringed markers, hairline solid grid, text in text colours) */
 :root { --chart: #14866a; --chart-wash: #e1f5ee; --sand: #efe6d2; }
-@media (prefers-color-scheme: dark) { :root { --chart: #199e70; --chart-wash: #0d3a2e; --sand: #3a3324; } }
 .viz { margin: 18px 0 4px; }
 .viz figcaption b { display: block; font-size: 15px; }
 .viz figcaption span { display: block; font-size: 13px; color: var(--muted); line-height: 1.4; margin-top: 2px; }
