@@ -55,37 +55,47 @@ function speedHtml(s) {
   const hiddenOne = [s.last, s.takeoff, s.loss].find(m => m && !shown(m));
   const jumpLine = s.jumpFromToe != null ? `<p class="note">Skok od odrazovej špičky po prvú stopu v piesku: <b>${num(s.jumpFromToe, 2)} m</b></p>` : "";
   return `<h2>Rýchlosť <small>${s.board ? 'z dosky' : 'odhad'}</small></h2>
-    <div class="big">${cell('Posledný krok', s.last)}${cell('Odraz', s.takeoff)}${lossCell}</div>${jumpLine}
+    <div class="big">${cell('Do odrazu', s.last)}${cell('Odraz', s.takeoff)}${lossCell}</div>${jumpLine}
     ${hiddenOne ? `<p class="met-why">${esc(hiddenReason(hiddenOne))}</p>` : ''}
     <details><summary>Ako isté to je?</summary><p>Istota: <b>${esc(s.sure)}</b>. ${esc(s.note)}</p></details>`;
 }
 
-// The last two steps and the board contact side by side. A step is a contact plus the flight
-// after it (World Athletics' convention), so the penultimate step lands on the board.
+// The last three foot contacts, named the way the coach says it (3rd-last, penultimate, take-off),
+// then what happens between them: the flight, the distance toe to toe and the rhythm.
 function stepsHtml(steps, heightCm, lowering) {
   if (!steps?.length) return '';
-  const cols = [['third', 'Predposl.'], ['pen', 'Posledný'], ['take', 'Odraz']].map(([id, label]) => [label, steps.find(s => s.id === id)]).filter(([, s]) => s);
+  const name = { third: '3. od konca', pen: 'Predposl.', take: 'Odraz' };
+  const short = { third: '3. od konca', pen: 'Predposl.', take: 'odraz' };
+  const cols = ['third', 'pen', 'take'].map(id => steps.find(s => s.id === id)).filter(Boolean);
   const f = (v, dp, unit) => (Number.isFinite(v) ? `${num(v, dp)}${unit ? ` ${unit}` : ''}` : '–');
-  const row = (label, get) => `<tr><th>${label}</th>${cols.map(([, s]) => `<td>${get(s)}</td>`).join('')}</tr>`;
+  const row = (label, get) => `<tr><th>${label}</th>${cols.map(s => `<td>${get(s)}</td>`).join('')}</tr>`;
   const pct = heightCm ? row('Pri dotyku, % výšky', s => f((s.com.td * 100 / heightCm) * 100, 0, '%')) : '';
+  // between contacts: each one with the next
+  const gaps = cols.slice(0, -1).map((s, k) => [s, cols[k + 1]]);
+  const far = s => (s.id === 'third' ? '≈ ' : '');
+  const gapRow = (label, get) => `<tr><th>${label}</th>${gaps.map(([a]) => `<td>${get(a)}</td>`).join('')}</tr>`;
+  const gapRows = [
+    gapRow('Let', a => f(a.flightMs, 0, 'ms')),
+    gapRow('Dĺžka kroku', a => (Number.isFinite(a.length) ? far(a) : '') + f(a.length, 2, 'm')),
+    gapRow('Frekvencia', a => f(a.freqHz, 1, 'Hz')),
+    gapRow('Rýchlosť', a => (Number.isFinite(a.speed) ? far(a) : '') + f(a.speed, 1, 'm/s')),
+  ].join('');
   const low = lowering && [
-    Number.isFinite(lowering.intoPen) && `do predposledného <b>${num(lowering.intoPen, 1)} cm</b> (dotyk 3. kroku od konca → dotyk predposledného)`,
-    Number.isFinite(lowering.intoBoard) && `do dosky <b>${num(lowering.intoBoard, 1)} cm</b> (odraz z predposledného → najnižší bod na doske, ako World Athletics)`,
+    Number.isFinite(lowering.intoPen) && `do predposledného <b>${num(lowering.intoPen, 1)} cm</b> (dotyk 3. od konca → dotyk predposledného)`,
+    Number.isFinite(lowering.intoBoard) && `do odrazu <b>${num(lowering.intoBoard, 1)} cm</b> (odlepenie z predposledného → najnižší bod na doske, ako World Athletics)`,
   ].filter(Boolean);
-  return `<h3 class="steps-h">Posledné kroky</h3>
-    <table class="steps"><thead><tr><th></th>${cols.map(([l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
-      ${row('Dĺžka kroku', s => (s.id === 'third' && Number.isFinite(s.length) ? '≈ ' : '') + f(s.length, 2, 'm'))}
+  return `<h3 class="steps-h">Posledné dotyky</h3>
+    <table class="steps"><thead><tr><th></th>${cols.map(s => `<th>${name[s.id]}</th>`).join('')}</tr></thead><tbody>
       ${row('Kontakt', s => f(s.contactMs, 0, 'ms'))}
-      ${row('Let', s => f(s.flightMs, 0, 'ms'))}
-      ${row('Frekvencia', s => f(s.freqHz, 1, 'Hz'))}
-      ${row('Rýchlosť', s => (s.id === 'third' && Number.isFinite(s.speed) ? '≈ ' : '') + f(s.speed, 1, 'm/s'))}
       ${row('Ťažisko pri dotyku', s => f(s.com.td * 100, 0, 'cm'))}
       ${row('Ťažisko najnižšie', s => f(s.com.low * 100, 0, 'cm'))}
-      ${row('Ťažisko pri odraze', s => f(s.com.to * 100, 0, 'cm'))}
+      ${row('Ťažisko pri odlepení', s => f(s.com.to * 100, 0, 'cm'))}
       ${pct}
     </tbody></table>
     ${low?.length ? `<p class="note">Zníženie ťažiska: ${low.join('; ')}. Publikované hodnoty sú 1–9 cm a chyba merania aj v laboratóriu je okolo 3 cm.</p>` : ''}
-    <p class="note">≈ predposledný krok je ďaleko od dosky: dĺžka asi ±0,15 m, rýchlosť asi ±0,3 m/s. Časy sú presné na snímku, výška ťažiska na centimetre. Krok je kontakt a let po ňom, posledný krok teda končí na doske. Dĺžka je od špičky po špičku, frekvencia z času od dotyku po ďalší dotyk, rýchlosť a výška ťažiska v metroch z dosky.</p>`;
+    <h3 class="steps-h">Medzi dotykmi</h3>
+    <table class="steps gaps"><thead><tr><th></th>${gaps.map(([a, b]) => `<th>${short[a.id]} → ${short[b.id]}</th>`).join('')}</tr></thead><tbody>${gapRows}</tbody></table>
+    <p class="note">Let je od odlepenia jednej nohy po dotyk druhej, dĺžka od špičky po špičku, frekvencia z času od dotyku po ďalší dotyk, rýchlosť ťažiska v tom istom úseku. Riadok predposledný → odraz je let do dosky. ≈ pri 3. kroku od konca: je ďaleko od dosky, dĺžka asi ±0,15 m, rýchlosť asi ±0,3 m/s. Časy sú presné na snímku, výška ťažiska na centimetre.</p>`;
 }
 
 function fixHtml(f, first) {

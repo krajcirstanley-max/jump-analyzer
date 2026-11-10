@@ -82,7 +82,7 @@ export const NORMS = {
   // WA17/WA18 men 3.22-4.20, women 2.51-3.46 (three 2017 finalists under 2.8).
   vyTO: { label: 'Zvislá rýchlosť pri odraze', unit: 'm/s', m: [3.2, 4.2], f: [2.5, 3.5], good: 'high' },
   // WA 2017 Fig. 7-8, "last step" mean horizontal CM velocity (penultimate contact + flight into board).
-  speedLast: { label: 'Rýchlosť v poslednom kroku', unit: 'm/s', m: [9.36, 10.0], f: [8.36, 9.2], good: 'high' },
+  speedLast: { label: 'Rýchlosť z predposledného do odrazu', unit: 'm/s', m: [9.36, 10.0], f: [8.36, 9.2], good: 'high' },
   // WA 2017 Table 7, horizontal CM velocity at take-off.
   speedTO: { label: 'Rýchlosť pri odraze', unit: 'm/s', m: [7.82, 9.56], f: [7.2, 8.98], good: 'high' },
   // WA 2017, take-off velocity minus last-step velocity, per athlete (range of the finalists).
