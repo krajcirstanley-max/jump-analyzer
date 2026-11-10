@@ -138,7 +138,11 @@ function streaming(clip, N, SIZE) {
     },
     async pick(list) {
       const want = [...new Set(list)].sort((a, b) => a - b);
-      const p = run(`select='${want.map(i => `eq(n\\,${i})`).join('+')}'`);
+      // Runs of consecutive frames as between(): one eq() per frame overflows ffmpeg's parser
+      // for a window of a hundred frames or more.
+      const runs = [];
+      for (const i of want) { const r = runs.at(-1); if (r && i === r[1] + 1) r[1] = i; else runs.push([i, i]); }
+      const p = run(`select='${runs.map(([a, b]) => (a === b ? `eq(n\\,${a})` : `between(n\\,${a}\\,${b})`)).join('+')}'`);
       const out = new Map();
       let k = 0;
       try {

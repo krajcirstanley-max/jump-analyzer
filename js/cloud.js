@@ -140,6 +140,7 @@ const STAGES = {
   'Loading models': 'Pripravujem analýzu',
   queued: 'Čakám na server',
   locate: 'Hľadám odraz vo videu',
+  ground: 'Meriam dosku a piesok',
   analysis: 'Počítam výsledky',
   coach: 'Píšem odporúčania',
 };

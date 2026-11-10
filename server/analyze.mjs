@@ -14,6 +14,7 @@ import { writeCoaching } from './coach.mjs';
 import { cliClient } from './claude-cli.mjs';
 import { probe, openFrames, jpeg } from './frames.mjs';
 import { locateEvents } from './locate.mjs';
+import { measureGround } from './ground.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MODELS_DIR = process.env.JUMP_MODELS_DIR || join(root, 'models');
@@ -81,6 +82,23 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
         result.locate = { error: String(e?.message || e).slice(0, 300) };
       }
       mark('located');
+    }
+    // Metres from the runway: the take-off line, the sand and the runway lines in every frame.
+    // Without them the analysis falls back to the gravity fit.
+    {
+      const pre = analyzeJump(fromWire(result), sex, meta.ts, { height });
+      if (!pre.error) {
+        onProgress?.({ stage: 'ground', done: 0, total: 1 });
+        try {
+          const g = await measureGround({ frames, track: fromWire(result).smooth, jump: pre, boxes: res.boxes });
+          if (!g.error) result.ground = g;
+          else result.groundError = g.error;
+        } catch (e) {
+          console.error('ground failed:', e?.message || e);
+          result.groundError = String(e?.message || e).slice(0, 300);
+        }
+        mark('ground');
+      }
     }
     onProgress?.({ stage: 'analysis', done: 0, total: 1 });
     const jump = analyzeJump(fromWire(result), sex, meta.ts, { height });

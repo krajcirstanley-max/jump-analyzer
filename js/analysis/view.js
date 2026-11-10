@@ -53,8 +53,9 @@ function speedHtml(s) {
   const lossCell = shown(s.loss) ? cell('Strata', s.loss, pctText ? `<small>${pctText}</small>` : '')
     : `<div><span>Strata</span><b>${pctText ?? '–'}</b></div>`;
   const hiddenOne = [s.last, s.takeoff, s.loss].find(m => m && !shown(m));
-  return `<h2>Rýchlosť <small>odhad</small></h2>
-    <div class="big">${cell('Posledný krok', s.last)}${cell('Odraz', s.takeoff)}${lossCell}</div>
+  const jumpLine = s.jumpFromToe != null ? `<p class="note">Skok od odrazovej špičky po prvú stopu v piesku: <b>${num(s.jumpFromToe, 2)} m</b></p>` : "";
+  return `<h2>Rýchlosť <small>${s.board ? 'z dosky' : 'odhad'}</small></h2>
+    <div class="big">${cell('Posledný krok', s.last)}${cell('Odraz', s.takeoff)}${lossCell}</div>${jumpLine}
     ${hiddenOne ? `<p class="met-why">${esc(hiddenReason(hiddenOne))}</p>` : ''}
     <details><summary>Ako isté to je?</summary><p>Istota: <b>${esc(s.sure)}</b>. ${esc(s.note)}</p></details>`;
 }

@@ -3,6 +3,7 @@
 import { detectContacts, keyFrames, withEvents } from './events.js';
 import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason } from './metrics.js';
 import { flightAnalysis } from './flight.js';
+import { groundAnalysis } from './ground.js';
 import { sharpen } from './kinematics.js';
 import { techniqueScore, coaching, PHASES } from './coach.js';
 
@@ -53,6 +54,22 @@ function buildPhases(ev, metrics, score, last, runThrough = false) {
   });
 }
 
+// The flight with every metre replaced by the runway's. Angles and the apex timing are image
+// ratios and stay. The instant speeds at touchdown are left out: the flight into the board is
+// only 7-11 frames and read 0.3-0.5 m/s apart between methods on our clips.
+function withGround(f, g) {
+  return {
+    ...f, ground: g, scaleSource: 'board', scaleOk: true, scaleWhy: null,
+    vxTO: g.vxTO, speedLast: g.speedLast, speedLoss: g.speedLoss, speedLossTO: g.speedLossPct,
+    vxTD: NaN, velocityLoss: NaN,
+    // Vertical speed comes from the time to the apex (g x t, no scale), so with the runway's
+    // horizontal speed the angle no longer depends on the gravity fit.
+    ...(f.apexOk && Number.isFinite(f.vyTO) ? { takeoffAngle: (Math.atan2(f.vyTO, g.vxTO) * 180) / Math.PI, angleOk: true } : {}),
+    takeoffSpeed: Math.hypot(g.vxTO, f.vyTO),
+    takeoffDist: g.takeoffDist, flightDistance: g.vxTO * g.flightTime, landingReach: g.landingReach, estDistance: g.jump,
+  };
+}
+
 // How far to trust the speed card, from the fit itself.
 function speedCard(flight, by, ev, track) {
   const last = by.speedLast ?? null, takeoff = by.speedTO ?? null, loss = by.speedLoss ?? null;
@@ -60,6 +77,17 @@ function speedCard(flight, by, ev, track) {
   const lossPct = flight && !flight.error && flight.angleOk && Number.isFinite(flight.speedLast) && flight.speedLast > 0
     ? ((flight.speedLast - flight.vxTO) / flight.speedLast) * 100 : null;
   if (!flight || flight.error) return { last, takeoff, loss, lossPct, sure: 'nízka', note: 'Z videa sa nedala určiť mierka.' };
+  if (flight.scaleSource === 'board') {
+    const g = flight.ground, cm = v => Math.round(v * 100);
+    // Far past the line is a short run-up from a spot nearer the sand (Stanley: 8-10 steps take
+    // off about 1 m from the sand on purpose), not a foul, so it is not mentioned at all.
+    const toLine = !Number.isFinite(g.toeToLine) || g.toeToLine < -0.3 ? ''
+      : g.toeToLine >= 0 ? `Odraz ${cm(g.toeToLine)} cm pred čiarou dosky.` : `Prešľap o ${cm(-g.toeToLine)} cm.`;
+    const diff = Math.round(Math.abs(g.legRatio - 1) * 100);
+    return { last, takeoff, loss, lossPct: Number.isFinite(g.speedLossPct) ? g.speedLossPct : null, sure: g.sure, board: true,
+      jumpFromToe: Number.isFinite(g.jump) && ev.landing != null ? g.jump : null,
+      note: `Metre z dosky (čiara odrazu ${String(g.boardM).replace('.', ',')} m od piesku). Kontrola s dĺžkou nohy: rozdiel ${diff} %. Rýchlosti asi ±0,2 m/s, dĺžka skoku asi ±0,2 m.${toLine ? ` ${toLine}` : ''}` };
+  }
   const yaw = ev.pen ? viewYawAt(track, ev.pen.td) : NaN;
   if (!flight.scaleOk) {
     const why = scaleReason(flight);
@@ -94,7 +122,10 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
   ev.keyFrames = ev.keyFrames.map(k => ({ ...k, label: KF_LABELS[k.id] ?? k.label }));
   const dir = contacts[0]?.dir ?? 1;
   const times = ts ?? Array.from({ length: clean.length }, (_, i) => i / fps);
-  const flight = flightAnalysis(smooth, ev, times, sex, dir, height);
+  const air = flightAnalysis(smooth, ev, times, sex, dir, height);
+  // Metres from the runway when the server found it; the gravity scale is only the fallback.
+  const ground = result.ground && !air.error ? groundAnalysis(result.ground, smooth, ev, times, sex, height) : null;
+  const flight = ground && !ground.error ? withGround(air, ground) : air;
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
   const runThrough = result.events?.kind === 'runthrough';
