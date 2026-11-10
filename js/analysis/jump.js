@@ -26,7 +26,9 @@ function finish(m) {
 
 // Consecutive frame ranges for the timeline bands. With the landing hidden the flight runs to
 // the end of the clip and the landing phase is the single last frame.
-function buildPhases(ev, metrics, score, last) {
+const NO_LANDING = new Set(['landingReach', 'kneeLand', 'hipLand', 'estDistance', 'flight']);
+
+function buildPhases(ev, metrics, score, last, runThrough = false) {
   const by = Object.fromEntries(metrics.map(m => [m.key, m]));
   const kf = Object.fromEntries(ev.keyFrames.map(k => [k.id, k]));
   const T = ev.takeoff, flex = kf.maxFlex?.frame ?? T.td, land = ev.landing ?? last;
@@ -46,6 +48,7 @@ function buildPhases(ev, metrics, score, last) {
       from, to, frame,
       keyFrames: PHASE_KF[p.id].map(id => kf[id]).filter(Boolean).map(k => ({ id: k.id, label: k.label, frame: k.frame })),
       metrics: p.keys.map(k => by[k]).filter(Boolean),
+      ...(runThrough && p.id === 'landing' ? { note: 'Prebeh: dopad na nohu a beh cez piesok, dopad sa nehodnotí.' } : {}),
     };
   });
 }
@@ -91,14 +94,18 @@ export function analyzeJump(result, sex, ts) {
   const dir = contacts[0]?.dir ?? 1;
   const times = ts ?? Array.from({ length: clean.length }, (_, i) => i / fps);
   const flight = flightAnalysis(smooth, ev, times, sex, dir);
-  const metrics = [...measure(sharpen(clean, fps), ev, fps, sex, dir, clean), ...flightMetrics(flight, ev, sex)].map(finish);
+  // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
+  // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
+  const runThrough = result.events?.kind === 'runthrough';
+  const metrics = [...measure(sharpen(clean, fps), ev, fps, sex, dir, clean), ...flightMetrics(flight, ev, sex)]
+    .filter(m => !(runThrough && NO_LANDING.has(m.key))).map(finish);
   const score = techniqueScore(metrics);
   const by = Object.fromEntries(metrics.map(m => [m.key, m]));
   const last = result.last ?? clean.length - 1;
   return {
-    ...ev, dir, fps, flight, metrics, score, eventsSource: named ? 'claude' : 'pose',
+    ...ev, dir, fps, flight, metrics, score, eventsSource: named ? 'claude' : 'pose', kind: runThrough ? 'runthrough' : 'jump',
     coach: coaching(metrics, sex),
-    phases: buildPhases(ev, metrics, score, last),
+    phases: buildPhases(ev, metrics, score, last, runThrough),
     speed: speedCard(flight, by, ev, smooth),
     replay: {
       from: Math.max(result.first ?? 0, ev.takeoff.td - Math.round(fps)),

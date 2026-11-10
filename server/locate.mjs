@@ -19,8 +19,8 @@ const OVERVIEW_SCHEMA = {
   properties: { takeoff: frameOrNull, landing: frameOrNull },
 };
 const FRAMES_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['on_ground', 'sand'],
-  properties: { on_ground: { type: 'array', items: { type: 'integer' } }, sand: frameOrNull },
+  type: 'object', additionalProperties: false, required: ['on_ground', 'sand', 'run_through'],
+  properties: { on_ground: { type: 'array', items: { type: 'integer' } }, sand: frameOrNull, run_through: { type: 'boolean' } },
 };
 
 const OVERVIEW_PROMPT = `You see a long jump filmed on a phone that pans with the athlete. The image is a contact sheet: frames in time order, row by row, each stamped with its frame number in yellow.
@@ -28,7 +28,8 @@ Find the jump. Answer with the printed frame numbers of the tile closest to the 
 
 const FRAMES_PROMPT = `You see a long jump filmed on a phone that pans with the athlete. Each image is a contact sheet of consecutive frames, row by row, cropped around the athlete, each stamped with its frame number in yellow.
 For every frame, decide whether a foot of the athlete is touching the running surface. A foot touches when it is flat on the ground or meets its own shadow; a foot above its shadow is in the air. Ignore the board and markings.
-List every frame number with a foot on the running surface in on_ground. In sand, give the first frame where any part of the body touches the sand pit, or null if it is not shown.`;
+List every frame number with a foot on the running surface in on_ground. In sand, give the first frame where any part of the body touches the sand pit, or null if it is not shown.
+Set run_through to true if this is a run-through (pop-up) instead of a full jump: after the takeoff the athlete comes down onto one foot in the sand and keeps running, rather than landing with both legs reaching forward. If the landing is not shown, judge from the flight: a run-through has no leg extension forward before the sand.`;
 
 const image = jpeg => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } });
 
@@ -112,7 +113,7 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
     for (const w of windows) for (const part of chunks(w, 36)) sheets.push(await contactSheet(frames, part, { boxes, cols: 9, tileW: 160 }));
     const ans = await ask(client, model, FRAMES_PROMPT, sheets, FRAMES_SCHEMA);
     const shown = new Set(windows.flat());
-    return { ans, T, L, ground: (ans?.on_ground ?? []).filter(i => shown.has(i)), sand: shown.has(ans?.sand) ? ans.sand : null };
+    return { ans, T, L, ground: (ans?.on_ground ?? []).filter(i => shown.has(i)), sand: shown.has(ans?.sand) ? ans.sand : null, runThrough: ans?.run_through === true };
   };
 
   // With no pose guess the overview has to come first; otherwise both run at once.
@@ -132,8 +133,11 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
     td3: c.third?.td ?? null, penTD: c.pen?.td ?? null, penTO: c.pen?.to ?? null,
     TD: c.take?.td ?? null, TO: c.take?.to ?? null, landing: seen.sand,
   };
+  const checked = checkEvents(named, fps);
+  // A run-through (pop-up) is the same jump up to the flight, then the athlete runs out of the pit.
+  if (checked.events.TD != null) checked.events.kind = seen.runThrough ? 'runthrough' : 'jump';
   return {
-    ...checkEvents(named, fps), coarse, runs, edges: { take: c.take?.from, pen: c.pen?.from, third: c.third?.from },
+    ...checked, coarse, runs, edges: { take: c.take?.from, pen: c.pen?.from, third: c.third?.from },
     windows: { T: seen.T, L: seen.L }, model, ms: Date.now() - t0,
   };
 }

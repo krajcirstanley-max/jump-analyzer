@@ -125,7 +125,7 @@ function userContent({ jump, snapshots, name, sex, history, errors, previous }) 
     .map(({ key, label, unit, value, norm, status, score, target, estimate }) => ({ key, label, unit, value, norm, status, score, target, estimate }));
   const hidden = (jump.metrics ?? []).filter(m => m.status === 'hidden').map(m => m.key);
   const phases = (jump.phases ?? []).map(({ id, label, score }) => ({ id, label, score }));
-  const facts = { athlete: name, sex, score: jump.score?.score ?? null, phases, speed: jump.speed ?? null, metrics, hiddenDoNotMention: hidden, previousJumps: history ?? [] };
+  const facts = { athlete: name, sex, attempt: jump.kind === 'runthrough' ? 'run-through (pop-up): lands on one foot and runs out of the pit; there is no landing and no full flight, so do not coach the landing, flight time or distance' : 'full jump', score: jump.score?.score ?? null, phases, speed: jump.speed ?? null, metrics, hiddenDoNotMention: hidden, previousJumps: history ?? [] };
 
   const out = [];
   for (const s of snapshots ?? []) {

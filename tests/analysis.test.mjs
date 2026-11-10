@@ -322,3 +322,22 @@ test('coaching is passed through untouched', { skip: !hasReal('IMG_2674') }, () 
   const j = real('IMG_2674', 'male');
   assert.ok(Array.isArray(j.coach.fixes) && 'take' in j.coach);
 });
+
+test('a run-through (pop-up) keeps the approach and takeoff but has no landing to judge', { skip: !hasReal('IMG_2674') }, () => {
+  const file = new URL('./fixtures/_real_IMG_2674_pose.json', import.meta.url);
+  const r = JSON.parse(readFileSync(file, 'utf8'));
+  const fix = a => a.map(k => (k ? Float64Array.from(k, v => (v == null ? NaN : v)) : null));
+  r.clean = fix(r.clean); r.smooth = fix(r.smooth);
+  const ts = r.clean.map((_, i) => i / 120);
+  const events = { td3: 678, penTD: 714, penTO: 727, TD: 735, TO: 752, landing: 838 };
+  const full = analyzeJump({ ...r, events: { ...events, kind: 'jump' } }, 'male', ts);
+  const run = analyzeJump({ ...r, events: { ...events, kind: 'runthrough' } }, 'male', ts);
+  assert.equal(run.kind, 'runthrough');
+  for (const k of ['landingReach', 'kneeLand', 'hipLand', 'estDistance', 'flight']) assert.ok(!by(run)[k], k);
+  const land = run.phases.find(p => p.id === 'landing');
+  assert.equal(land.score, null);
+  assert.match(land.note, /Prebeh/);
+  // Everything up to the flight is measured exactly as in the full jump.
+  for (const k of ['contactTO', 'kneeTD', 'kneeTO', 'takeoffAngle', 'penKnee']) assert.equal(by(run)[k]?.value, by(full)[k]?.value, k);
+  assert.ok(Number.isFinite(run.score.score));
+});

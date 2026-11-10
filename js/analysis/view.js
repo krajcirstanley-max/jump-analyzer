@@ -142,7 +142,7 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
       return `<button class="kf" data-frame="${k.frame}">${esc(k.label)}${t}</button>`;
     }).join('');
     const rows = (p.metrics ?? []).map(m => metricRow(m, m.key === metric)).join('');
-    els.detail.innerHTML = `<h2>${esc(p.label)}</h2>${rows || `<p class="met-why">${p.id === 'landing' ? 'Dopad nie je v zábere, táto fáza sa nedá zmerať.' : 'Táto fáza nie je na videu vidieť.'}</p>`}${noReplayNote ? `<p class="note">${esc(noReplayNote)}</p>` : ''}`;
+    els.detail.innerHTML = `<h2>${esc(p.label)}</h2>${rows || `<p class="met-why">${esc(p.note ?? (p.id === 'landing' ? 'Dopad nie je v zábere, táto fáza sa nedá zmerať.' : 'Táto fáza nie je na videu vidieť.'))}</p>`}${noReplayNote ? `<p class="note">${esc(noReplayNote)}</p>` : ''}`;
     if (player) {
       if (p.frame != null) { player.pause(); player.show(p.frame); }
       player.setBands(phases.map(x => ({ from: x.from, to: x.to, id: x.id, on: x.id === id })));
