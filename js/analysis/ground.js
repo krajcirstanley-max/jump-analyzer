@@ -120,8 +120,48 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const direct = toeTO - landX;
   const agree = Number.isFinite(jump) && Number.isFinite(direct) ? Math.abs(direct - jump) : NaN;
 
+  // The last three contacts on the ground: where the toe was planted, how long each contact and
+  // step took, and how high the centre of mass rode. Heights are on the body's scale (the stance
+  // leg, thigh + shank, as measured against the board above) from the foot's lowest point in the
+  // same frame, so neither the camera's pan nor its tilt enters.
+  const fps = (ts.length - 1) / (ts[ts.length - 1] - ts[0]);
+  const legMeasured = legUnits * boardM;
+  const heightAt = (i, c) => {
+    const k = track[i], m = k && centreOfMass(k, sex);
+    if (!m || !has(k, c.foot + 'hip', c.foot + 'knee', c.foot + 'ank', c.foot + 'bigtoe', c.foot + 'heel')) return NaN;
+    const legPx = dist(P(k, c.foot + 'hip'), P(k, c.foot + 'knee')) + dist(P(k, c.foot + 'knee'), P(k, c.foot + 'ank'));
+    return ((Math.max(P(k, c.foot + 'bigtoe')[1], P(k, c.foot + 'heel')[1]) - m[1]) / legPx) * legMeasured;
+  };
+  const steady = (c, i) => median([i - 1, i, i + 1].filter(j => j >= c.td && j <= c.to).map(j => heightAt(j, c)));
+  const contacts = [['third', ev.third], ['pen', ev.pen], ['take', { ...T, foot: s }]].filter(([, c]) => c && c.foot);
+  const steps = contacts.map(([id, c], n) => {
+    const toes = []; for (let i = c.td + 1; i <= c.to - 1; i++) toes.push(...footX(i, [c.foot + 'bigtoe']));
+    let mid = null; // the centre of mass passing over the toe
+    for (let i = c.td; i < c.to && mid == null; i++) { const a = X(i), b = X(i + 1), t = median(toes) * boardM; if (a >= t && b < t) mid = i; }
+    const hs = []; for (let i = c.td; i <= c.to; i++) hs.push([i, heightAt(i, c)]);
+    const low = hs.filter(([, h]) => Number.isFinite(h)).reduce((b, x) => (!b || x[1] < b[1] ? x : b), null);
+    const next = contacts[n + 1]?.[1];
+    const st = { id, foot: c.foot, td: c.td, to: c.to, contactMs: ((c.to - c.td + 1) / fps) * 1000, toeX: median(toes) * boardM,
+      com: { td: steady(c, c.td), mid: mid != null ? steady(c, mid) : NaN, low: low?.[1] ?? NaN, lowFrame: low?.[0] ?? null, to: steady(c, c.to) } };
+    if (next) {
+      st.flightMs = ((next.td - c.to - 1) / fps) * 1000;
+      st.stepMs = (ts[next.td] - ts[c.td]) * 1000;
+      st.freqHz = 1000 / st.stepMs;
+      st.toToMs = (ts[next.to] - ts[c.to]) * 1000;
+    }
+    return st;
+  });
+  // Step length is toe to toe. The speed is the centre of mass over the same touchdown-to-touchdown
+  // interval, not length / time: the board foot lands far ahead of the body (0.7 m vs 0.3 m on
+  // IMG_4596), which stretches the last step's toe-to-toe length without any extra speed.
+  steps.forEach((st, n) => { const nx = steps[n + 1]; if (nx) { st.length = st.toeX - nx.toeX; st.speed = (avgX(st.td) - avgX(nx.td)) / (ts[nx.td] - ts[st.td]); } });
+
+  const board = steps.find(st => st.id === 'take');
+  if (board) board.speed = vxTO; // the board contact's speed is the take-off speed
+
   const pxPerM = pxPerUnit(T.td, comX(T.td)) / boardM;
   return {
+    steps, legMeasured,
     boardM, implied, legRatio, yAth, pxPerM,
     speedLast, vxTO, speedLoss: vxTO - speedLast, speedLossPct: ((vxTO - speedLast) / speedLast) * 100,
     // + behind the take-off line (legal, distance given away), - past it towards the sand.

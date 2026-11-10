@@ -165,6 +165,11 @@ h2 + .met, .all-h + .met { border-top: 0; padding-top: 2px; }
 .big span { display: block; font-size: 12px; color: var(--muted); }
 .big b { display: block; font-size: clamp(14px, 4.4vw, 17px); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .big small { display: block; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.steps-h { font-size: 15px; margin: 16px 0 6px; }
+.steps { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; table-layout: fixed; }
+.steps th, .steps td { padding: 5px 4px; text-align: right; border-bottom: 1px solid var(--line, rgba(127,127,127,.18)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.steps thead th { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.steps tbody th { text-align: left; font-weight: 500; color: var(--muted); width: 38%; white-space: normal; }
 #res-speed details { margin-top: 8px; }
 
 /* Coaching */

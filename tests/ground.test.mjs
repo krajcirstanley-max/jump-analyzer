@@ -82,4 +82,11 @@ test('ground metres: speeds, take-off point and jump from a known scene', () => 
   // the stick figure's take-off foot jumps forward in one frame at toe-off, which moves the
   // centre of mass ~7 cm at once; real clips gave 0.02-0.10 m
   assert.ok(g.partsGap < 0.1, `Hay partition gap ${g.partsGap}`);
+  // the last contacts: timing straight from the frames
+  const pen = g.steps.find(x => x.id === 'pen'), take = g.steps.find(x => x.id === 'take');
+  assert.ok(pen && take, 'steps for the penultimate and the board');
+  assert.equal(Math.round(pen.contactMs), 125);
+  assert.equal(Math.round(pen.stepMs), 250);
+  assert.ok(Math.abs(pen.freqHz - 4) < 1e-9);
+  assert.ok(Math.abs(take.speed - g.vxTO) < 1e-9, 'the board column shows the take-off speed');
 });

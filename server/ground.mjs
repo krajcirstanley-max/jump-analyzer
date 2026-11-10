@@ -330,7 +330,8 @@ export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box }
 export async function measureGround({ frames, track, jump, boxes }) {
   const t0 = Date.now();
   const { W, H, N } = frames, T = jump.takeoff, s = jump.takeoffFoot, dir = jump.dir;
-  const from = Math.max(0, (jump.pen?.td ?? T.td - 30) - 25);
+  // From before the 3rd-last step: the last three steps are measured on the ground.
+  const from = Math.max(0, (jump.third?.td ?? (jump.pen?.td ?? T.td - 30) - 35) - 12);
   const to = Math.min(N - 1, (jump.landing ?? T.to + 90) + 6);
   const want = []; for (let i = from; i <= to; i++) want.push(i);
   const px = await frames.pick(want);

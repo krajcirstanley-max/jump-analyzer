@@ -60,6 +60,34 @@ function speedHtml(s) {
     <details><summary>Ako isté to je?</summary><p>Istota: <b>${esc(s.sure)}</b>. ${esc(s.note)}</p></details>`;
 }
 
+// The last two steps and the board contact side by side. A step is a contact plus the flight
+// after it (World Athletics' convention), so the penultimate step lands on the board.
+function stepsHtml(steps, heightCm, lowering) {
+  if (!steps?.length) return '';
+  const cols = [['third', 'Predposl.'], ['pen', 'Posledný'], ['take', 'Odraz']].map(([id, label]) => [label, steps.find(s => s.id === id)]).filter(([, s]) => s);
+  const f = (v, dp, unit) => (Number.isFinite(v) ? `${num(v, dp)}${unit ? ` ${unit}` : ''}` : '–');
+  const row = (label, get) => `<tr><th>${label}</th>${cols.map(([, s]) => `<td>${get(s)}</td>`).join('')}</tr>`;
+  const pct = heightCm ? row('Pri dotyku, % výšky', s => f((s.com.td * 100 / heightCm) * 100, 0, '%')) : '';
+  const low = lowering && [
+    Number.isFinite(lowering.intoPen) && `do predposledného <b>${num(lowering.intoPen, 1)} cm</b> (dotyk 3. kroku od konca → dotyk predposledného)`,
+    Number.isFinite(lowering.intoBoard) && `do dosky <b>${num(lowering.intoBoard, 1)} cm</b> (odraz z predposledného → najnižší bod na doske, ako World Athletics)`,
+  ].filter(Boolean);
+  return `<h3 class="steps-h">Posledné kroky</h3>
+    <table class="steps"><thead><tr><th></th>${cols.map(([l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
+      ${row('Dĺžka kroku', s => (s.id === 'third' && Number.isFinite(s.length) ? '≈ ' : '') + f(s.length, 2, 'm'))}
+      ${row('Kontakt', s => f(s.contactMs, 0, 'ms'))}
+      ${row('Let', s => f(s.flightMs, 0, 'ms'))}
+      ${row('Frekvencia', s => f(s.freqHz, 1, 'Hz'))}
+      ${row('Rýchlosť', s => (s.id === 'third' && Number.isFinite(s.speed) ? '≈ ' : '') + f(s.speed, 1, 'm/s'))}
+      ${row('Ťažisko pri dotyku', s => f(s.com.td * 100, 0, 'cm'))}
+      ${row('Ťažisko najnižšie', s => f(s.com.low * 100, 0, 'cm'))}
+      ${row('Ťažisko pri odraze', s => f(s.com.to * 100, 0, 'cm'))}
+      ${pct}
+    </tbody></table>
+    ${low?.length ? `<p class="note">Zníženie ťažiska: ${low.join('; ')}. Publikované hodnoty sú 1–9 cm a chyba merania aj v laboratóriu je okolo 3 cm.</p>` : ''}
+    <p class="note">≈ predposledný krok je ďaleko od dosky: dĺžka asi ±0,15 m, rýchlosť asi ±0,3 m/s. Časy sú presné na snímku, výška ťažiska na centimetre. Krok je kontakt a let po ňom, posledný krok teda končí na doske. Dĺžka je od špičky po špičku, frekvencia z času od dotyku po ďalší dotyk, rýchlosť a výška ťažiska v metroch z dosky.</p>`;
+}
+
 function fixHtml(f, first) {
   return `<article class="fix${first ? ' first' : ''}">
     ${first ? '<div class="fix-tag">Na ďalší rozbeh</div>' : ''}
@@ -114,7 +142,7 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   const s = scoreOf(jump);
   els.score.innerHTML = `<div class="score"><span class="score-n">${s == null ? '–' : Math.round(s)}</span><span class="score-of">/ 100</span>${feel != null ? `<span class="score-feel" data-feel-shown>Pocit ${feel}/5</span>` : '<span class="score-feel" data-feel-shown></span>'}</div>`;
   els.tiles.innerHTML = phases.map(tile).join('');
-  els.speed.innerHTML = speedHtml(jump.speed);
+  els.speed.innerHTML = speedHtml(jump.speed) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
   els.coach.innerHTML = awaitingCoach ? COACH_WAIT : coachHtml(jump.coach);
   els.all.innerHTML = allNumbers(jump);
 

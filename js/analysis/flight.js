@@ -161,25 +161,14 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
     if (!m || !(leg > 0) || !has(k, c.foot + 'bigtoe', c.foot + 'heel')) return NaN;
     return ((Math.max(P(k, c.foot + 'bigtoe')[1], P(k, c.foot + 'heel')[1]) - m[1]) / leg) * legM * 100;
   };
-  // Mid-stance: the centre of mass passing over the toe; the leg is near vertical, so a tilted
-  // phone cannot fake height there.
-  const midstance = c => {
-    for (let i = c.td; i < c.to; i++) {
-      const a = com(i), b = com(i + 1), ka = track[i], kb = track[i + 1];
-      if (!a || !b || !has(ka, c.foot + 'bigtoe') || !has(kb, c.foot + 'bigtoe')) continue;
-      if ((a[0] - P(ka, c.foot + 'bigtoe')[0]) * dir <= 0 && (b[0] - P(kb, c.foot + 'bigtoe')[0]) * dir > 0) return i;
-    }
-    return null;
-  };
-  const steady = (c, i, leg) => median([i - 1, i, i + 1, i + 2].map(j => above(j, c, leg)).filter(Number.isFinite));
-  // Into the penultimate: 3rd-last mid-stance minus penultimate mid-stance (Shimizu & Ae's interval).
+  // A few frames around i, inside the contact only: before touchdown the foot is not the ground.
+  const steady = (c, i, leg) => median([i - 1, i, i + 1, i + 2].filter(j => j >= c.td && j <= c.to).map(j => above(j, c, leg)).filter(Number.isFinite));
+  // Into the penultimate: 3rd-last touchdown minus penultimate touchdown, Shimizu & Ae's interval
+  // and instants. No published source reads mid-stance (research 2026-11-10), so neither do we.
   let hipDrop = NaN, hipDropFrame = null;
   if (ev.pen && ev.third) {
-    const m3 = midstance(ev.third), mp = midstance(ev.pen);
-    if (m3 != null && mp != null) {
-      hipDrop = steady(ev.third, m3, legPx(ev.third)) - steady(ev.pen, mp, legPx(ev.pen));
-      hipDropFrame = mp;
-    }
+    hipDrop = steady(ev.third, ev.third.td, legPx(ev.third)) - steady(ev.pen, ev.pen.td, legPx(ev.pen));
+    hipDropFrame = ev.pen.td;
   }
   // Into the board, World Athletics' interval: penultimate toe-off to the lowest point on the board.
   let comDropBoard = NaN, comDropBoardFrame = null;

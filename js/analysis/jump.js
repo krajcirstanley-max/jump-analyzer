@@ -62,12 +62,23 @@ function withGround(f, g) {
     ...f, ground: g, scaleSource: 'board', scaleOk: true, scaleWhy: null,
     vxTO: g.vxTO, speedLast: g.speedLast, speedLoss: g.speedLoss, speedLossTO: g.speedLossPct,
     vxTD: NaN, velocityLoss: NaN,
+    // the two lowerings on the leg as measured against the board, same instants as above
+    ...lowerings(g, f),
     // Vertical speed comes from the time to the apex (g x t, no scale), so with the runway's
     // horizontal speed the angle no longer depends on the gravity fit.
     ...(f.apexOk && Number.isFinite(f.vyTO) ? { takeoffAngle: (Math.atan2(f.vyTO, g.vxTO) * 180) / Math.PI, angleOk: true } : {}),
     takeoffSpeed: Math.hypot(g.vxTO, f.vyTO),
     takeoffDist: g.takeoffDist, flightDistance: g.vxTO * g.flightTime, landingReach: g.landingReach, estDistance: g.jump,
   };
+}
+
+function lowerings(g, f) {
+  const by = Object.fromEntries((g.steps ?? []).map(s => [s.id, s]));
+  const out = {};
+  const pen = by.pen, third = by.third, take = by.take;
+  if (third && pen && Number.isFinite(third.com.td - pen.com.td)) { out.hipDrop = (third.com.td - pen.com.td) * 100; out.hipDropFrame = pen.td; }
+  if (pen && take && Number.isFinite(pen.com.to - take.com.low)) { out.comDropBoard = (pen.com.to - take.com.low) * 100; out.comDropBoardFrame = take.com.lowFrame; }
+  return out;
 }
 
 // How far to trust the speed card, from the fit itself.
@@ -139,6 +150,9 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
     coach: coaching(metrics, sex),
     phases: buildPhases(ev, metrics, score, last, runThrough),
     speed: speedCard(flight, by, ev, smooth),
+    // The last three contacts in metres and milliseconds, only when the runway gave the scale.
+    steps: flight?.ground?.steps ?? null, stepsHeightCm: height ?? null,
+    lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.comDropBoard } : null,
     replay: {
       from: Math.max(result.first ?? 0, ev.takeoff.td - Math.round(fps)),
       to: ev.landing != null ? Math.min(last, ev.landing + Math.round(fps / 2)) : last,

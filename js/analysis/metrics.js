@@ -19,9 +19,10 @@ export const NORMS = {
   contactPen: { label: 'Kontakt predposledného kroku', unit: 'ms', m: [100, 135], f: [95, 135], good: 'low' },
   // WA17/WA18/PAN means 70-76 ms both sexes, finalists 56-92 (women down to 40).
   flightToBoard: { label: 'Let do dosky', unit: 'ms', m: [56, 92], f: [45, 90] },
-  // Centre of mass above the foot on the ground, 3rd-last mid-stance minus penultimate mid-stance
-  // (cm via the athlete's leg length). Same interval as Shimizu & Ae (ISBS, 6 university men,
-  // PB 7.06): 3 cm lower at penultimate touchdown, ~4 at toe-off. Too much also costs speed.
+  // Centre of mass above the foot on the ground, 3rd-last touchdown minus penultimate touchdown
+  // (cm on the athlete's leg; with the runway found, the leg as measured against the board).
+  // Shimizu & Ae (ISBS, 6 university men, PB 7.06): 3 cm lower at penultimate touchdown, 6 ± 2 at
+  // board touchdown. Published lowering is 1-9 cm against a ~3 cm measurement error (Lees 1993).
   hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [2, 6], f: [2, 6] },
   // WA's interval: penultimate toe-off to the lowest centre of mass on the board. WA17 men 1-6,
   // WA18 men 2-8 (mean 3); WA17 women 1-6, WA18 women 1-9 (mean 3-4).
