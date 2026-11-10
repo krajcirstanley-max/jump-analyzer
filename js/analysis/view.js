@@ -89,8 +89,8 @@ function stepsHtml(steps, heightCm, lowering) {
   return `<h3 class="steps-h">Posledné dotyky</h3>
     <table class="steps"><thead><tr><th></th>${cols.map(s => `<th>${name[s.id]}</th>`).join('')}</tr></thead><tbody>
       ${row('Kontakt', s => f(s.contactMs, 0, 'ms'))}
-      ${row('Došľap pred ťažiskom', s => f(s.tdDist, 2, 'm'))}
-      ${row('Ťažisko pred špičkou pri odlepení', s => f(s.toDist, 2, 'm'))}
+      ${row('Došľap pred ťažiskom', s => (s.id === 'third' ? '–' : f(s.tdDist, 2, 'm')))}
+      ${row('Ťažisko pred špičkou pri odlepení', s => (s.id === 'third' ? '–' : f(s.toDist, 2, 'm')))}
       ${row('Ťažisko pri dotyku', s => f(s.com.td * 100, 0, 'cm'))}
       ${row('Ťažisko najnižšie', s => f(s.com.low * 100, 0, 'cm'))}
       ${row('Ťažisko pri odlepení', s => f(s.com.to * 100, 0, 'cm'))}
@@ -99,7 +99,7 @@ function stepsHtml(steps, heightCm, lowering) {
     ${low?.length ? `<p class="note">Zníženie ťažiska: ${low.join('; ')}. Publikované hodnoty sú 1–9 cm a chyba merania aj v laboratóriu je okolo 3 cm.</p>` : ''}
     <h3 class="steps-h">Medzi dotykmi</h3>
     <table class="steps gaps"><thead><tr><th></th>${gaps.map(([a, b]) => `<th>${short[a.id]} → ${short[b.id]}</th>`).join('')}</tr></thead><tbody>${gapRows}</tbody></table>
-    <p class="note">Došľap je päta pred ťažiskom pri dotyku. Let je od odlepenia jednej nohy po dotyk druhej, dĺžka od špičky po špičku, frekvencia z času od dotyku po ďalší dotyk, rýchlosť ťažiska v tom istom úseku. Riadok predposledný → odraz je let do dosky. ≈ pri 3. kroku od konca: je ďaleko od dosky, dĺžka asi ±0,15 m, rýchlosť asi ±0,3 m/s. Časy sú presné na snímku, výška ťažiska na centimetre.</p>`;
+    <p class="note">Došľap je päta pred ťažiskom pri dotyku; pri 3. kroku od konca sa neukazuje, lebo je ďaleko od dosky. Let je od odlepenia jednej nohy po dotyk druhej, dĺžka od špičky po špičku, frekvencia z času od dotyku po ďalší dotyk, rýchlosť ťažiska v tom istom úseku. Riadok predposledný → odraz je let do dosky. ≈ pri 3. kroku od konca: je ďaleko od dosky, dĺžka asi ±0,15 m, rýchlosť asi ±0,3 m/s. Časy sú presné na snímku, výška ťažiska na centimetre.</p>`;
 }
 
 function fixHtml(f, first) {

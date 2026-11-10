@@ -80,9 +80,10 @@ export function rhythmHtml(p) {
   const total = parts.reduce((a, q) => a + q.ms, 0);
   const blocks = parts.map(q => {
     const w = (q.ms / total) * 100;
-    const txt = w >= 11 ? `${Math.round(q.ms)}` : '';
+    // every block carries its number: narrow ones centred in a smaller size, the rest at the start
+    const txt = `${Math.round(q.ms)}`;
     const name = q.kind === 'c' ? `${q.label}: kontakt ${Math.round(q.ms)} ms` : `let ${Math.round(q.ms)} ms`;
-    return `<div class="rh-${q.kind}" style="width:${w.toFixed(2)}%" title="${name}" aria-label="${name}">${txt}</div>`;
+    return `<div class="rh-${q.kind}${w < 11 ? ' rh-narrow' : ''}" style="width:${w.toFixed(2)}%" title="${name}" aria-label="${name}">${txt}</div>`;
   }).join('');
   const heads = parts.map(q => `<div style="width:${((q.ms / total) * 100).toFixed(2)}%">${q.kind === 'c' ? q.label : ''}</div>`).join('');
   return `<figure class="viz">
