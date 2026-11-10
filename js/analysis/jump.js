@@ -1,7 +1,7 @@
 // The jump analysis as data: no DOM, importable in Node, so phone and server cannot disagree.
 // Shape: docs/v1-contract.md.
 import { detectContacts, keyFrames, withEvents } from './events.js';
-import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason } from './metrics.js';
+import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from './metrics.js';
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
 import { sharpen } from './kinematics.js';
@@ -72,6 +72,47 @@ function withGround(f, g) {
   };
 }
 
+// What the side-view chart draws: the measured centre of mass up to toe-off, the planted toes,
+// the take-off line and the sand, and the flight to the landing from the take-off speeds
+// (horizontal from the runway, vertical from the time to the apex) - drawn dashed, as a model.
+function profileData(f, ev) {
+  const g = f?.ground;
+  if (!g || !g.series?.length) return null;
+  const hTO = g.series.at(-1).h;
+  const T = Number.isFinite(g.flightTime) ? g.flightTime : null;
+  const flight = T && Number.isFinite(f.vyTO) && Number.isFinite(g.vxTO)
+    ? { xTO: g.comXTO, hTO, vx: g.vxTO, vy: f.vyTO, T } : null;
+  return {
+    series: g.series.map(p => ({ t: +p.t.toFixed(4), x: +p.x.toFixed(3), h: +p.h.toFixed(3) })),
+    toes: g.steps.map(st => { const c = g.series.find(p => p.i === st.td); return { id: st.id, x: st.toeX, com: c ? { x: +c.x.toFixed(3), h: +c.h.toFixed(3) } : null }; }),
+    lineX: g.boardM, landX: g.landX, jump: g.jump, flight, toeTO: g.toeTO,
+    parts: [g.takeoffDist, g.vxTO * g.flightTime, g.landingReach].every(Number.isFinite) ? { takeoff: g.takeoffDist, flight: g.vxTO * g.flightTime, landing: g.landingReach } : null,
+    timeline: g.steps.map(st => ({ id: st.id, contactMs: st.contactMs, flightMs: st.flightMs ?? null })),
+  };
+}
+
+// Metrics built from other metrics and the runway's contacts (research 2026-11-10: what the World
+// Athletics and Berlin reports carry that we could read). Hidden when what they rest on is hidden.
+function derivedMetrics(base, ev, f, fps, sex, height) {
+  const by = Object.fromEntries(base.map(m => [m.key, m]));
+  const g = sex === 'female' ? 'f' : 'm', out = [];
+  const add = (key, value, frame, { hiddenBy = [], estimate = true, reason = null } = {}) => {
+    if (value == null || !Number.isFinite(value)) return;
+    const n = NORMS[key], [lo, hi] = n[g];
+    const hid = hiddenBy.find(m => !m || m.status === 'hidden');
+    const status = hid !== undefined ? 'hidden' : value < lo ? 'low' : value > hi ? 'high' : 'ok';
+    out.push({ key, label: n.label, unit: n.unit, value, norm: [lo, hi], status, frame, good: n.good, estimate, reason: status === 'hidden' ? reason ?? hid?.reason ?? 'kamera nie je dosť zboku' : null });
+  };
+  const tdm = by.kneeTD, mn = by.kneeMin;
+  if (tdm && mn && mn.frame > ev.takeoff.td) add('kneeVel', Math.abs(mn.value - tdm.value) / ((mn.frame - ev.takeoff.td) / fps), mn.frame, { hiddenBy: [tdm, mn] });
+  if (by.trunkTD && by.trunkTO) add('trunkRotBoard', by.trunkTO.value - by.trunkTD.value, ev.takeoff.to, { hiddenBy: [by.trunkTD, by.trunkTO] });
+  const st = Object.fromEntries((f?.ground?.steps ?? []).map(s => [s.id, s]));
+  if (st.take) add('touchdownDist', st.take.tdDist, ev.takeoff.td);
+  if (st.take && height) add('toHeight', (st.take.com.to * 100 / height) * 100, ev.takeoff.to);
+  if (st.third?.length && st.pen?.length) add('stepChange', ((st.pen.length - st.third.length) / st.third.length) * 100, ev.pen?.td ?? null);
+  return out;
+}
+
 function lowerings(g, f) {
   const by = Object.fromEntries((g.steps ?? []).map(s => [s.id, s]));
   const out = {};
@@ -140,7 +181,8 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
   const runThrough = result.events?.kind === 'runthrough';
-  const metrics = [...measure(sharpen(clean, fps), ev, fps, sex, dir, clean), ...flightMetrics(flight, ev, sex)]
+  const base = [...measure(sharpen(clean, fps), ev, fps, sex, dir, clean), ...flightMetrics(flight, ev, sex)];
+  const metrics = [...base, ...derivedMetrics(base, ev, flight, fps, sex, height)]
     .filter(m => !(runThrough && NO_LANDING.has(m.key))).map(finish);
   const score = techniqueScore(metrics);
   const by = Object.fromEntries(metrics.map(m => [m.key, m]));
@@ -152,6 +194,7 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
     speed: speedCard(flight, by, ev, smooth),
     // The last three contacts in metres and milliseconds, only when the runway gave the scale.
     steps: flight?.ground?.steps ?? null, stepsHeightCm: height ?? null,
+    profile: profileData(flight, ev),
     lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.comDropBoard } : null,
     replay: {
       from: Math.max(result.first ?? 0, ev.takeoff.td - Math.round(fps)),

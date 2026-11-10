@@ -7,9 +7,9 @@
 
 // Phases and the measurements that score them (weights: how much each phase counts).
 export const PHASES = [
-  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee'] },
-  { id: 'plant', label: 'Plant', weight: 0.35, keys: ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin', 'speedLossTO'] },
-  { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'trunkTO'] },
+  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee', 'stepChange'] },
+  { id: 'plant', label: 'Plant', weight: 0.35, keys: ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin', 'kneeVel', 'touchdownDist', 'speedLossTO'] },
+  { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'trunkTO', 'trunkRotBoard', 'toHeight'] },
   { id: 'flight', label: 'Let', weight: 0.05, keys: ['flight', 'peakHeight', 'trunkStability'] },
   { id: 'landing', label: 'Dopad', weight: 0.15, keys: ['landingReach', 'kneeLand', 'hipLand', 'estDistance'] },
 ];

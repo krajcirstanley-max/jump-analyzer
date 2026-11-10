@@ -227,3 +227,44 @@ div.att-open { cursor: default; }
 .chip { flex: 1; min-height: 40px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; touch-action: manipulation; cursor: pointer; }
 .chip.on { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
 .hud .chip { flex: 0 0 auto; min-height: 32px; padding: 0 12px; }
+
+/* Charts (house data-viz rules: 2px lines, ringed markers, hairline solid grid, text in text colours) */
+:root { --chart: #14866a; --chart-wash: #e1f5ee; --sand: #efe6d2; }
+@media (prefers-color-scheme: dark) { :root { --chart: #199e70; --chart-wash: #0d3a2e; --sand: #3a3324; } }
+.viz { margin: 18px 0 4px; }
+.viz figcaption b { display: block; font-size: 15px; }
+.viz figcaption span { display: block; font-size: 13px; color: var(--muted); line-height: 1.4; margin-top: 2px; }
+.viz-wrap { position: relative; margin-top: 8px; }
+.viz-svg { width: 100%; height: auto; display: block; overflow: visible; touch-action: pan-y; }
+.viz-grid { stroke: var(--line); stroke-width: 1; }
+.viz-tick { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.viz-note { fill: var(--muted); font-size: 10px; }
+.viz-label { fill: var(--text); font-size: 11px; font-weight: 600; }
+.viz-value { fill: var(--text); font-size: 11px; font-weight: 600; }
+.viz-line { fill: none; stroke: var(--chart); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz-model { stroke-dasharray: 5 4; opacity: .75; }
+.viz-dot { fill: var(--chart); stroke: var(--card); stroke-width: 2; }
+.viz-foot { fill: var(--chart); }
+.viz-mark { stroke: var(--muted); stroke-width: 1; opacity: .7; }
+.viz-bracket { fill: none; stroke: var(--muted); stroke-width: 1; }
+.viz-sand { fill: var(--sand); }
+.viz-runway { fill: var(--line); }
+.viz-cross { stroke: var(--muted); stroke-width: 1; }
+.viz-hit { fill: transparent; cursor: crosshair; }
+.viz-tip { position: absolute; top: -6px; width: 150px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0,0,0,.08); pointer-events: none; }
+.viz-tip b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+.viz-tip span { color: var(--muted); }
+.rh-heads { display: flex; gap: 2px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.rh-heads div { white-space: nowrap; overflow: visible; }
+.rh-bar { display: flex; gap: 2px; margin-top: 3px; height: 28px; }
+.rh-bar div { border-radius: 4px; font-size: 12px; font-weight: 600; display: flex; align-items: center; padding-left: 6px; font-variant-numeric: tabular-nums; min-width: 0; }
+.rh-c { background: var(--chart); color: #fff; }
+.rh-f { background: var(--chart-wash); color: var(--text); }
+.viz-legend { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.viz-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+.parts { display: flex; gap: 2px; height: 28px; margin-top: 12px; }
+.parts div { border-radius: 4px; font-size: 12px; font-weight: 600; display: flex; align-items: center; padding-left: 6px; white-space: nowrap; overflow: hidden; min-width: 0; }
+.pt-takeoff, .pt-landing { background: var(--chart-wash); color: var(--text); }
+.pt-flight { background: var(--chart); color: #fff; }
+.viz-sub { font-size: 12px; color: var(--muted); margin: 6px 0 0; line-height: 1.4; }

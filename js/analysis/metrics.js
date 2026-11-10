@@ -27,9 +27,24 @@ export const NORMS = {
   // WA's interval: penultimate toe-off to the lowest centre of mass on the board. WA17 men 1-6,
   // WA18 men 2-8 (mean 3); WA17 women 1-6, WA18 women 1-9 (mean 3-4).
   comDropBoard: { label: 'Zníženie ťažiska do dosky', unit: 'cm', m: [1, 8], f: [1, 9] },
-  // Take-off vs last-step speed, %: WA17 per-athlete losses (-1.66 to -0.25 m/s men, -1.48 to
-  // -0.12 women) over their last-step speeds.
-  speedLossTO: { label: 'Strata rýchlosti na odraze', unit: '%', m: [-17, -3], f: [-17, -1] },
+  // Take-off speed against the mean speed from the penultimate touchdown to the board touchdown, %.
+  // That is Berlin 2009's "loss at take-off" (men 12-22 %, women 13-19 %), not WA's touchdown-to-
+  // take-off loss; the earlier WA-derived band (-17 to -3) was the wrong reference (2026-11-10).
+  speedLossTO: { label: 'Strata rýchlosti na odraze', unit: '%', m: [-22, -12], f: [-19, -13] },
+  // Heel ahead of the centre of mass at board touchdown (runway scale). Nemtsev 2016 sub-elite,
+  // mean ± 1 SD: men 0.44 ± 0.06 m (6.94 m jumps), women 0.39 ± 0.05 m (5.50 m). No elite figure found.
+  touchdownDist: { label: 'Došľap pred ťažiskom', unit: 'm', m: [0.38, 0.50], f: [0.34, 0.44] },
+  // Knee range of motion over the time from touchdown to the deepest bend, as a speed. WA17 range:
+  // men 143-764 °/s (mean 536), women 238-682 (mean 465). Phone at 120 fps: about ±20 %.
+  kneeVel: { label: 'Rýchlosť ohybu kolena na doske', unit: '°/s', m: [143, 764], f: [238, 682] },
+  // Trunk at toe-off minus trunk at touchdown: forward rotation on the board. Berlin 2009 finalists:
+  // men 6-13°, women 1-15° (WA18 means +6.4 / +8.4°).
+  trunkRotBoard: { label: 'Rotácia trupu na doske', unit: '°', m: [6, 13], f: [1, 15] },
+  // Centre of mass at toe-off as % of standing height. Linthorne 2005 Table II: 63-69 % (n = 3).
+  toHeight: { label: 'Výška ťažiska pri odraze', unit: '%', m: [62, 70], f: [62, 70], good: 'high' },
+  // Last step (penultimate to board, toe to toe) against the one before, %. WA17 men -9 % (-19 to
+  // -1), women -10 %; WA18 women -12 % (-27 to -5). Our earlier step is far from the board: ±0.15 m.
+  stepChange: { label: 'Skrátenie posledného kroku', unit: '%', m: [-19, -1], f: [-27, -5] },
   // Stanley's idea (2026-11-10): the lowering shows as a deeper bend of the stance knee in the
   // penultimate than in the step before. An angle, so no scale and no perspective. It agreed
   // in direction with hipDrop on all five clips (+5/+8° Stanley, 0/+1/-7° Miška). PROVISIONAL

@@ -141,13 +141,18 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     const hs = []; for (let i = c.td; i <= c.to; i++) hs.push([i, heightAt(i, c)]);
     const low = hs.filter(([, h]) => Number.isFinite(h)).reduce((b, x) => (!b || x[1] < b[1] ? x : b), null);
     const next = contacts[n + 1]?.[1];
+    // heel ahead of the centre of mass at touchdown, centre of mass ahead of the toe at toe-off
+    const heelTD = median([c.td, c.td + 1].flatMap(i => footX(i, [c.foot + 'heel']))) * boardM;
+    const toeOff = median([c.to - 1, c.to].flatMap(i => footX(i, [c.foot + 'bigtoe']))) * boardM;
     const st = { id, foot: c.foot, td: c.td, to: c.to, contactMs: ((c.to - c.td + 1) / fps) * 1000, toeX: median(toes) * boardM,
+      tdDist: X(c.td) - heelTD, toDist: toeOff - X(c.to),
       com: { td: steady(c, c.td), mid: mid != null ? steady(c, mid) : NaN, low: low?.[1] ?? NaN, lowFrame: low?.[0] ?? null, to: steady(c, c.to) } };
     if (next) {
       st.flightMs = ((next.td - c.to - 1) / fps) * 1000;
       st.stepMs = (ts[next.td] - ts[c.td]) * 1000;
       st.freqHz = 1000 / st.stepMs;
       st.toToMs = (ts[next.to] - ts[c.to]) * 1000;
+      st.flightRatio = st.flightMs / st.contactMs;
     }
     return st;
   });
@@ -156,12 +161,39 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   // IMG_4596), which stretches the last step's toe-to-toe length without any extra speed.
   steps.forEach((st, n) => { const nx = steps[n + 1]; if (nx) { st.length = st.toeX - nx.toeX; st.speed = (avgX(st.td) - avgX(nx.td)) / (ts[nx.td] - ts[st.td]); } });
 
+  // Centre of mass frame by frame from the 3rd-last touchdown to toe-off, for the charts: distance
+  // from the sand and height. The ground under the CoM is the image of the athlete's line, pinned
+  // in each contact to the stance foot (the same zero the contact heights use) and interpolated
+  // across the flights; the scale is the leg's (thigh + shank, 7-frame median). Read through the
+  // homography alone, flight heights drifted to 1.77 m once the board was far away (IMG_4596).
+  const legPxAt = i => median([-3, -2, -1, 0, 1, 2, 3].flatMap(d => ['l', 'r'].map(f => {
+    const q = track[i + d]; return q && has(q, f + 'hip', f + 'knee', f + 'ank') ? dist(P(q, f + 'hip'), P(q, f + 'knee')) + dist(P(q, f + 'knee'), P(q, f + 'ank')) : NaN;
+  })));
+  const groundAt = i => applyH(Hi[i], [comX(i), yAth])[1];
+  const anchors = contacts.map(([, c]) => {
+    const d = []; for (let i = c.td; i <= c.to; i++) { const k = track[i]; if (!ok(i) || !has(k, c.foot + 'bigtoe', c.foot + 'heel')) continue; d.push(Math.max(P(k, c.foot + 'bigtoe')[1], P(k, c.foot + 'heel')[1]) - groundAt(i)); }
+    return { t: (ts[c.td] + ts[c.to]) / 2, d: median(d) };
+  }).filter(a => Number.isFinite(a.d));
+  const offset = t => {
+    if (!anchors.length) return 0;
+    if (t <= anchors[0].t) return anchors[0].d;
+    for (let k = 1; k < anchors.length; k++) if (t <= anchors[k].t) { const a = anchors[k - 1], b = anchors[k]; return a.d + ((t - a.t) / (b.t - a.t)) * (b.d - a.d); }
+    return anchors.at(-1).d;
+  };
+  const series = [];
+  for (let i = (ev.third ?? ev.pen ?? T).td; i <= T.to; i++) {
+    if (!ok(i)) continue;
+    const c = centreOfMass(track[i], sex); if (!c) continue;
+    const x = comX(i), h = ((groundAt(i) + offset(ts[i]) - c[1]) / legPxAt(i)) * legMeasured;
+    if (Number.isFinite(x) && Number.isFinite(h)) series.push({ i, t: ts[i] - ts[T.td], x: x * boardM, h });
+  }
+
   const board = steps.find(st => st.id === 'take');
   if (board) board.speed = vxTO; // the board contact's speed is the take-off speed
 
   const pxPerM = pxPerUnit(T.td, comX(T.td)) / boardM;
   return {
-    steps, legMeasured,
+    steps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
     boardM, implied, legRatio, yAth, pxPerM,
     speedLast, vxTO, speedLoss: vxTO - speedLast, speedLossPct: ((vxTO - speedLast) / speedLast) * 100,
     // + behind the take-off line (legal, distance given away), - past it towards the sand.

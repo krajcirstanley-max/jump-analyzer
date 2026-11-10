@@ -1,5 +1,6 @@
 // The Výsledok screen: feel first, then score and phase tiles, replay, speed, coaching and
 // every number. Renders a finished jump into the slots of index.html.
+import { profileHtml, rhythmHtml, wireCharts } from './charts.js';
 import { MAX_YAW } from './metrics.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -78,6 +79,7 @@ function stepsHtml(steps, heightCm, lowering) {
     gapRow('Let', a => f(a.flightMs, 0, 'ms')),
     gapRow('Dĺžka kroku', a => (Number.isFinite(a.length) ? far(a) : '') + f(a.length, 2, 'm')),
     gapRow('Frekvencia', a => f(a.freqHz, 1, 'Hz')),
+    gapRow('Let ÷ kontakt', a => f(a.flightRatio, 2, '')),
     gapRow('Rýchlosť', a => (Number.isFinite(a.speed) ? far(a) : '') + f(a.speed, 1, 'm/s')),
   ].join('');
   const low = lowering && [
@@ -87,6 +89,8 @@ function stepsHtml(steps, heightCm, lowering) {
   return `<h3 class="steps-h">Posledné dotyky</h3>
     <table class="steps"><thead><tr><th></th>${cols.map(s => `<th>${name[s.id]}</th>`).join('')}</tr></thead><tbody>
       ${row('Kontakt', s => f(s.contactMs, 0, 'ms'))}
+      ${row('Došľap pred ťažiskom', s => f(s.tdDist, 2, 'm'))}
+      ${row('Ťažisko pred špičkou pri odlepení', s => f(s.toDist, 2, 'm'))}
       ${row('Ťažisko pri dotyku', s => f(s.com.td * 100, 0, 'cm'))}
       ${row('Ťažisko najnižšie', s => f(s.com.low * 100, 0, 'cm'))}
       ${row('Ťažisko pri odlepení', s => f(s.com.to * 100, 0, 'cm'))}
@@ -95,7 +99,7 @@ function stepsHtml(steps, heightCm, lowering) {
     ${low?.length ? `<p class="note">Zníženie ťažiska: ${low.join('; ')}. Publikované hodnoty sú 1–9 cm a chyba merania aj v laboratóriu je okolo 3 cm.</p>` : ''}
     <h3 class="steps-h">Medzi dotykmi</h3>
     <table class="steps gaps"><thead><tr><th></th>${gaps.map(([a, b]) => `<th>${short[a.id]} → ${short[b.id]}</th>`).join('')}</tr></thead><tbody>${gapRows}</tbody></table>
-    <p class="note">Let je od odlepenia jednej nohy po dotyk druhej, dĺžka od špičky po špičku, frekvencia z času od dotyku po ďalší dotyk, rýchlosť ťažiska v tom istom úseku. Riadok predposledný → odraz je let do dosky. ≈ pri 3. kroku od konca: je ďaleko od dosky, dĺžka asi ±0,15 m, rýchlosť asi ±0,3 m/s. Časy sú presné na snímku, výška ťažiska na centimetre.</p>`;
+    <p class="note">Došľap je päta pred ťažiskom pri dotyku. Let je od odlepenia jednej nohy po dotyk druhej, dĺžka od špičky po špičku, frekvencia z času od dotyku po ďalší dotyk, rýchlosť ťažiska v tom istom úseku. Riadok predposledný → odraz je let do dosky. ≈ pri 3. kroku od konca: je ďaleko od dosky, dĺžka asi ±0,15 m, rýchlosť asi ±0,3 m/s. Časy sú presné na snímku, výška ťažiska na centimetre.</p>`;
 }
 
 function fixHtml(f, first) {
@@ -152,7 +156,8 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   const s = scoreOf(jump);
   els.score.innerHTML = `<div class="score"><span class="score-n">${s == null ? '–' : Math.round(s)}</span><span class="score-of">/ 100</span>${feel != null ? `<span class="score-feel" data-feel-shown>Pocit ${feel}/5</span>` : '<span class="score-feel" data-feel-shown></span>'}</div>`;
   els.tiles.innerHTML = phases.map(tile).join('');
-  els.speed.innerHTML = speedHtml(jump.speed) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
+  els.speed.innerHTML = speedHtml(jump.speed) + profileHtml(jump.profile) + rhythmHtml(jump.profile) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
+  wireCharts(els.speed);
   els.coach.innerHTML = awaitingCoach ? COACH_WAIT : coachHtml(jump.coach);
   els.all.innerHTML = allNumbers(jump);
 
