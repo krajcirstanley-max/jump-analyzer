@@ -34,6 +34,15 @@ test('picks the jumper even when he is detected only in the last third', () => {
   assert.ok(a.points[0].frame >= 600 && a.points.at(-1).box[3] - a.points.at(-1).box[1] > 800);
 });
 
+test('does not jump to a smaller bystander after losing the jumper in the sand (IMG_4594)', () => {
+  const jumper = { 488: [426, 875, 625, 1205, 1], 496: [461, 997, 620, 1192, 1], 504: [442, 1037, 615, 1207, 1] };
+  const bystander = f => [362 + (f - 528) * 4, 897 - (f - 528), 397 + (f - 528) * 4, 993 - (f - 528), 1];
+  const samples = [];
+  for (let f = 488; f <= 560; f += 8) samples.push({ frame: f, boxes: [jumper[f], f >= 528 ? bystander(f) : null].filter(Boolean) });
+  const t = linkTracks(samples).find(tr => tr.points[0].frame === 488);
+  assert.equal(t.points.at(-1).frame, 504);
+});
+
 test('constant-velocity prediction both ways', () => {
   const pts = [{ frame: 0, box: [0, 0, 10, 10] }, { frame: 8, box: [8, 0, 18, 10] }];
   assert.deepEqual(predictBox(pts, 16), [16, 0, 26, 10]);

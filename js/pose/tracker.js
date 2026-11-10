@@ -13,11 +13,14 @@ export function iou(a, b) {
 }
 
 // Similarity of two boxes allowing for movement: centre distance relative to size.
-function linkCost(a, b, frames) {
+// missed: the person went unseen for at least one sample. Movement over the gap is still
+// allowed, but a size jump is not: on IMG_4594 the jumper vanished in the sand for two
+// samples and the track jumped to a smaller bystander behind the pit (cost 1.02 < 1.2).
+function linkCost(a, b, frames, missed = false) {
   const s = Math.max(boxH(a), boxH(b));
   const d = Math.hypot(cx(a) - cx(b), cy(a) - cy(b)) / s;
   const size = Math.abs(Math.log(boxH(a) / boxH(b)));
-  return d / Math.max(1, frames / 8) + size; // allow more movement over longer gaps
+  return d / Math.max(1, frames / 8) + size * (missed ? 2 : 1); // allow more movement over longer gaps
 }
 
 // Links per-frame detections into tracks. samples: [{ frame, boxes: [[x1,y1,x2,y2,s]] }].
@@ -31,7 +34,8 @@ export function linkTracks(samples, maxCost = 1.2, maxGapSamples = 3) {
       const last = t.points[t.points.length - 1];
       const gap = frame - last.frame;
       if (gap > maxGapSamples * (t.step || 8)) return;
-      boxes.forEach((b, bi) => pairs.push([linkCost(last.box, b, gap), ti, bi]));
+      const missed = gap > 1.5 * (t.step || 8);
+      boxes.forEach((b, bi) => pairs.push([linkCost(last.box, b, gap, missed), ti, bi]));
     });
     pairs.sort((a, b) => a[0] - b[0]);
     const taken = new Set();

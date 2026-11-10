@@ -48,7 +48,9 @@ export async function runPipeline(frames, engine, opts = {}) {
       progress('Following the jumper', points.length, N / o.sampleStep);
     }
   }
-  const first = points[0].frame, last = Math.min(N - 1, points.at(-1).frame);
+  // A short tail past the last detection: the landing (sand, a crouched body) is where the
+  // detector loses the jumper first, and the keypoints can still follow them from frame to frame.
+  const first = points[0].frame, last = Math.min(N - 1, points.at(-1).frame + 2 * o.sampleStep);
   const guide = interpolateBoxes(points, first, last);
 
   // Pass 2: fast model on every frame, crop from the previous frame's keypoints.
