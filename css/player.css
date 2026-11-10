@@ -1,0 +1,23 @@
+/* Replay player: timeline with phase bands, three-button controls. */
+.player { --thumb: 20px; }
+.player .timeline { position: relative; height: 40px; margin: 4px 0 8px; }
+.player .timeline .bands { position: absolute; left: calc(var(--thumb) / 2); right: calc(var(--thumb) / 2); top: 50%; height: 10px; margin-top: -5px; border-radius: 5px; background: rgba(128, 128, 128, 0.28); overflow: hidden; }
+.player .timeline .band { position: absolute; top: 0; bottom: 0; opacity: 0.85; }
+.player .timeline .bands[data-focus] .band { opacity: 0.32; }
+.player .timeline .bands[data-focus] .band.on { opacity: 1; }
+.player .timeline .band-pen { background: #6ea8fe; }
+.player .timeline .band-plant { background: #ff8a2a; }
+.player .timeline .band-toeoff { background: #ffd24a; }
+.player .timeline .band-flight { background: #4ddba2; }
+.player .timeline .band-landing { background: #d58bff; }
+
+/* Over the bands, transparent track, a thumb sized to match --thumb above. */
+.player .timeline .scrub { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; touch-action: none; }
+.player .timeline .scrub::-webkit-slider-runnable-track { background: transparent; height: 100%; }
+.player .timeline .scrub::-moz-range-track { background: transparent; }
+.player .timeline .scrub::-webkit-slider-thumb { -webkit-appearance: none; width: var(--thumb); height: var(--thumb); margin-top: 10px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
+.player .timeline .scrub::-moz-range-thumb { width: var(--thumb); height: var(--thumb); border-radius: 50%; background: #fff; border: 0; }
+
+.player .controls.controls-v1 { grid-template-columns: 1fr 1.4fr 1fr; }
+.player .controls.controls-v1 .btn { -webkit-touch-callout: none; }
+.player .controls.controls-v1 .step { font-size: 28px; line-height: 1; }

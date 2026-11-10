@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Skok</title>
+<meta name="description" content="Rozbor skoku do diaľky z videa">
+<meta name="theme-color" content="#14161a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Skok">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/player.css">
+</head>
+<body>
+<header class="top">
+  <div class="seg" id="athlete-switch" role="radiogroup" aria-label="Atlét">
+    <button data-athlete="stanley" role="radio" aria-checked="true">Stanley</button>
+    <button data-athlete="miska" role="radio" aria-checked="false">Miška</button>
+  </div>
+  <div class="top-who hidden" id="res-who"></div>
+</header>
+
+<main>
+  <!-- Domov -->
+  <section class="view" id="view-home">
+    <button class="card latest" id="latest"></button>
+
+    <label class="btn primary go" for="file">Analyzovať skok</label>
+    <input type="file" id="file" accept="video/*,.mov,.mp4" hidden>
+    <p class="hint">Vyber originál: <b>Photos → Share → Export Unmodified Original → Files</b>, potom tu <b>Choose File</b>. Photo Library dá len 30 fps kópiu.</p>
+
+    <div class="card pb">
+      <div class="pb-fields">
+        <label><span>PB (m)</span><input id="pb" type="text" inputmode="decimal" autocomplete="off" placeholder="zadaj"></label>
+        <label><span>Cieľ (m)</span><input id="goal" type="text" inputmode="decimal" autocomplete="off" placeholder="zadaj"></label>
+      </div>
+      <div id="pb-bar"></div>
+    </div>
+
+    <details class="card settings">
+      <summary>Nastavenia</summary>
+      <label class="field"><span>Kľúč k serveru</span>
+        <input id="cloud-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="vlož kľúč">
+      </label>
+      <button class="btn" id="cloud-save">Uložiť kľúč</button>
+      <p class="note" id="cloud-state"></p>
+      <p class="note" id="ver"></p>
+    </details>
+  </section>
+
+  <!-- Výsledok -->
+  <section class="view hidden" id="view-result">
+    <div class="card empty" id="res-empty">
+      <p>Zatiaľ tu nič nie je.</p>
+      <button class="btn" data-tab="home">Analyzovať skok</button>
+    </div>
+
+    <div class="card hidden" id="res-progress" aria-live="polite">
+      <div class="pose-line"><span id="pose-stage"></span><span id="pose-pct"></span></div>
+      <div class="meter"><div id="pose-bar"></div></div>
+      <div class="row prog-actions">
+        <button class="btn" id="res-notify" hidden>Upozorni ma, keď bude hotovo</button>
+        <button class="btn" id="res-cancel">Zrušiť</button>
+      </div>
+    </div>
+
+    <div class="hidden" id="res-msg"></div>
+    <div class="card hidden" id="res-feel"></div>
+
+    <div class="stack hidden" id="res-after">
+      <div class="card" id="res-summary">
+        <div id="res-score"></div>
+        <div class="tiles" id="res-tiles" role="group" aria-label="Fázy skoku"></div>
+        <div class="keyframes" id="res-chips" role="toolbar" aria-label="Kľúčové momenty"></div>
+      </div>
+      <div class="card player-card" id="player-card"><div id="player" class="player"></div></div>
+      <div class="card" id="res-detail"></div>
+      <div class="card" id="res-speed"></div>
+      <div class="stack" id="res-coach"></div>
+      <details class="card all"><summary>Všetky čísla</summary><div id="res-all"></div></details>
+      <button class="btn danger" id="res-del" data-del="">Zmazať pokus</button>
+    </div>
+  </section>
+
+  <!-- Progres -->
+  <section class="view hidden" id="view-progress"><div class="stack" id="progress"></div></section>
+</main>
+
+<nav class="tabs" aria-label="Hlavná navigácia">
+  <button class="tab on" data-tab="home" aria-current="page">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg><span>Domov</span>
+  </button>
+  <button class="tab" data-tab="result">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Výsledok</span>
+  </button>
+  <button class="tab" data-tab="progress">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18l5-6 4 3 7-9"/></svg><span>Progres</span>
+  </button>
+</nav>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

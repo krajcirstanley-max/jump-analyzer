@@ -1,0 +1,12 @@
+{
+  "name": "jump-analyzer-server",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.7.0",
+    "onnxruntime-node": "1.31.1"
+  }
+}
