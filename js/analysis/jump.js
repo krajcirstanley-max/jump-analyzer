@@ -80,7 +80,8 @@ function speedCard(flight, by, ev, track) {
 
 
 // ts: the clip's real frame timestamps, used when the result doesn't carry a frame rate.
-export function analyzeJump(result, sex, ts) {
+// height: the athlete's height in cm (centre-of-mass lowering in cm); optional.
+export function analyzeJump(result, sex, ts, { height = null } = {}) {
   const clean = result.clean, smooth = result.smooth;
   if (!clean || !smooth) return { error: 'Chýba vyčistený záznam pohybu.' };
   const fps = result.fps ?? (ts ? (ts.length - 1) / (ts.at(-1) - ts[0]) : NaN);
@@ -93,7 +94,7 @@ export function analyzeJump(result, sex, ts) {
   ev.keyFrames = ev.keyFrames.map(k => ({ ...k, label: KF_LABELS[k.id] ?? k.label }));
   const dir = contacts[0]?.dir ?? 1;
   const times = ts ?? Array.from({ length: clean.length }, (_, i) => i / fps);
-  const flight = flightAnalysis(smooth, ev, times, sex, dir);
+  const flight = flightAnalysis(smooth, ev, times, sex, dir, height);
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
   const runThrough = result.events?.kind === 'runthrough';

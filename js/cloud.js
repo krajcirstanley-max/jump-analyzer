@@ -209,12 +209,13 @@ export function warmCloud() {
   fetch(`${base()}/warm`, { method: 'POST', headers: auth() }).catch(() => {});
 }
 
-export async function analyzeInCloud(file, { sex, name, history, onProgress, onResult, signal } = {}) {
+export async function analyzeInCloud(file, { sex, name, height, history, onProgress, onResult, signal } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
   if (file.size > MAX_UPLOAD) throw statusError(413);
   const t0 = Date.now();
   warmCloud();
   const params = new URLSearchParams({ sex: sex || 'male', name: name || '' });
+  if (height) params.set('height', String(height));
   // The query string is bounded, and the newest attempts matter most.
   let h = (history || []).slice(-5);
   while (h.length && JSON.stringify(h).length > 6000) h = h.slice(1);

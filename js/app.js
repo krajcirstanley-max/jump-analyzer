@@ -27,8 +27,8 @@ else if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 
 // ---------- athletes and their PB / goal ----------
 const ATHLETES = {
-  stanley: { name: 'Stanley', sex: 'male', goal: 8 },
-  miska: { name: 'Miška', sex: 'female', goal: null },
+  stanley: { name: 'Stanley', sex: 'male', goal: 8, height: 186 },
+  miska: { name: 'Miška', sex: 'female', goal: null, height: 171 },
 };
 const profileKey = a => `jump.profile.${a}`;
 const profiles = {};
@@ -275,7 +275,7 @@ async function runAnalysis(file, run, forceLocal) {
   if (!stillCurrent()) return;
   hold({ id, athlete: resultAthlete, ...currentClip });
   const history = hist.coachHistory(await hist.listAttempts(resultAthlete));
-  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, history, ...opts }));
+  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, ...opts }));
 }
 
 async function followCloud(run, start) {
@@ -441,7 +441,7 @@ function setOverlays() {
 
 function showJump() {
   const who = ATHLETES[resultAthlete ?? athlete];
-  jump = analyzeJump(pose, who.sex, player.ts);
+  jump = analyzeJump(pose, who.sex, player.ts, { height: who.height });
   setOverlays();
   player.refresh();
   if (jump.error) {

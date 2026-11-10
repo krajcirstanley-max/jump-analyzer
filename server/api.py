@@ -90,12 +90,15 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         sex: str = Query("male"),
         name: str = Query(""),
         history: str = Query(""),
+        height: float = Query(0),
         owner=Depends(user),
     ):
         if sex not in ("male", "female"):
             raise HTTPException(400, SK["sex"])
         if len(name) > 60:
             raise HTTPException(400, SK["name"])
+        if height and not 120 <= height <= 230:
+            height = 0  # nonsense is ignored; the analysis falls back to a typical height
         try:
             past = json.loads(history) if history else []
             if not isinstance(past, list):
@@ -127,7 +130,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
             t = now()
             jobs.put(job_key(job_id), {"state": "queued", "stage": "queued", "done": 0, "total": 1, "owner": owner, "createdAt": t, "updatedAt": t})
             try:
-                start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:]})
+                start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {})})
             except Exception as e:
                 print("job start failed:", e)
                 path.unlink(missing_ok=True)

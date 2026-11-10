@@ -7,6 +7,7 @@
 import { P, has, mid, dist, centreOfMass, torsoLength } from './kinematics.js';
 
 const G = 9.81;
+const range = (a, b) => { const out = []; for (let i = a; i <= b; i++) out.push(i); return out; };
 
 // Least-squares fit of y = a t² + b t + c; returns coefficients and RMS residual.
 export function fitParabola(t, y) {
@@ -40,7 +41,8 @@ function slope(t, y) {
 }
 
 // track: smoothed keypoints; ev: keyFrames() output; ts: frame timestamps (s).
-export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1) {
+// height: the athlete's height in cm, for the centre-of-mass lowering; a typical one by sex if absent.
+export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = null) {
   const { takeoff: T, takeoffFoot: s, landing } = ev;
   const com = i => (track[i] ? centreOfMass(track[i], sex) : null);
 
@@ -145,36 +147,69 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1) {
     if (ct.length >= 5) speedLast = slope(ct, cx) / (pxPerM * zoom(Math.round((ev.pen.td + ev.pen.to) / 2)));
   }
 
-  // Hip lowering into the penultimate. Comparing pixels across frames is meaningless with a
-  // moving phone, so each stance gives one scale-free number: hip height above the planted toe
-  // as a fraction of that leg's length, taken as the centre of mass passes over the toe (the
-  // leg is near vertical there, so a tilted phone cannot fake height). Only the difference
-  // between the two ratios needs metres, which makes it insensitive to the scale itself.
-  const hipRatio = (c, foot) => {
-    let cross = null;
-    for (let i = c.td; i < c.to && cross == null; i++) {
-      const a = com(i), b = com(i + 1), ka = track[i], kb = track[i + 1];
-      if (!a || !b || !has(ka, foot + 'bigtoe') || !has(kb, foot + 'bigtoe')) continue;
-      if ((a[0] - P(ka, foot + 'bigtoe')[0]) * dir <= 0 && (b[0] - P(kb, foot + 'bigtoe')[0]) * dir > 0) cross = i;
-    }
-    if (cross == null) return null;
-    const h = [], l = [];
-    for (let i = cross - 1; i <= cross + 2; i++) {
-      const k = track[i];
-      if (k && has(k, 'lhip', 'rhip', foot + 'bigtoe')) h.push(P(k, foot + 'bigtoe')[1] - mid(P(k, 'lhip'), P(k, 'rhip'))[1]);
-    }
-    for (let i = c.td + 2; i <= c.to - 2; i++) {
-      const k = track[i];
-      if (k && has(k, foot + 'hip', foot + 'knee', foot + 'ank')) l.push(dist(P(k, foot + 'hip'), P(k, foot + 'knee')) + dist(P(k, foot + 'knee'), P(k, foot + 'ank')));
-    }
-    const leg = median(l), hip = median(h);
-    return leg > 0 && Number.isFinite(hip) ? { ratio: hip / leg, leg, frame: cross } : null;
+  // Centre-of-mass lowering. Pixels can't be compared across frames with a moving phone, so each
+  // height is the centre of mass above the foot on the ground in that same frame, turned into cm
+  // with that stance leg's own image length and the athlete's real leg length (thigh + shank
+  // = 0.491 x height, Winter). No flight scale needed: it works when metres are withheld.
+  const legM = (0.491 * (height ?? (sex === 'female' ? 168 : 180))) / 100;
+  const legPx = c => median(range(c.td + 2, c.to - 2).map(i => {
+    const k = track[i];
+    return k && has(k, c.foot + 'hip', c.foot + 'knee', c.foot + 'ank') ? dist(P(k, c.foot + 'hip'), P(k, c.foot + 'knee')) + dist(P(k, c.foot + 'knee'), P(k, c.foot + 'ank')) : NaN;
+  }).filter(Number.isFinite));
+  const above = (i, c, leg) => {
+    const k = track[i], m = com(i);
+    if (!m || !(leg > 0) || !has(k, c.foot + 'bigtoe', c.foot + 'heel')) return NaN;
+    return ((Math.max(P(k, c.foot + 'bigtoe')[1], P(k, c.foot + 'heel')[1]) - m[1]) / leg) * legM * 100;
   };
+  // Mid-stance: the centre of mass passing over the toe; the leg is near vertical, so a tilted
+  // phone cannot fake height there.
+  const midstance = c => {
+    for (let i = c.td; i < c.to; i++) {
+      const a = com(i), b = com(i + 1), ka = track[i], kb = track[i + 1];
+      if (!a || !b || !has(ka, c.foot + 'bigtoe') || !has(kb, c.foot + 'bigtoe')) continue;
+      if ((a[0] - P(ka, c.foot + 'bigtoe')[0]) * dir <= 0 && (b[0] - P(kb, c.foot + 'bigtoe')[0]) * dir > 0) return i;
+    }
+    return null;
+  };
+  const steady = (c, i, leg) => median([i - 1, i, i + 1, i + 2].map(j => above(j, c, leg)).filter(Number.isFinite));
+  // Into the penultimate: 3rd-last mid-stance minus penultimate mid-stance (Shimizu & Ae's interval).
   let hipDrop = NaN, hipDropFrame = null;
   if (ev.pen && ev.third) {
-    const a = hipRatio(ev.third, ev.third.foot), b = hipRatio(ev.pen, ev.pen.foot);
-    if (a && b) { hipDrop = (a.ratio - b.ratio) * (b.leg / (pxPerM * zoom(b.frame))) * 100; hipDropFrame = b.frame; }
+    const m3 = midstance(ev.third), mp = midstance(ev.pen);
+    if (m3 != null && mp != null) {
+      hipDrop = steady(ev.third, m3, legPx(ev.third)) - steady(ev.pen, mp, legPx(ev.pen));
+      hipDropFrame = mp;
+    }
   }
+  // Into the board, World Athletics' interval: penultimate toe-off to the lowest point on the board.
+  let comDropBoard = NaN, comDropBoardFrame = null;
+  if (ev.pen) {
+    const start = above(ev.pen.to, ev.pen, legPx(ev.pen)), legT = legPx(T);
+    let low = Infinity;
+    for (let i = T.td; i <= T.to; i++) { const h = above(i, T, legT); if (h < low) { low = h; comDropBoardFrame = i; } }
+    if (Number.isFinite(start) && Number.isFinite(low)) comDropBoard = start - low;
+  }
+
+  // Speed lost on the board, as a percentage: stance speeds in image units over the body's local
+  // size, so the metre scale cancels and it holds when metres are withheld. Not done for the
+  // penultimate vs the 3rd-last: across a whole stride the body-size correction is off by 5-10%
+  // (camera distance and limb angles change), more than the ~6% being measured; on our clips it
+  // read +17% to -47%. The board loss compares stances 0.2 s apart and stays physical.
+  const fps = (ts.length - 1) / (ts[ts.length - 1] - ts[0]);
+  const trim = Math.max(1, Math.round(fps / 60));
+  const stanceV = c => {
+    const ct = [], cx = [];
+    for (let i = c.td + trim; i <= c.to - trim; i++) {
+      const m = com(i);
+      if (m && has(track[i], c.foot + 'bigtoe')) { cx.push((m[0] - P(track[i], c.foot + 'bigtoe')[0]) * dir); ct.push(ts[i]); }
+    }
+    return ct.length >= 4 ? slope(ct, cx) / zoom(Math.round((c.td + c.to) / 2)) : NaN;
+  };
+  const vP = ev.pen ? stanceV(ev.pen) : NaN;
+  const vT = slope(tail.t, tail.x) / zoom(T.to);
+  const lossTO = vP > 0 && vT > 0 ? ((vT - vP) / vP) * 100 : NaN;
+  // The board can't add speed, and elite losses stay under ~20%: outside -40..+2% it is a bad read.
+  const speedLossTO = lossTO >= -40 && lossTO <= 2 ? lossTO : NaN;
 
   return {
     pxPerM, fitRmsM: fit.rms / pxPerM, fitSeconds, torsoM, scaleOk, angleOk, apexOk, tUp, depth, scaleWhy, scaleSource: 'gravity',
@@ -184,7 +219,7 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1) {
     apexRise: (fit.b * fit.b) / (4 * fit.a * pxPerM), // height of the fitted arc itself
     takeoffDist, flightDistance,
     speedLast, speedLoss: vxTO - speedLast,
-    hipDrop, hipDropFrame,
+    hipDrop, hipDropFrame, comDropBoard, comDropBoardFrame, speedLossTO,
     peakHeight: ((fit.b * fit.b) / (4 * fit.a * pxPerM)) * 100,
     zoomTD: zoom(T.td), zoomPen: ev.pen ? zoom(ev.pen.td) : NaN,
     landingReach: reach,

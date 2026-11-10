@@ -50,7 +50,7 @@ export function coachClient({ token, localLogin = false } = {}) {
 
 // onResult fires before any coaching work, so a slow or failed coaching call can't hold up
 // or lose the numbers. coachFallback is what to show if the coaching step never comes back.
-export async function analyzeClip(engine, { clip, sex = 'male', name = '', history = [], client, onProgress, onResult }) {
+export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, history = [], client, onProgress, onResult }) {
   const t = { start: performance.now() };
   const mark = k => { t[k] = Math.round(performance.now() - t.start); };
   const meta = probe(clip);
@@ -67,7 +67,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', histo
     // Claude watches the frames and names the key frames; the pose track's guess only says
     // where to look. Without a client, or if it fails, the pose track's own frames stand.
     if (client) {
-      const guess = analyzeJump(fromWire(result), sex, meta.ts);
+      const guess = analyzeJump(fromWire(result), sex, meta.ts, { height });
       try {
         const loc = await locateEvents({
           frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, client, onProgress,
@@ -83,7 +83,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', histo
       mark('located');
     }
     onProgress?.({ stage: 'analysis', done: 0, total: 1 });
-    const jump = analyzeJump(fromWire(result), sex, meta.ts);
+    const jump = analyzeJump(fromWire(result), sex, meta.ts, { height });
     mark('analysis');
     const coachFallback = jump.error ? null : await writeCoaching({ jump, name, sex });
     await onResult?.({ result, coachFallback, ms: t });
@@ -178,7 +178,7 @@ async function oneShot(argv) {
   const historyFile = flag('--history');
   let last = 0;
   const r = await analyzeClip(engine, {
-    clip, sex: flag('--sex', 'male'), name: flag('--name', ''),
+    clip, sex: flag('--sex', 'male'), name: flag('--name', ''), height: Number(flag('--height', 0)) || null,
     history: historyFile ? JSON.parse(readFileSync(historyFile, 'utf8')) : [],
     client: coachClient({ localLogin: process.env.COACH_VIA === 'subscription' }),
     onProgress: ({ stage, done, total }) => {

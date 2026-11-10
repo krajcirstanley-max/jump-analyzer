@@ -19,11 +19,16 @@ export const NORMS = {
   contactPen: { label: 'Kontakt predposledného kroku', unit: 'ms', m: [100, 135], f: [95, 135], good: 'low' },
   // WA17/WA18/PAN means 70-76 ms both sexes, finalists 56-92 (women down to 40).
   flightToBoard: { label: 'Let do dosky', unit: 'ms', m: [56, 92], f: [45, 90] },
-  // Hips over the planted toe, 3rd-last stance minus penultimate stance. The only source with the
-  // same interval is Shimizu & Ae (ISBS, 6 university men, PB 7.06): CoM 3 cm lower at penultimate
-  // touchdown, ~4 at toe-off. WA's 1-9 cm is a different interval (penultimate toe-off to lowest on
-  // the board). Too much also costs speed, so no `good` direction.
-  hipDrop: { label: 'Zníženie bokov do predposledného', unit: 'cm', m: [2, 6], f: [2, 6] },
+  // Centre of mass above the foot on the ground, 3rd-last mid-stance minus penultimate mid-stance
+  // (cm via the athlete's leg length). Same interval as Shimizu & Ae (ISBS, 6 university men,
+  // PB 7.06): 3 cm lower at penultimate touchdown, ~4 at toe-off. Too much also costs speed.
+  hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [2, 6], f: [2, 6] },
+  // WA's interval: penultimate toe-off to the lowest centre of mass on the board. WA17 men 1-6,
+  // WA18 men 2-8 (mean 3); WA17 women 1-6, WA18 women 1-9 (mean 3-4).
+  comDropBoard: { label: 'Zníženie ťažiska do dosky', unit: 'cm', m: [1, 8], f: [1, 9] },
+  // Take-off vs last-step speed, %: WA17 per-athlete losses (-1.66 to -0.25 m/s men, -1.48 to
+  // -0.12 women) over their last-step speeds.
+  speedLossTO: { label: 'Strata rýchlosti na odraze', unit: '%', m: [-17, -3], f: [-17, -1] },
   // Stanley's idea (2026-11-10): the lowering shows as a deeper bend of the stance knee in the
   // penultimate than in the step before. An angle, so no scale and no perspective. It agreed
   // in direction with hipDrop on all five clips (+5/+8° Stanley, 0/+1/-7° Miška). PROVISIONAL
@@ -160,6 +165,9 @@ export function landingLeg(kp, fallback) {
 
 export const MAX_YAW = 30; // degrees off side-on beyond which angles are withheld
 
+// Measured without the flight's metre scale: centimetres from the leg length, losses as ratios.
+const SCALE_FREE = new Set(['hipDrop', 'comDropBoard', 'speedLossTO']);
+
 // Why metres from the flight are withheld, in the athlete's words.
 export function scaleReason(f) {
   if (f?.scaleWhy === 'depth') return `v lete sa vzďaľuješ od kamery (telo sa na videu zmenší o ${Math.round(Math.abs(1 - f.depth) * 100)} %), takže mierka v metroch nesedí; natoč skok zboku z väčšej diaľky`;
@@ -177,7 +185,7 @@ export function flightMetrics(f, ev, sex = 'male') {
     if (value == null || !Number.isFinite(value)) return null;
     const n = NORMS[key], [lo, hi] = n[g];
     const fromApex = key === 'peakHeight' || key === 'vyTO';
-    const usable = key === 'takeoffAngle' ? f.angleOk : fromApex ? f.apexOk || f.scaleOk : f.scaleOk;
+    const usable = SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk : fromApex ? f.apexOk || f.scaleOk : f.scaleOk);
     const status = !usable ? 'hidden' : value < lo ? 'low' : value > hi ? 'high' : 'ok';
     const why = fromApex ? (f.angleOk ? 'vrchol letu nie je na videu' : scaleReason(f)) : scaleReason(f);
     return { key, label: n.label, unit: n.unit, value, norm: [lo, hi], status, frame, good: n.good, estimate: true, reason: usable ? null : why };
@@ -191,6 +199,8 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('speedTO', f.vxTO, ev.takeoff.to),
     row('speedLoss', f.speedLoss, ev.takeoff.to),
     row('hipDrop', f.hipDrop, f.hipDropFrame),
+    row('comDropBoard', f.comDropBoard, f.comDropBoardFrame),
+    row('speedLossTO', f.speedLossTO, ev.takeoff.to),
     row('peakHeight', f.peakHeight, ev.apex),
     row('landingReach', f.landingReach, ev.landing),
     row('estDistance', f.estDistance, ev.landing),
