@@ -8,9 +8,11 @@ const colour = s => (s === 'l' ? LEFT : s === 'r' ? RIGHT : MID);
 const DIMMED = 0.3; // frames where the athlete is covered and the pose is a guess
 
 // result: pipeline output; scale: frame-source pixels per pipeline pixel.
-export function skeletonOverlay(result, scale) {
+// skip(index): frames where another skeleton is shown instead (the ideal pose).
+export function skeletonOverlay(result, scale, { skip = null } = {}) {
   const hidden = hiddenFrames(result);
   return (ctx, toCanvas, index) => {
+    if (skip?.(index)) return;
     // Cleaned + smoothed track when available (score is 1 = present, 0 = gap).
     const sm = result.smooth?.[index];
     const acc = result.accurate?.[index];

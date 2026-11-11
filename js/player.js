@@ -62,6 +62,7 @@ export class Player {
     this.playing = false;
     this.view = { s: 1, tx: 0, ty: 0 };   // zoom/pan on top of the fit-to-stage scale
     this.overlays = [];                   // fn(ctx, toCanvas, index)
+    this.frameHooks = [];                 // fn(index) after a frame is drawn, besides onFrame
     this.pending = null;                  // newest frame asked for and not drawn yet
     this.waiting = [];                    // show() promises to settle once it is drawn
     this.head = new Map();                // frames at the loop start, owned by the player
@@ -228,7 +229,7 @@ export class Player {
         // we get here (closed). Asking again starts a run that keeps it.
         if ((bmp === undefined || (bmp && !bmp.width)) && this.pending === i && retries++ < MAX_RETRIES) continue;
         // A drag draws what arrives, so it keeps moving even when requests outrun the decoder.
-        if (bmp && bmp.width) { this.index = i; this.bmp = bmp; this.#redraw(); this.onFrame?.(i); }
+        if (bmp && bmp.width) { this.index = i; this.bmp = bmp; this.#redraw(); this.onFrame?.(i); for (const f of this.frameHooks) f(i); }
         if (this.pending === i) { this.pending = null; this.#settle(); }
       }
     } finally {

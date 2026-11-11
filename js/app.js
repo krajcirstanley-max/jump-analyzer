@@ -5,7 +5,8 @@ import { Player } from './player.js';
 import { skeletonOverlay } from './pose/overlay.js';
 import { analyzeJump } from './analysis/jump.js';
 import { coaching } from './analysis/coach.js';
-import { jointLabels } from './analysis/labels.js';
+import { jointLabels, idealOverlay } from './analysis/labels.js';
+import { idealFor } from './analysis/ideal.js';
 import { renderResult, showCoach } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
 import { CLOUD_URL } from './config.js';
@@ -437,11 +438,65 @@ function finishPose() {
   return showJump();
 }
 
+// "Ty / Ideál" at the board touchdown: the athlete's own skeleton with the angles that miss the
+// elite norms moved into them (ideal.js). The switch shows only on that frame.
+const idealState = { on: false };
+let ideal = null;
+function idealToggle() {
+  const stage = player?.stage;
+  if (!stage) return null;
+  let el = stage.querySelector('.ideal-toggle');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'ideal-toggle hidden';
+    el.setAttribute('role', 'radiogroup');
+    el.setAttribute('aria-label', 'Porovnanie s ideálom');
+    el.innerHTML = '<button data-ideal="0" role="radio">Ty</button><button data-ideal="1" role="radio">Ideál</button><span class="ideal-note"></span>';
+    el.onclick = e => {
+      const b = e.target.closest('[data-ideal]');
+      if (!b) return;
+      idealState.on = b.dataset.ideal === '1';
+      syncIdeal(player.index);
+      player.refresh();
+    };
+    stage.appendChild(el);
+    const legend = document.createElement('div');
+    legend.className = 'ideal-legend hidden';
+    stage.after(legend);
+    player.frameHooks.push(i => syncIdeal(i));
+  }
+  return el;
+}
+function syncIdeal(i) {
+  const el = idealToggle();
+  if (!el) return;
+  const here = !!ideal && i === ideal.frame;
+  el.classList.toggle('hidden', !here);
+  el.querySelectorAll('[data-ideal]').forEach(b => {
+    const on = (b.dataset.ideal === '1') === idealState.on;
+    b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on));
+  });
+  el.querySelector('.ideal-note').textContent = '';
+  const legend = player.stage.parentNode.querySelector('.ideal-legend');
+  if (legend) {
+    const show = here && idealState.on;
+    legend.classList.toggle('hidden', !show);
+    const deg = v => `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}°`;
+    const moved = (ideal?.items ?? []).filter(it => it.set);
+    legend.innerHTML = !show ? '' : moved.length
+      ? `<b>Ideál podľa noriem finalistov</b>${moved.map(it => `<span>${esc(it.label)} <strong>${deg(it.ideal)}</strong> <em>ty ${deg(it.you)}</em></span>`).join('')}`
+      : '<b>Všetky uhly sú v norme</b>';
+  }
+}
 function setOverlays() {
   player.overlays.length = 0;
   const k = player.src.width / pose.W;
-  player.overlays.push(skeletonOverlay(pose, k));
-  if (!jump.error) player.overlays.push(jointLabels(jump, pose, k));
+  ideal = jump.error ? null : idealFor(jump, pose, ATHLETES[resultAthlete ?? athlete].sex);
+  player.overlays.push(skeletonOverlay(pose, k, { skip: i => idealState.on && ideal && i === ideal.frame }));
+  idealState.on = false;
+  if (!jump.error) player.overlays.push(jointLabels(jump, pose, k, { skip: i => idealState.on && ideal && i === ideal.frame }));
+  if (ideal) player.overlays.push(idealOverlay(ideal, k, idealState));
+  syncIdeal(player.index);
 }
 
 function showJump() {

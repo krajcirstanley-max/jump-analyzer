@@ -21,3 +21,18 @@
 .player .controls.controls-v1 { grid-template-columns: 1fr 1.4fr 1fr; }
 .player .controls.controls-v1 .btn { -webkit-touch-callout: none; }
 .player .controls.controls-v1 .step { font-size: 28px; line-height: 1; }
+
+/* "Ty / Ideál" switch on the board-touchdown frame (ideal.js) */
+.player .stage { position: relative; }
+.ideal-toggle { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; justify-content: flex-end; background: rgba(10, 12, 16, 0.78); border-radius: 18px; padding: 3px; flex-wrap: wrap; max-width: min(240px, calc(100% - 20px)); }
+.ideal-toggle.hidden { display: none; }
+.ideal-toggle button { appearance: none; border: 0; background: transparent; color: #e8e8e8; font: 600 13px -apple-system, system-ui, sans-serif; padding: 6px 14px; border-radius: 999px; min-height: 32px; cursor: pointer; }
+.ideal-toggle button.on[data-ideal="0"] { background: #ff8a2a; color: #111; }
+.ideal-toggle button.on[data-ideal="1"] { background: #1fbf6b; color: #0b1a10; }
+.ideal-toggle .ideal-note { flex-basis: 100%; text-align: right; color: #fff; font: 500 12px/1.3 -apple-system, system-ui, sans-serif; padding: 3px 10px 4px; }
+.ideal-toggle .ideal-note:empty { display: none; }
+.ideal-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin: 8px 2px 0; font-size: 14px; }
+.ideal-legend.hidden { display: none; }
+.ideal-legend b { flex-basis: 100%; color: #1a9b57; font-weight: 600; }
+.ideal-legend strong { color: #1a9b57; }
+.ideal-legend em { font-style: normal; color: var(--muted); }
