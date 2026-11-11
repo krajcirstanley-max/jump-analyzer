@@ -42,6 +42,21 @@ function coneClusters(conesByFrame, H, boardM) {
     if (k < 0 || k > 2 || Math.abs(x - (boardM + 0.2 + 10 * k)) > 0.8 + 1.2 * k) continue;
     if (!best[k] || g.length > best[k].obs.length) best[k] = { k, x, obs: g };
   }
+  // From far away the board's 2 m ruler stretches with distance: on IMG_4658 (filmed across the
+  // hall) the 10.2 m cone came out at 14.2 m and the 20.2 m cone at 32.8 m, outside the window
+  // above. The cones still come in order up the runway, so a missing one is taken by order: the
+  // first group 6-16 m up from the board cone, then one 1.5-3.5 times as far. These keep their
+  // image positions for the splits but never set the scale (byOrder).
+  const zero = boardM + 0.2;
+  const ups = groups.filter(g => g.length >= 3).map(g => ({ x: median(g.map(o => o.x)), obs: g })).filter(g => g.x - zero > 4);
+  if (!best[1]) {
+    const c1 = ups.find(g => g.x - zero >= 6 && g.x - zero <= 16);
+    if (c1) best[1] = { k: 1, x: c1.x, obs: c1.obs, byOrder: true };
+  }
+  if (best[1] && !best[2]) {
+    const g1 = best[1].x - zero, c2 = ups.find(g => g.x > best[1].x + 4 && (g.x - zero) / g1 >= 1.5 && (g.x - zero) / g1 <= 3.5);
+    if (c2) best[2] = { k: 2, x: c2.x, obs: c2.obs, byOrder: true };
+  }
   return Object.values(best).sort((a, b) => a.k - b.k);
 }
 
@@ -102,8 +117,9 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   // take-off line, so the line and the board distance stay where they were found.
   const cones = coneClusters(ground.cones, H, boardM);
   let coneScale = null;
-  if (cones.length >= 2) {
-    const a = cones[0], b = cones.at(-1), sc = (10 * (b.k - a.k)) / (b.x - a.x);
+  const measured = cones.filter(c => !c.byOrder);
+  if (measured.length >= 2) {
+    const a = measured[0], b = measured.at(-1), sc = (10 * (b.k - a.k)) / (b.x - a.x);
     if (sc > 0.85 && sc < 1.15) {
       const u = 1 - sc, A = [sc, 0, u, 0, 1, 0, 0, 0, 1];
       const mul = (M, N) => [0, 1, 2].flatMap(r => [0, 1, 2].map(c => M[r * 3] * N[c] + M[r * 3 + 1] * N[3 + c] + M[r * 3 + 2] * N[6 + c]));
@@ -262,7 +278,9 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     return ((c[0] - qx) * -run) / m; // metres before (upstream of) the cone
   };
   const crossing = k => {
-    const cone = cones.find(c => c.k === k);
+    // The board cone's trigger point is 1 m from the line, where the board's own homography is
+    // at its best: when that cone wasn't picked up (IMG_4658: 2 sightings), the ground stands in.
+    const cone = cones.find(c => c.k === k) ?? (k === 0 && cones.some(c => c.k === 1) ? { k: 0, x: boardM + 0.2, obs: [] } : null);
     const seen = cone ? new Map(cone.obs.map(o => [o.i, o])) : null;
     // distance past the trigger point: + before it, - after it
     // Without the cone there is no split: through the board's homography alone the 1-11 m time
@@ -282,8 +300,15 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     return mt - mv / sl;
   };
   const t1 = crossing(0), t11 = crossing(1), t21 = crossing(2);
+  // The 1-11 m time has to agree with the speed into the board: its average speed (10 m over the
+  // time) may sit a little under the last step's, never far from it. On IMG_4658 (filmed from
+  // 40 m) the cone crossings gave 1.17 s, 8.5 m/s, while the run read 9.4-10 m/s at both ends
+  // and Freelap said 1.06 s: such a time is withheld, not shown.
+  const fits = (sec) => Number.isFinite(sec) && !(Number.isFinite(speedLast) && Math.abs(10 / sec / speedLast - 1) > 0.12);
+  const s1 = t1 - t11, s2 = t11 - t21;
   const splits = {
-    s1to11: Number.isFinite(t1 - t11) ? t1 - t11 : null, s11to21: Number.isFinite(t11 - t21) ? t11 - t21 : null,
+    s1to11: fits(s1) ? s1 : null, s11to21: Number.isFinite(s2) && fits(s1) ? s2 : null,
+    withheld: Number.isFinite(s1) && !fits(s1) ? +s1.toFixed(3) : null,
     source: cones.length >= 2 && coneScale ? 'cones' : 'board',
     cones: cones.map(c => ({ k: c.k, x: +c.x.toFixed(2), n: c.obs.length })), coneScale,
   };

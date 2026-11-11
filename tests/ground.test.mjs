@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { homography, applyH, invertH } from '../js/analysis/homography.js';
-import { detectRunway } from '../server/ground.mjs';
+import { detectRunway, detectRunwayZoomed, zoomFor } from '../server/ground.mjs';
 import { groundAnalysis } from '../js/analysis/ground.js';
 import { J, JI } from '../js/pose/models.js';
 
@@ -39,6 +39,26 @@ test('finds the runway lines, the sand edge and the take-off line', () => {
   for (const k of ['sand', 'white', 'takeoff']) d.corners[k].forEach((p, i) => {
     const e = Math.hypot(p[0] - truth[k][i][0], p[1] - truth[k][i][1]);
     assert.ok(e < 2, `${k}[${i}] off by ${e.toFixed(2)} px: ${p.map(v => v.toFixed(1))} vs ${truth[k][i].map(v => v.toFixed(1))}`);
+  });
+});
+
+// IMG_4658: filmed across the hall, the athlete about 200 px tall. The same runway at half size
+// is enlarged around the foot first and the answer mapped back to the frame's own pixels.
+test('far camera: the board area is enlarged before the runway is looked for', () => {
+  const big = runwayImage(), W = big.W / 2, H = big.H / 2, px = new Uint8Array(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) for (let c = 0; c < 4; c++) {
+    let v = 0; for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) v += big.px[((2 * y + dy) * big.W + 2 * x + dx) * 4 + c];
+    px[(y * W + x) * 4 + c] = v / 4;
+  }
+  const opts = { toe: [230, 220], ground: [235, 225], foot: [227, 250], dir: -1 };
+  assert.equal(zoomFor(400), 1);
+  const s = zoomFor(190);
+  assert.ok(s > 1.9 && s <= 4);
+  const d = detectRunwayZoomed(px, W, H, opts, s);
+  assert.ok(!d.error, d.error);
+  for (const k of ['sand', 'takeoff']) d.corners[k].forEach((p, i) => {
+    const t = big.truth[k][i].map(v => v / 2), e = Math.hypot(p[0] - t[0], p[1] - t[1]);
+    assert.ok(e < 1.5, `${k}[${i}] off by ${e.toFixed(2)} px`);
   });
 });
 

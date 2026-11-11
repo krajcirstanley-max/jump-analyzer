@@ -212,6 +212,50 @@ export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null,
   };
 }
 
+// A far camera (IMG_4658, filmed across the hall: the athlete about 200 px tall at the board) makes
+// the runway lines too thin and short for the line finder, whose pixel thresholds were set on
+// clips where the athlete is 370-480 px tall. Then the area around the foot is enlarged first, so
+// the runway looks the size it does from the usual spot, and the answer is mapped back.
+export const ZOOM_BELOW = 300; // athlete box height in px under which the board area is enlarged
+export function zoomFor(boxH) { return boxH > 0 && boxH < ZOOM_BELOW ? Math.min(4, 380 / boxH) : 1; }
+
+function enlarge(rgba, W, H, x0, y0, w, h, s) {
+  const OW = Math.round(w * s), OH = Math.round(h * s), out = new Uint8ClampedArray(OW * OH * 4);
+  for (let Y = 0; Y < OH; Y++) {
+    const y = Math.min(H - 1.001, Math.max(0, y0 + (Y + 0.5) / s - 0.5)), yi = Math.floor(y), fy = y - yi;
+    for (let X = 0; X < OW; X++) {
+      const x = Math.min(W - 1.001, Math.max(0, x0 + (X + 0.5) / s - 0.5)), xi = Math.floor(x), fx = x - xi;
+      const a = (yi * W + xi) * 4, b = a + 4, c = a + W * 4, d = c + 4, o = (Y * OW + X) * 4;
+      for (let k = 0; k < 4; k++) out[o + k] = (rgba[a + k] * (1 - fx) + rgba[b + k] * fx) * (1 - fy) + (rgba[c + k] * (1 - fx) + rgba[d + k] * fx) * fy;
+    }
+  }
+  return { img: out, OW, OH };
+}
+
+export function detectRunwayZoomed(rgba, W, H, opts, s = 1) {
+  if (!(s > 1.05)) return detectRunway(rgba, W, H, opts);
+  const [tx, ty] = opts.toe;
+  const x0 = Math.max(0, Math.floor(tx - 640 / s)), x1 = Math.min(W, Math.ceil(tx + 640 / s));
+  const y0 = Math.max(0, Math.floor(ty - 330 / s)), y1 = Math.min(H, Math.ceil(ty + 330 / s));
+  const { img, OW, OH } = enlarge(rgba, W, H, x0, y0, x1 - x0, y1 - y0, s);
+  const fwd = p => p && [(p[0] - x0) * s, (p[1] - y0) * s];
+  const d = detectRunway(img, OW, OH, {
+    ...opts, toe: fwd(opts.toe), ground: fwd(opts.ground), foot: opts.foot && opts.foot.map(x => (x - x0) * s),
+  });
+  if (d.error) return d;
+  const back = p => p && [p[0] / s + x0, p[1] / s + y0];
+  // y = m x + c (lines) and x = m y + c (edges) keep their slope; the offset moves.
+  const line = l => l && { ...l, c: y0 + l.c / s - l.m * x0 };
+  const edge = e => e && { ...e, c: x0 + e.c / s - e.m * y0 };
+  const pair = v => v && v.map(back);
+  return {
+    far: line(d.far), near: line(d.near), sand: edge(d.sand), white: edge(d.white),
+    takeoff: d.takeoff && { ...edge(d.takeoff), offPx: d.takeoff.offPx / s }, band: d.band / s, zoom: s,
+    corners: { sand: pair(d.corners.sand), white: pair(d.corners.white), takeoff: pair(d.corners.takeoff) },
+    debug: { ...d.debug, zoom: s },
+  };
+}
+
 // ---------- following the camera ----------
 export function lumaU8(rgba, W, H) {
   const out = new Uint8Array(W * H);
@@ -377,6 +421,8 @@ export async function measureGround({ frames, track, jump, boxes }) {
   // 1.7 s before the board, when the clip has it: the athlete passes 11 m (the Freelap split)
   // about 1.2-1.4 s before the board, and the 10.2 m cone has to be followed into the frame.
   const fps = frames.fps || 120;
+  // (2.6 s was tried for the 20.2 m cone: the tracking error on IMG_4677 rose from 1.3 to 2.2 px
+  // and moved the jump by 9 cm, and IMG_4658 still gave no 11-21 m time.)
   const from = Math.max(0, Math.min((jump.third?.td ?? (jump.pen?.td ?? T.td - 30) - 35) - 12, T.td - Math.round(1.7 * fps)));
   const to = Math.min(N - 1, (jump.landing ?? T.to + 90) + 6);
   const want = []; for (let i = from; i <= to; i++) want.push(i);
@@ -391,9 +437,10 @@ export async function measureGround({ frames, track, jump, boxes }) {
   };
   // Look for the runway in the takeoff contact, every third frame.
   const dets = [];
+  const bT = boxes?.[T.td], zoom = zoomFor(bT ? bT[3] - bT[1] : 0);
   for (let i = T.td; i <= T.to; i += 3) {
     const f = footAt(i); if (!f || !get(i)) continue;
-    const d = detectRunway(get(i), W, H, { ...f, dir });
+    const d = detectRunwayZoomed(get(i), W, H, { ...f, dir }, zoom);
     // The sand is enough here: when the shoe covers the board (IMG_4676) the board comes from
     // the frames after toe-off below.
     if (!d.error && d.corners.sand) dets.push({ i, d });
@@ -427,7 +474,7 @@ export async function measureGround({ frames, track, jump, boxes }) {
       // (in x, and down to the ground: in the air above the board the box ends well above it)
       const pts = board.map(toI).concat([s0]), xs = pts.map(p => p[0]), b = boxes?.[i];
       if (b && b[0] <= Math.max(...xs) + 60 && b[2] >= Math.min(...xs) - 30 && b[3] >= Math.min(...pts.map(p => p[1])) - 25) continue;
-      const d = detectRunway(get(i), W, H, { toe: s0, dir, foot: [s0[0] - 4, s0[0] + 4], ground: s0 });
+      const d = detectRunwayZoomed(get(i), W, H, { toe: s0, dir, foot: [s0[0] - 4, s0[0] + 4], ground: s0 }, zoom);
       if (!d.error && d.corners.sand && d.corners.takeoff && d.takeoff.n >= 5) clear.push({ i, d });
     }
   }
@@ -455,7 +502,7 @@ export async function measureGround({ frames, track, jump, boxes }) {
   }
   const offs = lineDets.map(x => x.d.takeoff?.offPx).filter(Number.isFinite);
   return {
-    frames: out, cones, ref, detections: dets.length, clearDetections: clear.length,
+    frames: out, cones, ref, detections: dets.length, clearDetections: clear.length, zoom: +zoom.toFixed(2),
     line: lineDets === clear ? 'foul strip, board clear' : offs.length ? 'foul strip' : 'white edge',
     lineOffsetPx: offs.length ? +[...offs].sort((a, b) => a - b)[offs.length >> 1].toFixed(1) : null,
     trackRms: +Math.max(...Object.values(g).map(v => v.rms)).toFixed(2), ms: Date.now() - t0,
