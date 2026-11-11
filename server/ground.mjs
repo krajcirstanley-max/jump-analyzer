@@ -394,10 +394,14 @@ export async function measureGround({ frames, track, jump, boxes }) {
   for (let i = T.td; i <= T.to; i += 3) {
     const f = footAt(i); if (!f || !get(i)) continue;
     const d = detectRunway(get(i), W, H, { ...f, dir });
-    if (!d.error && d.corners.sand && d.corners.white) dets.push({ i, d });
+    // The sand is enough here: when the shoe covers the board (IMG_4676) the board comes from
+    // the frames after toe-off below.
+    if (!d.error && d.corners.sand) dets.push({ i, d });
   }
   if (!dets.length) return { error: 'runway not found', ms: Date.now() - t0 };
-  const ref = dets[0].i, d0 = dets[0].d;
+  // Contact frames that also showed the board lead, as they did before sand-only frames counted.
+  const boardDets = dets.filter(x => x.d.corners.white), base = boardDets.length ? boardDets : dets;
+  const ref = base[0].i, d0 = base[0].d;
   const farY = d0.far.m * (W / 2) + d0.far.c;
   const g = await trackGround(get, W, H, { ref, from, to, groundY: () => farY - 150, box: i => boxes?.[i] });
   // The board again once the athlete has left it. During the contact the white shoe stands on
@@ -405,30 +409,36 @@ export async function measureGround({ frames, track, jump, boxes }) {
   // 40 cm wide) the line came out 10-17 cm too far up the runway, the 2 m ruler too long and
   // every distance 5 % short (6.44 m for 6.80 by tape). With the board clear, the darker
   // plasticine strip shows and the take-off line is its far edge. The scan starts from a point
-  // between the sand and the board, carried from the contact's detection by the tracking.
+  // between the sand and the board, carried from the contact's detection by the tracking. When
+  // the contact showed no board, the foot on it stands in for the board.
   const clear = [];
-  const href = g[ref]?.h, back = href && invertH(href);
-  if (back && d0.corners.white) {
+  const href = g[ref]?.h, back = href && invertH(href), f0 = footAt(ref);
+  if (back && (d0.corners.white || f0)) {
     const c0 = d0.corners;
-    const start = [0, 1].map(k => [(c0.sand[k][0] + c0.white[k][0]) / 2, (c0.sand[k][1] + c0.white[k][1]) / 2])
-      .reduce((a, p) => [a[0] + p[0] / 2, a[1] + p[1] / 2], [0, 0]);
-    const board = [c0.white[0], c0.white[1]];
+    const sandMid = [(c0.sand[0][0] + c0.sand[1][0]) / 2, (c0.sand[0][1] + c0.sand[1][1]) / 2];
+    const board = c0.white ? [c0.white[0], c0.white[1]] : [f0.toe, f0.ground];
+    const bMid = [(board[0][0] + board[1][0]) / 2, (board[0][1] + board[1][1]) / 2];
+    const start = [(sandMid[0] + bMid[0]) / 2, (sandMid[1] + bMid[1]) / 2];
     for (let i = T.to + 3; i <= Math.min(to, T.to + Math.round(0.6 * fps)); i += 3) {
       if (!g[i] || !get(i)) continue;
       const toI = p => applyH(g[i].h, applyH(back, p));
       const s0 = toI(start);
       // the athlete's box must keep clear of the board and of the scan's start
-      const xs = board.map(p => toI(p)[0]).concat(s0[0]), b = boxes?.[i];
-      if (b && b[0] <= Math.max(...xs) + 60 && b[2] >= Math.min(...xs) - 30) continue;
+      // (in x, and down to the ground: in the air above the board the box ends well above it)
+      const pts = board.map(toI).concat([s0]), xs = pts.map(p => p[0]), b = boxes?.[i];
+      if (b && b[0] <= Math.max(...xs) + 60 && b[2] >= Math.min(...xs) - 30 && b[3] >= Math.min(...pts.map(p => p[1])) - 25) continue;
       const d = detectRunway(get(i), W, H, { toe: s0, dir, foot: [s0[0] - 4, s0[0] + 4], ground: s0 });
       if (!d.error && d.corners.sand && d.corners.takeoff && d.takeoff.n >= 5) clear.push({ i, d });
     }
   }
-  const lineDets = clear.length >= 2 ? clear : dets;
+  // Two clear frames at least: one alone was wrong on IMG_4676 (motion blur read the strip as
+  // 7 px instead of about 30 and every distance came out 14 % long).
+  const lineDets = clear.length >= 2 ? clear : boardDets;
+  if (!lineDets.length) return { error: 'take-off line not found', ms: Date.now() - t0 };
   // Every detection into the reference frame; corners that agree within 6 px are averaged.
-  const pick = d => [...d.corners.sand, ...(d.corners.takeoff ?? d.corners.white)];
+  const pick = (d, k) => (k < 2 ? d.corners.sand[k] : (d.corners.takeoff ?? d.corners.white)[k - 2]);
   const refPts = [0, 1, 2, 3].map(k => {
-    const q = (lineDets === clear && k < 2 ? dets.concat(clear) : lineDets).filter(x => g[x.i]).map(x => applyH(invertH(g[x.i].h), pick(x.d)[k]));
+    const q = (lineDets === clear && k < 2 ? base.concat(clear) : lineDets).filter(x => g[x.i]).map(x => applyH(invertH(g[x.i].h), pick(x.d, k)));
     const med = v => [...v].sort((a, b) => a - b)[v.length >> 1];
     const mx = med(q.map(p => p[0])), my = med(q.map(p => p[1]));
     const keep = q.filter(p => Math.hypot(p[0] - mx, p[1] - my) < 6);
