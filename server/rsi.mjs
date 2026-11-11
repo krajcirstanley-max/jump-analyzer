@@ -58,8 +58,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     const usesBox = named?.box ?? Boolean(rsi.boxEstCm);
     const result = {
       ...rsi, exercise, named, nameError, usesBox,
-      // the box height is asked for when the drill starts from a box and the athlete gave none
-      askBox: usesBox && !boxCm,
+      askBox: false, // RSI = jump height / contact time: the box never enters it, so nobody is asked
       W: meta.W, H: meta.H, N: meta.N, ts: wire.ts, ms: Math.round(performance.now() - t0),
     };
     return { result };

@@ -14,8 +14,6 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 const key = a => `jump.rsi.${a}`;
 const load = a => { try { return JSON.parse(localStorage.getItem(key(a)) || '[]'); } catch { return []; } };
 const save = (a, list) => { try { localStorage.setItem(key(a), JSON.stringify(list.slice(-200))); } catch { /* storage blocked */ } };
-const lastBox = a => { try { return Number(localStorage.getItem(`${key(a)}.box`)) || null; } catch { return null; } };
-const keepBox = (a, cm) => { try { localStorage.setItem(`${key(a)}.box`, String(cm)); } catch { /* blocked */ } };
 
 // Keep only what the screen and the trend need.
 function record(r, file) {
@@ -37,11 +35,8 @@ function resultHtml(rec) {
   const b = bestOf(rec), st = rec.standing?.[0];
   const odd = rec.exercise === 'other' ? '<p class="note">Toto nevyzerá ako drop jump, odrazy ani výskok. Čísla nižšie sú len z dotykov, ktoré som našiel.</p>' : '';
   const head = odd + `<h2>${esc(NAMES[rec.exercise] ?? rec.exercise)} <small>${esc(LEG[rec.leg] ?? '')}${rec.boxCm ? ` · debna ${rec.boxCm} cm` : ''} · ${rec.fps} fps</small></h2>`;
-  const box = rec.askBox && !rec.boxCm ? `<form class="rsi-box" data-box>
-      <label>Aká vysoká bola debna? <input type="number" inputmode="decimal" min="5" max="120" step="1" placeholder="${rec.boxEstCm ?? 40}" name="box"> cm</label>
-      <button class="btn small">Uložiť</button>
-      <p class="note">${rec.boxEstCm ? `Z videa odhadujem asi ${rec.boxEstCm} cm. ` : ''}RSI je z kontaktu a letu a od debny nezávisí, výška debny je na porovnávanie skokov medzi sebou.</p>
-    </form>` : '';
+  // No box question: RSI is jump height / contact time, the box never enters it (Stanley).
+  const box = '';
   if (!b) {
     return `${head}${box}<div class="big">${tile('Výška výskoku', st ? `${num(st.heightCm, 1)} cm` : '–')}${tile('Let', st ? `${st.flightMs} ms` : '–')}${tile('RSI', '–', 'z výskoku z miesta sa nepočíta')}</div>
       <p class="note">Pri výskoku z miesta je výška z času letu. RSI-mod by potreboval začiatok pohybu, ten sa z videa číta neisto.</p>`;
@@ -94,7 +89,7 @@ function historyHtml(list) {
 export function initRsi({ root, getAthlete }) {
   root.innerHTML = `
     <div class="card"><h2>RSI</h2>
-      <p class="note">Natáčaj <b>spredu</b>, telefón nehybne (statív alebo pevne v ruke), v zábere celé chodidlá aj debna. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
+      <p class="note">Natáčaj <b>spredu</b>, telefón nehybne (statív alebo pevne v ruke), v zábere celé chodidlá. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
       <label class="btn big-btn" id="rsi-pick">Analyzovať RSI<input type="file" accept="video/*" hidden id="rsi-file"></label>
       <p class="note hidden" id="rsi-progress" aria-live="polite"></p>
     </div>
@@ -112,15 +107,6 @@ export function initRsi({ root, getAthlete }) {
     current = rec;
     $('rsi-result').classList.remove('hidden');
     $('rsi-result').innerHTML = resultHtml(rec);
-    const form = $('rsi-result').querySelector('[data-box]');
-    form?.addEventListener('submit', e => {
-      e.preventDefault();
-      const cm = Math.round(Number(new FormData(form).get('box')) || rec.boxEstCm || 0);
-      if (!(cm >= 5 && cm <= 120)) return;
-      const a = getAthlete().id, list = load(a), i = list.findIndex(r => r.id === rec.id);
-      rec.boxCm = cm; rec.askBox = false; if (i >= 0) list[i] = rec; save(a, list); keepBox(a, cm);
-      show(rec); renderHistory();
-    });
   };
 
   $('rsi-file').addEventListener('change', async e => {
@@ -137,8 +123,6 @@ export function initRsi({ root, getAthlete }) {
       });
       if (result?.error) throw new CloudError(result.error);
       const rec = record(result, file);
-      // a box the athlete gave for this drill last time is the likely one; still shown, still editable
-      if (rec.askBox && lastBox(who.id) && rec.boxEstCm && Math.abs(lastBox(who.id) - rec.boxEstCm) <= 8) { rec.boxCm = lastBox(who.id); rec.askBox = false; }
       const list = load(who.id); list.push(rec); save(who.id, list);
       prog.classList.add('hidden');
       show(rec); renderHistory();
