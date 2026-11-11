@@ -400,10 +400,35 @@ export async function measureGround({ frames, track, jump, boxes }) {
   const ref = dets[0].i, d0 = dets[0].d;
   const farY = d0.far.m * (W / 2) + d0.far.c;
   const g = await trackGround(get, W, H, { ref, from, to, groundY: () => farY - 150, box: i => boxes?.[i] });
+  // The board again once the athlete has left it. During the contact the white shoe stands on
+  // the white unit and the foul strip can't be read: on IMG_4677 (Ostrava, a white unit about
+  // 40 cm wide) the line came out 10-17 cm too far up the runway, the 2 m ruler too long and
+  // every distance 5 % short (6.44 m for 6.80 by tape). With the board clear, the darker
+  // plasticine strip shows and the take-off line is its far edge. The scan starts from a point
+  // between the sand and the board, carried from the contact's detection by the tracking.
+  const clear = [];
+  const href = g[ref]?.h, back = href && invertH(href);
+  if (back && d0.corners.white) {
+    const c0 = d0.corners;
+    const start = [0, 1].map(k => [(c0.sand[k][0] + c0.white[k][0]) / 2, (c0.sand[k][1] + c0.white[k][1]) / 2])
+      .reduce((a, p) => [a[0] + p[0] / 2, a[1] + p[1] / 2], [0, 0]);
+    const board = [c0.white[0], c0.white[1]];
+    for (let i = T.to + 3; i <= Math.min(to, T.to + Math.round(0.6 * fps)); i += 3) {
+      if (!g[i] || !get(i)) continue;
+      const toI = p => applyH(g[i].h, applyH(back, p));
+      const s0 = toI(start);
+      // the athlete's box must keep clear of the board and of the scan's start
+      const xs = board.map(p => toI(p)[0]).concat(s0[0]), b = boxes?.[i];
+      if (b && b[0] <= Math.max(...xs) + 60 && b[2] >= Math.min(...xs) - 30) continue;
+      const d = detectRunway(get(i), W, H, { toe: s0, dir, foot: [s0[0] - 4, s0[0] + 4], ground: s0 });
+      if (!d.error && d.corners.sand && d.corners.takeoff && d.takeoff.n >= 5) clear.push({ i, d });
+    }
+  }
+  const lineDets = clear.length >= 2 ? clear : dets;
   // Every detection into the reference frame; corners that agree within 6 px are averaged.
   const pick = d => [...d.corners.sand, ...(d.corners.takeoff ?? d.corners.white)];
   const refPts = [0, 1, 2, 3].map(k => {
-    const q = dets.filter(x => g[x.i]).map(x => applyH(invertH(g[x.i].h), pick(x.d)[k]));
+    const q = (lineDets === clear && k < 2 ? dets.concat(clear) : lineDets).filter(x => g[x.i]).map(x => applyH(invertH(g[x.i].h), pick(x.d)[k]));
     const med = v => [...v].sort((a, b) => a - b)[v.length >> 1];
     const mx = med(q.map(p => p[0])), my = med(q.map(p => p[1]));
     const keep = q.filter(p => Math.hypot(p[0] - mx, p[1] - my) < 6);
@@ -418,9 +443,10 @@ export async function measureGround({ frames, track, jump, boxes }) {
     const c = get(+i) && detectCones(get(+i), W, H, { box: boxes?.[+i] });
     if (c?.length) cones[i] = c.map(p => p.map(x => +x.toFixed(1)));
   }
-  const offs = dets.map(x => x.d.takeoff?.offPx).filter(Number.isFinite);
+  const offs = lineDets.map(x => x.d.takeoff?.offPx).filter(Number.isFinite);
   return {
-    frames: out, cones, ref, detections: dets.length, line: offs.length ? 'foul strip' : 'white edge',
+    frames: out, cones, ref, detections: dets.length, clearDetections: clear.length,
+    line: lineDets === clear ? 'foul strip, board clear' : offs.length ? 'foul strip' : 'white edge',
     lineOffsetPx: offs.length ? +[...offs].sort((a, b) => a - b)[offs.length >> 1].toFixed(1) : null,
     trackRms: +Math.max(...Object.values(g).map(v => v.rms)).toFixed(2), ms: Date.now() - t0,
   };
