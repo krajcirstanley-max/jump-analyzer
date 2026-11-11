@@ -143,7 +143,8 @@ function speedCard(flight, by, ev, track) {
     const diff = Math.round(Math.abs(g.legRatio - 1) * 100);
     const sp = g.splits ?? {}, fine = v => (Number.isFinite(v) && v > 0.7 && v < 2.5 ? v : null);
     const cones = sp.coneScale ? ` Mierku spresnili Freelap kužele (10 m medzi nimi): ${sp.coneScale > 1 ? '+' : '−'}${Math.abs(Math.round((sp.coneScale - 1) * 100))} % oproti samotnej doske.` : '';
-    const splitNote = fine(sp.s1to11) ? ' Čas 1–11 m je z videa tak, ako ho meria Freelap: ťažisko 80 cm pred kužeľmi na 0,2 a 10,2 m. Proti Freelapu raz overené: 1,07 s z videa, 1,10 s Freelap.' : '';
+    const splitNote = fine(sp.s1to11) ? ' Čas 1–11 m je z videa tak, ako ho meria Freelap: ťažisko 80 cm pred kužeľmi na 0,2 a 10,2 m. Proti Freelapu raz overené: 1,07 s z videa, 1,10 s Freelap.'
+      : Number.isFinite(sp.withheld) ? ` Čas 1–11 m neukazujem: z kužeľov vyšlo ${sp.withheld.toFixed(2).replace('.', ',')} s, čo nesedí s rýchlosťou rozbehu pri doske. Kužele sú na to v zábere príliš ďaleko.` : '';
     return { last, takeoff, loss, lossPct: Number.isFinite(g.speedLossPct) ? g.speedLossPct : null, sure: g.sure, board: true,
       jumpFromToe: Number.isFinite(g.jump) && ev.landing != null ? g.jump : null,
       split1to11: fine(sp.s1to11), split11to21: fine(sp.s11to21), cones: !!sp.coneScale,
