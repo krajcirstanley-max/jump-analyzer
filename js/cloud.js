@@ -141,6 +141,7 @@ const STAGES = {
   queued: 'Čakám na server',
   locate: 'Hľadám odraz vo videu',
   ground: 'Meriam dosku a piesok',
+  rsi: 'Počítam kontakty a lety',
   analysis: 'Počítam výsledky',
   coach: 'Píšem odporúčania',
 };
@@ -210,19 +211,21 @@ export function warmCloud() {
   fetch(`${base()}/warm`, { method: 'POST', headers: auth() }).catch(() => {});
 }
 
-export async function analyzeInCloud(file, { sex, name, height, history, onProgress, onResult, signal } = {}) {
+export async function analyzeInCloud(file, { sex, name, height, history, mode = 'jump', boxCm = null, onProgress, onResult, signal } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
   if (file.size > MAX_UPLOAD) throw statusError(413);
   const t0 = Date.now();
   warmCloud();
   const params = new URLSearchParams({ sex: sex || 'male', name: name || '' });
   if (height) params.set('height', String(height));
+  if (mode === 'rsi') { params.set('mode', 'rsi'); if (boxCm) params.set('box', String(boxCm)); }
   // The query string is bounded, and the newest attempts matter most.
   let h = (history || []).slice(-5);
   while (h.length && JSON.stringify(h).length > 6000) h = h.slice(1);
   if (h.length) params.set('history', JSON.stringify(h));
   const { jobId } = await upload(file, params, { signal, onProgress });
-  rememberJob(jobId);
+  // RSI jobs take seconds and the jump screen would not know what to do with one on resume.
+  if (mode !== 'rsi') rememberJob(jobId);
   return follow(jobId, { signal, onProgress, onResult, t0 });
 }
 

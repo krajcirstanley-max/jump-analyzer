@@ -7,6 +7,7 @@ import { analyzeJump } from './analysis/jump.js';
 import { coaching } from './analysis/coach.js';
 import { jointLabels } from './analysis/labels.js';
 import { renderResult, showCoach } from './analysis/view.js';
+import { initRsi } from './rsi-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud } from './cloud.js';
 import * as hist from './history.js';
@@ -43,6 +44,9 @@ function saveProfile(a) {
 let athlete = 'stanley';
 try { const a = localStorage.getItem('athlete'); if (a in ATHLETES) athlete = a; } catch { /* storage blocked */ }
 
+// RSI tab: its own screen and storage; it only asks who is jumping.
+const rsiView = initRsi({ root: document.getElementById('rsi'), getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }) });
+
 // Blank clears the field; anything outside a plausible jump is ignored.
 function parseMetres(s) {
   const x = parseFloat(String(s).trim().replace(',', '.'));
@@ -78,7 +82,8 @@ function showTab(name) {
   if (name === tab) return;
   tabScroll[tab] = scrollY;
   tab = name;
-  for (const t of ['home', 'result', 'progress']) $(`view-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['home', 'result', 'progress', 'rsi']) $(`view-${t}`).classList.toggle('hidden', t !== name);
+  if (name === 'rsi') rsiView.shown();
   document.querySelectorAll('.tab').forEach(b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -546,6 +551,7 @@ function setAthlete(a) {
   });
   fillPbFields();
   renderLists();
+  rsiView.athleteChanged();
 }
 document.querySelectorAll('[data-athlete]').forEach(b => b.addEventListener('click', () => setAthlete(b.dataset.athlete)));
 

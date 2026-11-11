@@ -14,6 +14,7 @@ SK = {
     "too_big": "Video je väčšie ako 300 MB. Skráť ho a skús to znova.",
     "empty": "Server nedostal žiadne video.",
     "sex": "Neplatné pohlavie.",
+    "mode": "Neznámy druh analýzy.",
     "name": "Meno je príliš dlhé.",
     "history": "História pokusov má zlý formát.",
     "missing": "Táto analýza neexistuje.",
@@ -91,8 +92,14 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         name: str = Query(""),
         history: str = Query(""),
         height: float = Query(0),
+        mode: str = Query("jump"),
+        box: float = Query(0),
         owner=Depends(user),
     ):
+        if mode not in ("jump", "rsi"):
+            raise HTTPException(400, SK["mode"])
+        if box and not 5 <= box <= 120:
+            box = 0  # a box height outside 5-120 cm is a typo; the app asks again
         if sex not in ("male", "female"):
             raise HTTPException(400, SK["sex"])
         if len(name) > 60:
@@ -130,7 +137,8 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
             t = now()
             jobs.put(job_key(job_id), {"state": "queued", "stage": "queued", "done": 0, "total": 1, "owner": owner, "createdAt": t, "updatedAt": t})
             try:
-                start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {})})
+                start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {}),
+                                          **({"mode": "rsi"} if mode == "rsi" else {}), **({"boxCm": box} if box else {})})
             except Exception as e:
                 print("job start failed:", e)
                 path.unlink(missing_ok=True)
