@@ -64,6 +64,38 @@ export function resolveSwaps(frames, pr, ok, trust = 0.15) {
   return swapped;
 }
 
+// Both feet on one spot: for a few frames the model can put the left and the right foot in the
+// same place (IMG_4676, frames 547-549, in the middle of the take-off contact: the stance foot
+// vanished, the contact split in two and the board contact came out as 0 ms). The foot that
+// jumped away from where it last was is dropped; the gap is filled later like any other. Point
+// by point, because the collapse is often partial: at 547 the toes and heels sat together while
+// the ankles did not. Returns the frames that were changed.
+const FOOT = ['ank', 'heel', 'bigtoe', 'smalltoe'].map(p => [JI['l' + p], JI['r' + p]]);
+export function dropCollapsedFeet(frames, ok, { near = 0.12, back = 10 } = {}) {
+  const changed = new Set();
+  const last = {}; // keypoint -> [x, y, frame] where it was last seen apart from its pair
+  frames.forEach((f, i) => {
+    if (!f) return;
+    const sc = torso(f);
+    let g = null;
+    for (const [l, r] of FOOT) {
+      if (!ok(f, l) || !ok(f, r)) continue;
+      const pt = k => [f[k * 3], f[k * 3 + 1]];
+      if (Math.hypot(f[l * 3] - f[r * 3], f[l * 3 + 1] - f[r * 3 + 1]) >= near * sc) { last[l] = [...pt(l), i]; last[r] = [...pt(r), i]; continue; }
+      const away = k => { const p = last[k]; return p && i - p[2] <= back ? Math.hypot(f[k * 3] - p[0], f[k * 3 + 1] - p[1]) : NaN; };
+      const dl = away(l), dr = away(r);
+      if (!Number.isFinite(dl) || !Number.isFinite(dr)) continue;
+      // Feet really side by side (in flight, landing) both arrive smoothly: only a point that
+      // teleported goes (548: the right toe 240 px from where it stood a frame earlier).
+      if (Math.max(dl, dr) < Math.max(0.5 * sc, 2 * Math.min(dl, dr))) continue;
+      g ??= Float32Array.from(f);
+      g[(dl > dr ? l : r) * 3 + 2] = 0;
+    }
+    if (g) { frames[i] = g; changed.add(i); }
+  });
+  return [...changed];
+}
+
 function applySwap(f, pr) {
   const g = Float32Array.from(f);
   for (const [l, r] of pr) for (let c = 0; c < 3; c++) { g[l * 3 + c] = f[r * 3 + c]; g[r * 3 + c] = f[l * 3 + c]; }
@@ -144,8 +176,12 @@ export function cleanTrack(raw, okScore, fps, { cutoff = 12, maxGapMs = 25 } = {
   const minOf = new Map(raw.map((f, i) => [f, okScore(i)]));
   const okF = (f, k) => f[k * 3 + 2] >= minOf.get(f);
 
-  // 1. Left/right: legs and arms resolved separately over the whole clip.
+  // 0. Both feet put on one spot: the foot that jumped away goes.
   let frames = raw.slice();
+  const collapsed = dropCollapsedFeet(frames, (f, k) => f[k * 3 + 2] >= minOf.get(f));
+  collapsed.forEach(i => minOf.set(frames[i], okScore(i)));
+
+  // 1. Left/right: legs and arms resolved separately over the whole clip.
   const swapped = { legs: resolveSwaps(frames, LEG_PAIRS, okF), arms: new Set() };
   frames = frames.map((f, i) => (f && swapped.legs.has(i) ? applySwap(f, LEG_PAIRS) : f));
   frames.forEach((f, i) => { if (f) minOf.set(f, okScore(i)); });

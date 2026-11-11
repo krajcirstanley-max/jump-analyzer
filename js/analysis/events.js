@@ -113,6 +113,9 @@ export function detectContacts(track, first, last, fps, opts = {}) {
         const toV = peak(ayToe, j - 5, j + 3);
         const td = tdV >= 0 ? tdV : i;
         let to = toV >= 0 ? toV - 1 : j;
+        // A toe peak before the touchdown is noise, not a contact of 0 ms (IMG_4676 before the
+        // foot-collapse fix: 543-542 on the board); the slide's own end stands instead.
+        if (to <= td) to = Math.max(j, td + 1);
         // The trailing leg keeps sliding back after toe-off, so the slide can outlast the
         // contact (IMG_4596: slide to 1019, toe up at 1013). The toe rising well clear of its own
         // level earlier in the stance ends the contact; this only ever shortens it. Within one

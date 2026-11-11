@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { J, JI } from '../js/pose/models.js';
-import { cleanTrack, hampel, fillGaps, filtfilt } from '../js/pose/clean.js';
+import { cleanTrack, hampel, fillGaps, filtfilt, dropCollapsedFeet } from '../js/pose/clean.js';
 
 const K = J.length, FPS = 120;
 
@@ -69,4 +69,25 @@ test('zero-phase low-pass keeps slow motion and removes jitter without shifting 
   // Peak stays on the same frame (no phase lag).
   const peak = a => { let m = 0; for (let i = 100; i < 160; i++) if (a[i] > a[m] || m < 100) m = i; return m; };
   assert.equal(peak(y), peak(Float64Array.from({ length: n }, (_, i) => slow(i))));
+});
+
+// IMG_4676: for three frames of the take-off contact the model put both feet where the swinging
+// foot was; the stance foot vanished and the contact split in two.
+test('drops the foot that jumped onto the other foot', () => {
+  const truth = runner(120);
+  const feet = ['ank', 'heel', 'bigtoe', 'smalltoe'];
+  const noisy = truth.map((f, i) => {
+    if (i < 60 || i > 62) return f;
+    const g = Float32Array.from(f);
+    for (const p of feet) for (let c = 0; c < 2; c++) g[JI['r' + p] * 3 + c] = f[JI['l' + p] * 3 + c] + 1;
+    return g;
+  });
+  const frames = noisy.slice();
+  const changed = dropCollapsedFeet(frames, (f, k) => f[k * 3 + 2] >= 0.3);
+  assert.deepEqual(changed, [60, 61, 62]);
+  for (const i of changed) for (const p of feet) { assert.equal(frames[i][JI['r' + p] * 3 + 2], 0); assert.ok(frames[i][JI['l' + p] * 3 + 2] > 0.3); }
+  const { clean } = cleanTrack(noisy, () => 0.3, FPS);
+  assert.ok(Math.abs(clean[61][JI.rbigtoe * 3] - truth[61][JI.rbigtoe * 3]) < 8);
+  // feet that really pass each other are left alone
+  assert.deepEqual(dropCollapsedFeet(truth.slice(), (f, k) => f[k * 3 + 2] >= 0.3), []);
 });
