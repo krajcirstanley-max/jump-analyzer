@@ -259,18 +259,35 @@ export function pickFeatures(L, W, H, { y0, y1, cell = 64, max = 40, avoid }) {
     }
   return out.sort((p, q) => q.lam - p.lam).slice(0, max);
 }
-function ransacH(src, dst, { tol = 2, iters = 300, rand = mulberry(11) } = {}) {
+// Rotation + scale + shift as a homography: a hand-held phone's shake (pan and tilt shift the
+// image, roll turns it, a step closer scales it). Least squares, closed form.
+function similarity(src, dst) {
+  const n = src.length; if (n < 2) return null;
+  let mx = 0, my = 0, ux = 0, uy = 0;
+  for (let i = 0; i < n; i++) { mx += src[i][0]; my += src[i][1]; ux += dst[i][0]; uy += dst[i][1]; }
+  mx /= n; my /= n; ux /= n; uy /= n;
+  let sa = 0, sb = 0, ss = 0;
+  for (let i = 0; i < n; i++) {
+    const x = src[i][0] - mx, y = src[i][1] - my, u = dst[i][0] - ux, v = dst[i][1] - uy;
+    sa += x * u + y * v; sb += x * v - y * u; ss += x * x + y * y;
+  }
+  if (!(ss > 1e-9)) return null;
+  const a = sa / ss, b = sb / ss;
+  return [a, -b, ux - a * mx + b * my, b, a, uy - b * mx - a * my, 0, 0, 1];
+}
+function ransacH(src, dst, { tol = 2, iters = 300, rand = mulberry(11), model = 'homography' } = {}) {
   const n = src.length; if (n < 6) return null;
+  const fitFn = model === 'similarity' ? similarity : homography, k = model === 'similarity' ? 2 : 4;
   let best = null;
   for (let it = 0; it < iters; it++) {
-    const idx = new Set(); while (idx.size < 4) idx.add((rand() * n) | 0);
-    const s = [...idx]; const h = homography(s.map(i => src[i]), s.map(i => dst[i])); if (!h) continue;
+    const idx = new Set(); while (idx.size < k) idx.add((rand() * n) | 0);
+    const s = [...idx]; const h = fitFn(s.map(i => src[i]), s.map(i => dst[i])); if (!h) continue;
     let inl = 0; for (let i = 0; i < n; i++) { const p = applyH(h, src[i]); if (Math.hypot(p[0] - dst[i][0], p[1] - dst[i][1]) < tol) inl++; }
     if (!best || inl > best.inl) best = { h, inl };
   }
   if (!best || best.inl < 6) return null;
   let inliers = []; for (let i = 0; i < n; i++) { const p = applyH(best.h, src[i]); if (Math.hypot(p[0] - dst[i][0], p[1] - dst[i][1]) < tol) inliers.push(i); }
-  const h = homography(inliers.map(i => src[i]), inliers.map(i => dst[i]));
+  const h = fitFn(inliers.map(i => src[i]), inliers.map(i => dst[i]));
   if (!h) return null;
   const res = inliers.map(i => { const p = applyH(h, src[i]); return Math.hypot(p[0] - dst[i][0], p[1] - dst[i][1]); });
   return { h, inliers: new Set(inliers), rms: Math.sqrt(res.reduce((s, v) => s + v * v, 0) / res.length) };
@@ -279,7 +296,7 @@ function ransacH(src, dst, { tol = 2, iters = 300, rand = mulberry(11) } = {}) {
 // The camera's motion over the ground, frame by frame: H[i] maps ref-frame pixels on the
 // ground plane to frame i. Ground texture is tracked with the athlete masked out; features
 // that leave are replaced. getRGBA(i) may be async. box(i) -> [x0, y0, x1, y1] to avoid.
-export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box }) {
+export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box, model = 'homography', sane = null }) {
   const out = { [ref]: { h: [1, 0, 0, 0, 1, 0, 0, 0, 1], n: 0, rms: 0 } };
   const inBox = (i, x, y) => { const b = box?.(i); if (!b) return false; const mx = (b[2] - b[0]) * 0.15 + 20, my = (b[3] - b[1]) * 0.1 + 20; return x > b[0] - mx && x < b[2] + mx && y > b[1] - my && y < b[3] + my; };
   for (const step of [1, -1]) {
@@ -297,8 +314,8 @@ export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box }
       const m = feats.map(f => (inBox(i, f.cur[0] + vel[0], f.cur[1] + vel[1]) ? null : matchPatch(L, W, H, f.tpl, f.cur[0] + vel[0], f.cur[1] + vel[1])));
       const ok = feats.map((f, k) => m[k] && !m[k].edge && m[k].score > 0.8);
       const idx = feats.map((_, k) => k).filter(k => ok[k]);
-      const fit = ransacH(idx.map(k => feats[k].ref), idx.map(k => [m[k].x, m[k].y]));
-      if (!fit) break;
+      const fit = ransacH(idx.map(k => feats[k].ref), idx.map(k => [m[k].x, m[k].y]), { model });
+      if (!fit || (sane && !sane(fit.h, h))) break;
       h = fit.h;
       const prevCur = feats.map(f => f.cur);
       feats = feats.map((f, k) => {
@@ -371,4 +388,43 @@ export async function measureGround({ frames, track, jump, boxes }) {
     lineOffsetPx: offs.length ? +[...offs].sort((a, b) => a - b)[offs.length >> 1].toFixed(1) : null,
     trackRms: +Math.max(...Object.values(g).map(v => v.rms)).toFixed(2), ms: Date.now() - t0,
   };
+}
+
+// ---------- a hand-held phone (RSI clips) ----------
+// The phone's own motion over a whole clip, from the background with the athlete masked out.
+// Hand shake is mostly rotation, and a rotating camera moves every depth alike, so walls, floor
+// and the box all count. Rotation + scale + shift: a full homography over a few seconds drifted
+// into nonsense on a panning clip (6 million px at the frame centre). Tracked at about `rate` Hz (shake is far
+// slower) and decoded once, in order. Returns { h: { [frame]: H ref->frame }, ref, moved, rms,
+// tracked } or null when the background has too little texture.
+export async function trackCamera(frames, { from, to, boxes, rate = 60 }) {
+  const t0 = Date.now(), { W, H } = frames;
+  const k = Math.max(1, Math.round(frames.fps / rate));
+  const n = Math.floor((to - from) / k) + 1;
+  const it = frames.sequential(from, to, 1);
+  let refRGBA = null, at = -1, cur = null;
+  const get = async j => {
+    if (j === 0 && refRGBA) return refRGBA;
+    const want = from + j * k;
+    while (at < want) { const r = await it.next(); if (r.done) throw new Error('clip ended'); at = r.value.i; cur = r.value.rgba; }
+    if (j === 0) refRGBA = Buffer.from(cur);
+    return cur;
+  };
+  let g;
+  try {
+    // shake is small: stop at a fit that zooms past ±15 % of the first frame or jumps more than
+    // a fifth of the frame in one step (a lost track, not a hand)
+    const scale = h => Math.hypot(h[0], h[3]);
+    const sane = (h, prev) => Math.abs(scale(h) - 1) < 0.15 && Math.hypot(h[2] - prev[2], h[5] - prev[5]) < 0.2 * Math.min(W, H);
+    g = await trackGround(get, W, H, { ref: 0, from: 0, to: n - 1, groundY: () => 0, box: j => boxes?.[from + j * k], model: 'similarity', sane });
+  } catch { g = null; } finally { await it.return?.(); }
+  const keys = Object.keys(g ?? {}).map(Number);
+  if (keys.length < 2) return null;
+  const h = {}; let moved = 0, rms = 0;
+  for (const j of keys) {
+    h[from + j * k] = g[j].h;
+    const c = applyH(g[j].h, [W / 2, H / 2]); moved = Math.max(moved, Math.hypot(c[0] - W / 2, c[1] - H / 2));
+    rms = Math.max(rms, g[j].rms);
+  }
+  return { h, ref: from, step: k, moved: +moved.toFixed(1), rms: +rms.toFixed(2), tracked: +(keys.length / n).toFixed(2), ms: Date.now() - t0 };
 }

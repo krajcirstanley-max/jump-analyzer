@@ -141,6 +141,7 @@ const STAGES = {
   queued: 'Čakám na server',
   locate: 'Hľadám odraz vo videu',
   ground: 'Meriam dosku a piesok',
+  camera: 'Sledujem pohyb telefónu',
   rsi: 'Počítam kontakty a lety',
   analysis: 'Počítam výsledky',
   coach: 'Píšem odporúčania',

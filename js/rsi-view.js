@@ -21,7 +21,7 @@ function record(r, file) {
   return {
     id: `${Date.now()}`, at: new Date().toISOString(), file: file?.name ?? '', fps: Math.round(r.fps),
     exercise: r.exercise, leg, boxCm: r.boxCm ?? null, boxEstCm: r.boxEstCm == null ? null : Math.round(r.boxEstCm),
-    askBox: r.askBox, rsiErrPct: r.rsiErrPct,
+    askBox: r.askBox, rsiErrPct: r.rsiErrPct, camera: r.camera ?? null,
     jumps: r.jumps.map(j => ({ contactMs: Math.round(j.contactMs), flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1), rsi: +j.rsi.toFixed(2), ri: +j.ri.toFixed(2), slow: j.slow, landingFlexed: j.landingFlexed })),
     standing: (r.standing ?? []).map(j => ({ flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1) })),
     best5: r.best5 ? { rsi: +r.best5.rsi.toFixed(2), ri: +r.best5.ri.toFixed(2), contactMs: Math.round(r.best5.contactMs) } : null,
@@ -57,6 +57,7 @@ function resultHtml(rec) {
   })() : '';
   const flags = [
     rec.jumps.some(j => j.slow) && '⚠ kontakt nad 250 ms: to už nie je rýchly odraz.',
+    rec.camera?.used && rec.camera.tracked < 0.9 && 'Telefón sa hýbal a pozadie som nevedel sledovať celé video: kontakty na konci môžu byť nepresné.',
     rec.jumps.some(j => j.landingFlexed) && 'Pri dopade boli boky nižšie než pri odraze: let a výška môžu byť trochu nadhodnotené.',
   ].filter(Boolean);
   return `${head}${box}
@@ -89,7 +90,7 @@ function historyHtml(list) {
 export function initRsi({ root, getAthlete }) {
   root.innerHTML = `
     <div class="card"><h2>RSI</h2>
-      <p class="note">Natáčaj <b>spredu</b>, telefón nehybne (statív alebo pevne v ruke), v zábere celé chodidlá. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
+      <p class="note">Natáčaj <b>spredu</b>, pokojne aj z ruky (pohyb telefónu odrátam podľa pozadia), v zábere celé chodidlá a kus okolia. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
       <label class="btn big-btn" id="rsi-pick">Analyzovať RSI<input type="file" accept="video/*" hidden id="rsi-file"></label>
       <p class="note hidden" id="rsi-progress" aria-live="polite"></p>
     </div>

@@ -6,6 +6,7 @@
 // Jump height from flight time: h = g t² / 8 (take-off and landing at the same height).
 // RSI (drop jump, hops) = jump height / contact time, in m/s.
 import { JI } from '../pose/models.js';
+import { applyH, invertH } from './homography.js';
 
 const G = 9.81;
 const K = Object.keys(JI).length;
@@ -15,9 +16,36 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
 // Raw keypoints, the heavy model where it ran: the 12 Hz cleaning that suits angles would smear
 // the touchdown and toe-off by a frame or two, and here the edges are the measurement.
-function rawTrack(result) {
+//
+// cam: { h: { [frame]: H } } from the camera tracker, H mapping reference-frame pixels to frame
+// i. A hand-held phone shakes: every keypoint is moved back into the reference frame, so a
+// planted foot stays on one image row however the phone moves. Frames between tracked ones get
+// an interpolated H (the tracker may sample every 2nd-4th frame); outside the tracked span the
+// nearest one is held.
+function camLookup(cam, n) {
+  const keys = Object.keys(cam?.h ?? {}).map(Number).sort((a, b) => a - b);
+  if (keys.length < 2) return null;
+  const inv = new Array(n).fill(null);
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    while (k + 1 < keys.length && keys[k + 1] <= i) k++;
+    const a = keys[k], b = keys[Math.min(k + 1, keys.length - 1)];
+    const w = i <= a ? 0 : i >= b ? 1 : (i - a) / (b - a);
+    const h = cam.h[a].map((v, j) => v * (1 - w) + cam.h[b][j] * w);
+    inv[i] = invertH(h.map(v => v / h[8]));
+  }
+  return inv;
+}
+function rawTrack(result, cam) {
   const n = result.fast?.length ?? 0, out = new Array(n);
-  for (let i = 0; i < n; i++) out[i] = result.accurate?.[i] ?? result.fast?.[i] ?? null;
+  const inv = camLookup(cam, n);
+  for (let i = 0; i < n; i++) {
+    const kp = result.accurate?.[i] ?? result.fast?.[i] ?? null;
+    if (!kp || !inv) { out[i] = kp; continue; }
+    const m = Float32Array.from(kp);
+    for (let j = 0; j < m.length; j += 3) if (Number.isFinite(m[j])) { const [x, y] = applyH(inv[i], [m[j], m[j + 1]]); m[j] = x; m[j + 1] = y; }
+    out[i] = m;
+  }
   return out;
 }
 
@@ -78,8 +106,8 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {})
 }
 
 // result: the pose result (wire shape after fromWire), ts: frame times in s.
-export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = null } = {}) {
-  const track = rawTrack(result);
+export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = null, cam = null } = {}) {
+  const track = rawTrack(result, cam);
   if (!track.length) return { error: 'Vo videu som nenašiel športovca.' };
   const fps = (ts.length - 1) / (ts.at(-1) - ts[0]);
   const pxM = scaleAt(track, sex, height);

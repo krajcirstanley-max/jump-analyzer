@@ -85,3 +85,47 @@ test('pose jitter of ±3 px (about 3 mm) moves the edges by at most a frame', ()
     assert.ok(Math.abs(j.flightMs - 500) <= 2 * r.edgeMs + 1e-9, `${fps} fps flight ${j.flightMs}`);
   }
 });
+
+// A hand-held phone: the whole image shakes (pan, tilt and a little roll, 2-4 Hz, up to ~40 px)
+// while the athlete jumps. The camera tracker's H (reference -> frame) undoes it.
+function shake(i, fps) {
+  const t = i / fps, a = 0.012 * Math.sin(2 * Math.PI * 1.7 * t);       // roll, rad
+  const tx = 30 * Math.sin(2 * Math.PI * 2.3 * t), ty = 25 * Math.sin(2 * Math.PI * 3.1 * t + 1);
+  const c = Math.cos(a), s = Math.sin(a), cx = 540, cy = 960;
+  return [c, -s, cx - c * cx + s * cy + tx, s, c, cy - s * cx - c * cy + ty, 0, 0, 1];
+}
+function shaken(result, ts) {
+  const fps = (ts.length - 1) / (ts.at(-1) - ts[0]), h = {};
+  const fast = result.fast.map((kp, i) => {
+    const H = shake(i, fps); h[i] = H;
+    const m = Float32Array.from(kp);
+    for (let j = 0; j < m.length; j += 3) if (m[j + 2] > 0) { const x = m[j], y = m[j + 1]; m[j] = H[0] * x + H[1] * y + H[2]; m[j + 1] = H[3] * x + H[4] * y + H[5]; }
+    return m;
+  });
+  return { result: { fast, accurate: fast.map(() => null) }, cam: { h } };
+}
+
+test('hand-held phone: with the camera motion taken out the drop jump reads the same', () => {
+  const tFall = Math.sqrt((2 * 0.4) / 9.81);
+  for (const fps of [120, 240]) {
+    const { result, ts } = clip({ fps, plan: [stand(0.6, 0.4), fall(0.4, tFall), stand(0.2), air(0.5), stand(0.8)] });
+    const sh = shaken(result, ts);
+    const raw = rsiAnalysis(sh.result, ts, { sex: 'male', height: 180 });
+    const fixed = rsiAnalysis(sh.result, ts, { sex: 'male', height: 180, cam: sh.cam });
+    // uncorrected, the shake hides or splits the contact
+    assert.ok(raw.error || raw.jumps.length !== 1 || Math.abs(raw.jumps[0].contactMs - 200) > 2 * raw.edgeMs, `${fps} fps: shake did not matter`);
+    assert.equal(fixed.kind, 'drop_jump', `${fps} fps`);
+    const j = fixed.jumps[0];
+    assert.ok(Math.abs(j.contactMs - 200) <= 2 * fixed.edgeMs + 1e-9, `${fps} fps contact ${j.contactMs}`);
+    assert.ok(Math.abs(j.flightMs - 500) <= 2 * fixed.edgeMs + 1e-9, `${fps} fps flight ${j.flightMs}`);
+  }
+});
+
+test('hand-held phone, tracked every 4th frame: interpolated H is enough', () => {
+  const { result, ts } = clip({ fps: 240, plan: [stand(0.5), ...Array(6).fill(0).flatMap(() => [air(0.4), stand(0.18)]), stand(0.5)] });
+  const sh = shaken(result, ts);
+  const sparse = { h: Object.fromEntries(Object.entries(sh.cam.h).filter(([i]) => i % 4 === 0)) };
+  const r = rsiAnalysis(sh.result, ts, { sex: 'male', height: 180, cam: sparse });
+  assert.equal(r.jumps.length, 5, JSON.stringify(r.events));
+  r.jumps.forEach(j => assert.ok(Math.abs(j.contactMs - 180) <= 2 * r.edgeMs + 1e-9, `contact ${j.contactMs}`));
+});

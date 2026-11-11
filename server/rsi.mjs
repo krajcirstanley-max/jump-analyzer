@@ -6,6 +6,7 @@ import { toWire, fromWire } from '../js/cloud.js';
 import { rsiAnalysis } from '../js/analysis/rsi.js';
 import { contactSheet } from './grid.mjs';
 import { probe, openFrames } from './frames.mjs';
+import { trackCamera } from './ground.mjs';
 
 export const RSI_MODEL = 'claude-sonnet-5-5'; // naming a drill from a strip of frames is easy
 export const EXERCISES = ['drop_jump', 'drop_jump_single', 'pogo', 'repeated_hops', 'hurdle_hops', 'cmj', 'squat_jump', 'single_leg_hops', 'other'];
@@ -17,7 +18,7 @@ const SCHEMA = {
     box: { type: 'boolean' },
   },
 };
-const PROMPT = `You see a plyometric jump drill filmed from the front with a still phone. The image is a contact sheet: frames in time order, row by row, each stamped with its frame number in yellow.
+const PROMPT = `You see a plyometric jump drill filmed from the front with a phone (on a tripod or hand-held). The image is a contact sheet: frames in time order, row by row, each stamped with its frame number in yellow.
 Name the drill: drop_jump (steps off a box, lands on both feet and rebounds up at once), drop_jump_single (the same on one leg), pogo (fast ankle bounces, knees nearly straight), repeated_hops (several rebound jumps in a row, both feet), hurdle_hops (repeated jumps over hurdles), cmj (one jump from standing with a dip first), squat_jump (one jump from a held squat, no dip), single_leg_hops (repeated hops on one leg), other.
 leg: the leg(s) that take the contacts, from the athlete's point of view (the athlete's left foot is on the right side of the image when facing the camera). box: true if the athlete starts standing on a box or step.`;
 
@@ -42,8 +43,14 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     const res = await runPipeline(frames, engine, { onProgress });
     if (res.error) return { error: 'Vo videu som nenašiel športovca. Skontroluj, či sú v zábere celé nohy.' };
     const wire = toWire(res, meta.ts);
+    // The phone may be hand-held: follow its motion over the background, then read the feet in
+    // one fixed frame. Under 1.5 px of motion it was on a tripod and nothing changes.
+    onProgress?.({ stage: 'camera', done: 0, total: 1 });
+    let camera = null, cameraError = null;
+    try { camera = await trackCamera(frames, { from: res.first, to: res.last, boxes: res.boxes }); } catch (e) { cameraError = String(e?.message || e).slice(0, 200); }
+    const cam = camera && camera.moved >= 1.5 ? camera : null;
     onProgress?.({ stage: 'rsi', done: 0, total: 1 });
-    const rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm });
+    const rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
     if (rsi.error) return { error: rsi.error };
     // Claude names the drill; the pattern of contacts is the fallback and the cross-check.
     let named = null, nameError = null;
@@ -58,6 +65,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     const usesBox = named?.box ?? Boolean(rsi.boxEstCm);
     const result = {
       ...rsi, exercise, named, nameError, usesBox,
+      camera: camera && { moved: camera.moved, rms: camera.rms, tracked: camera.tracked, step: camera.step, ms: camera.ms, used: !!cam }, cameraError,
       askBox: false, // RSI = jump height / contact time: the box never enters it, so nobody is asked
       W: meta.W, H: meta.H, N: meta.N, ts: wire.ts, ms: Math.round(performance.now() - t0),
     };

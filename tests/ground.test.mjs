@@ -90,3 +90,40 @@ test('ground metres: speeds, take-off point and jump from a known scene', () => 
   assert.ok(Math.abs(pen.freqHz - 4) < 1e-9);
   assert.ok(Math.abs(take.speed - g.vxTO) < 1e-9, 'the board column shows the take-off speed');
 });
+
+test('hand-held phone: the camera tracker recovers the shake over a textured background', async () => {
+  const { trackCamera } = await import('../server/ground.mjs');
+  const { applyH } = await import('../js/analysis/homography.js');
+  // a smooth random texture bigger than the frame; each frame is a window into it
+  const BW = 520, BH = 440, W = 360, H = 280, fps = 240, N = 240;
+  let seed = 5; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const noise = Float32Array.from({ length: BW * BH }, () => rnd() * 255);
+  const base = new Float32Array(BW * BH);
+  for (let y = 2; y < BH - 2; y++) for (let x = 2; x < BW - 2; x++) { let s = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) s += noise[(y + dy) * BW + x + dx]; base[y * BW + x] = s / 25; }
+  const shift = i => [80 + 30 * Math.sin(2 * Math.PI * 2.3 * i / fps), 80 + 25 * Math.sin(2 * Math.PI * 3.1 * i / fps + 1)];
+  const boxes = [];
+  const frame = i => {
+    const [ox, oy] = shift(i), out = new Uint8ClampedArray(W * H * 4);
+    const bx = 150 + 20 * Math.sin(i / 9), box = [bx, 60, bx + 60, 250]; boxes[i] = box; // the athlete: moves on its own
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const X = x + ox, Y = y + oy, x0 = Math.floor(X), y0 = Math.floor(Y), fx = X - x0, fy = Y - y0;
+      const v = (1 - fy) * ((1 - fx) * base[y0 * BW + x0] + fx * base[y0 * BW + x0 + 1]) + fy * ((1 - fx) * base[(y0 + 1) * BW + x0] + fx * base[(y0 + 1) * BW + x0 + 1]);
+      const inA = x > box[0] + 8 && x < box[2] - 8 && y > box[1] + 8 && y < box[3] - 8;
+      const o = (y * W + x) * 4; out[o] = out[o + 1] = out[o + 2] = inA ? 200 + 40 * Math.sin(x + i) : v; out[o + 3] = 255;
+    }
+    return out;
+  };
+  const frames = { W, H, fps, N, async *sequential(from, to) { for (let i = from; i <= to; i++) yield { i, rgba: frame(i) }; } };
+  const cam = await trackCamera(frames, { from: 0, to: N - 1, boxes, rate: 60 });
+  assert.ok(cam, 'no track');
+  assert.equal(cam.step, 4);
+  assert.ok(cam.tracked >= 0.95, `tracked ${cam.tracked}`);
+  // a background point at p in frame 0 sits at p + shift(0) - shift(i) in frame i
+  const err = Object.entries(cam.h).map(([i, h]) => { const p = [60, 200], q = applyH(h, p), s0 = shift(0), si = shift(+i); return [q[0] - (p[0] + s0[0] - si[0]), q[1] - (p[1] + s0[1] - si[1])]; });
+  // What the contacts need: no jump from one tracked frame to the next (a jump reads as foot
+  // speed), and a slow drift that stays far inside the 2 cm band (10-20 px on a real clip).
+  const stepErr = Math.max(...err.slice(1).map((e, k) => Math.hypot(e[0] - err[k][0], e[1] - err[k][1])));
+  const drift = Math.max(...err.map(e => Math.hypot(...e)));
+  assert.ok(stepErr < 1, `step ${stepErr.toFixed(2)} px`);
+  assert.ok(drift < 3, `drift ${drift.toFixed(2)} px`);
+});
