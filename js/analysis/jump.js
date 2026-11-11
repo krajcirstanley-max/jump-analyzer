@@ -4,6 +4,7 @@ import { detectContacts, keyFrames, withEvents } from './events.js';
 import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from './metrics.js';
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
+import { refineTouchdowns } from './refine.js';
 import { sharpen } from './kinematics.js';
 import { techniqueScore, coaching, PHASES } from './coach.js';
 
@@ -66,7 +67,11 @@ function withGround(f, g) {
     ...lowerings(g, f),
     // Vertical speed comes from the time to the apex (g x t, no scale), so with the runway's
     // horizontal speed the angle no longer depends on the gravity fit.
-    ...(f.apexOk && Number.isFinite(f.vyTO) ? { takeoffAngle: (Math.atan2(f.vyTO, g.vxTO) * 180) / Math.PI, angleOk: true } : {}),
+    // The fit's own gate (3 cm) is for a gravity scale; here it only has to place the apex, and a
+    // far, panning phone leaves a few cm of wobble on the arc (IMG_4677: 3.0 cm, apex at 0.24 s of
+    // 0.68 s seen, angle hidden for no good reason). 5 cm with the apex well inside the arc.
+    ...((f.apexOk || (f.fitRmsM < 0.05 && f.tUp > 0.05 && f.tUp < f.fitSeconds - 0.08)) && Number.isFinite(f.vyTO)
+      ? { takeoffAngle: (Math.atan2(f.vyTO, g.vxTO) * 180) / Math.PI, angleOk: true, apexOk: true } : {}),
     takeoffSpeed: Math.hypot(g.vxTO, f.vyTO),
     takeoffDist: g.takeoffDist, flightDistance: g.vxTO * g.flightTime, landingReach: g.landingReach, estDistance: g.jump,
   };
@@ -136,9 +141,13 @@ function speedCard(flight, by, ev, track) {
     const toLine = !Number.isFinite(g.toeToLine) || g.toeToLine < -0.3 ? ''
       : g.toeToLine >= 0 ? `Odraz ${cm(g.toeToLine)} cm pred čiarou dosky.` : `Prešľap o ${cm(-g.toeToLine)} cm.`;
     const diff = Math.round(Math.abs(g.legRatio - 1) * 100);
+    const sp = g.splits ?? {}, fine = v => (Number.isFinite(v) && v > 0.7 && v < 2.5 ? v : null);
+    const cones = sp.coneScale ? ` Mierku spresnili Freelap kužele (10 m medzi nimi): ${sp.coneScale > 1 ? '+' : '−'}${Math.abs(Math.round((sp.coneScale - 1) * 100))} % oproti samotnej doske.` : '';
+    const splitNote = fine(sp.s1to11) ? ' Čas 1–11 m je z videa tak, ako ho meria Freelap: ťažisko 80 cm pred kužeľmi na 0,2 a 10,2 m. Proti Freelapu raz overené: 1,07 s z videa, 1,10 s Freelap.' : '';
     return { last, takeoff, loss, lossPct: Number.isFinite(g.speedLossPct) ? g.speedLossPct : null, sure: g.sure, board: true,
       jumpFromToe: Number.isFinite(g.jump) && ev.landing != null ? g.jump : null,
-      note: `Metre z dosky (čiara odrazu ${String(g.boardM).replace('.', ',')} m od piesku). Kontrola s dĺžkou nohy: rozdiel ${diff} %. Rýchlosti asi ±0,2 m/s, dĺžka skoku asi ±0,2 m.${toLine ? ` ${toLine}` : ''}` };
+      split1to11: fine(sp.s1to11), split11to21: fine(sp.s11to21), cones: !!sp.coneScale,
+      note: `Metre z dosky (čiara odrazu ${String(g.boardM).replace('.', ',')} m od piesku).${cones} Kontrola s dĺžkou nohy: rozdiel ${diff} %. Rýchlosti asi ±0,2 m/s, dĺžka skoku asi ±0,2 m.${splitNote}${toLine ? ` ${toLine}` : ''}` };
   }
   const yaw = ev.pen ? viewYawAt(track, ev.pen.td) : NaN;
   if (!flight.scaleOk) {
@@ -167,7 +176,10 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
   const fps = result.fps ?? (ts ? (ts.length - 1) / (ts.at(-1) - ts[0]) : NaN);
   if (!(fps > 0)) return { error: 'Neznáma snímková frekvencia.' };
   // Key frames Claude named on the server win over the ones detected from the pose track.
-  const named = result.events?.TD != null && result.events?.TO != null ? result.events : null;
+  // Their touchdowns are then moved to the first frame the foot is really down (raw track).
+  const named0 = result.events?.TD != null && result.events?.TO != null ? result.events : null;
+  const refined = named0 ? refineTouchdowns(result, named0, { height }) : null;
+  const named = refined ? refined.events : null;
   const contacts = withEvents(clean, detectContacts(clean, result.first, result.last, fps), named, fps);
   const ev = keyFrames(clean, contacts, fps, sex, { events: named });
   if (ev.error) return { ...ev, error: 'V zázname sa nenašiel odraz.' };

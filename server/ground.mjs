@@ -340,6 +340,31 @@ export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box, 
   return out;
 }
 
+// ---------- Freelap cones ----------
+// Stanley's Freelap cones always stand at 0.2, 10.2 and 20.2 m from the board (the chip fires
+// 80 cm before a cone, so the splits are the real 1-11 and 11-21 m). They are small, bright
+// yellow and tall rather than wide; the base (bottom of the blob) is the point on the ground.
+// IMG_4677: rgb about (220, 198, 78), 13 x 18 px at 15 m. Orange marker discs (R-G about 70)
+// and the yellow-tan benches (thin, wide, G-B about 75) do not pass.
+export function detectCones(rgba, W, H, { box = null, y0 = 0 } = {}) {
+  const yel = o => { const r = rgba[o], g = rgba[o + 1], b = rgba[o + 2]; return r > 185 && g > 165 && b < 125 && r - g < 45 && g - b > 85; };
+  const seen = new Uint8Array(W * H), out = [];
+  const athH = box ? box[3] - box[1] : H;
+  for (let y = Math.max(0, Math.round(y0)); y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x; if (seen[i] || !yel(i * 4)) continue;
+    const st = [i]; seen[i] = 1; let n = 0, x0 = x, x1 = x, ya = y, yb = y;
+    while (st.length) {
+      const j = st.pop(), jx = j % W, jy = (j / W) | 0; n++;
+      if (jx < x0) x0 = jx; if (jx > x1) x1 = jx; if (jy < ya) ya = jy; if (jy > yb) yb = jy;
+      if (n > 20000) break;
+      for (const k of [j - 1, j + 1, j - W, j + W]) if (k >= 0 && k < W * H && !seen[k] && yel(k * 4)) { seen[k] = 1; st.push(k); }
+    }
+    const w = x1 - x0 + 1, h = yb - ya + 1;
+    if (n >= 20 && h >= 5 && h >= 0.7 * w && h <= 0.25 * athH && n >= 0.35 * w * h) out.push([(x0 + x1) / 2, yb + 0.5, h]);
+  }
+  return out;
+}
+
 // ---------- one call for the server ----------
 // frames: openFrames() handle. track: smoothed keypoints. jump: analyzeJump() output (takeoff,
 // takeoffFoot, pen, landing, dir). boxes: the athlete's box per frame. Returns
@@ -348,7 +373,11 @@ export async function measureGround({ frames, track, jump, boxes }) {
   const t0 = Date.now();
   const { W, H, N } = frames, T = jump.takeoff, s = jump.takeoffFoot, dir = jump.dir;
   // From before the 3rd-last step: the last three steps are measured on the ground.
-  const from = Math.max(0, (jump.third?.td ?? (jump.pen?.td ?? T.td - 30) - 35) - 12);
+  // From before the 3rd-last step: the last three steps are measured on the ground. And from
+  // 1.7 s before the board, when the clip has it: the athlete passes 11 m (the Freelap split)
+  // about 1.2-1.4 s before the board, and the 10.2 m cone has to be followed into the frame.
+  const fps = frames.fps || 120;
+  const from = Math.max(0, Math.min((jump.third?.td ?? (jump.pen?.td ?? T.td - 30) - 35) - 12, T.td - Math.round(1.7 * fps)));
   const to = Math.min(N - 1, (jump.landing ?? T.to + 90) + 6);
   const want = []; for (let i = from; i <= to; i++) want.push(i);
   const px = await frames.pick(want);
@@ -380,11 +409,18 @@ export async function measureGround({ frames, track, jump, boxes }) {
     const keep = q.filter(p => Math.hypot(p[0] - mx, p[1] - my) < 6);
     return [keep.reduce((a, p) => a + p[0], 0) / keep.length, keep.reduce((a, p) => a + p[1], 0) / keep.length];
   });
-  const out = {};
-  for (const [i, v] of Object.entries(g)) out[i] = refPts.map(p => applyH(v.h, p).map(x => +x.toFixed(2)));
+  const out = {}, cones = {};
+  for (const [i, v] of Object.entries(g)) {
+    out[i] = refPts.map(p => applyH(v.h, p).map(x => +x.toFixed(2)));
+    // Cones anywhere in the frame: the analysis keeps those that land beside the runway. A band
+    // from the tracked corners lost the 10.2 m cone on IMG_4677, where the tracking 10 m from
+    // the board was tens of pixels off.
+    const c = get(+i) && detectCones(get(+i), W, H, { box: boxes?.[+i] });
+    if (c?.length) cones[i] = c.map(p => p.map(x => +x.toFixed(1)));
+  }
   const offs = dets.map(x => x.d.takeoff?.offPx).filter(Number.isFinite);
   return {
-    frames: out, ref, detections: dets.length, line: offs.length ? 'foul strip' : 'white edge',
+    frames: out, cones, ref, detections: dets.length, line: offs.length ? 'foul strip' : 'white edge',
     lineOffsetPx: offs.length ? +[...offs].sort((a, b) => a - b)[offs.length >> 1].toFixed(1) : null,
     trackRms: +Math.max(...Object.values(g).map(v => v.rms)).toFixed(2), ms: Date.now() - t0,
   };

@@ -127,3 +127,43 @@ test('hand-held phone: the camera tracker recovers the shake over a textured bac
   assert.ok(stepErr < 1, `step ${stepErr.toFixed(2)} px`);
   assert.ok(drift < 3, `drift ${drift.toFixed(2)} px`);
 });
+
+// The board found 10 cm off (2.1 m drawn where 2 m is assumed: every metre 5 % short, as on
+// IMG_4677) and Freelap cones at 0.2 and 10.2 m: the cones fix the scale, and the 1-11 m time
+// comes from the centre of mass passing 80 cm before each cone.
+test('Freelap cones: they fix a 5 % board scale error and give the 1-11 m time', () => {
+  const K = J.length, FPS = 120, PX = 200, v = 8, N = 300, TD = 180, TO = 198, LAND = 270;
+  const toeX = (TD * v) / FPS + 0.57, lineX = toeX + 0.1, sandX = lineX + 2;
+  const camAt = i => (i * v) / FPS * PX - 540;
+  const img = (i, x, h, y = 0) => [x * PX - camAt(i), 1200 - h * PX + 60 * y];
+  const track = [], frames = {}, cones = {}, ts = [];
+  for (let i = 0; i < N; i++) {
+    ts.push(i / FPS);
+    const hx = (i * v) / FPS, f = new Float32Array(K * 3);
+    const set = (n, x, h) => { const [X, Y] = img(i, x, h); f[JI[n] * 3] = X; f[JI[n] * 3 + 1] = Y; f[JI[n] * 3 + 2] = 1; };
+    for (const s of ['l', 'r']) {
+      const planted = s === 'r' && i >= TD && i <= TO;
+      const fx = planted ? toeX - 0.17 : hx + 0.2;
+      set(s + 'hip', hx, 0.95); set(s + 'knee', (hx + fx) / 2 + 0.05, 0.5); set(s + 'ank', fx, 0.08);
+      set(s + 'heel', fx - 0.06, 0.02); set(s + 'bigtoe', fx + 0.17, 0); set(s + 'smalltoe', fx + 0.15, 0);
+      set(s + 'sho', hx, 1.45); set(s + 'elb', hx, 1.2); set(s + 'wri', hx + 0.05, 1.0); set(s + 'ear', hx, 1.65);
+    }
+    set('nose', hx + 0.08, 1.63);
+    track.push(f);
+    frames[i] = [img(i, sandX, 0, 0), img(i, sandX, 0, 1.22), img(i, sandX - 2.1, 0, 0), img(i, sandX - 2.1, 0, 1.22)];
+    const seen = [lineX - 0.2, lineX - 10.2].map(x => img(i, x, 0, -0.2)).filter(p => p[0] > 0 && p[0] < 1080);
+    if (seen.length) cones[i] = seen;
+  }
+  const ev = { takeoff: { td: TD, to: TO }, takeoffFoot: 'r', pen: { td: 150, to: 164, foot: 'l' }, landing: LAND };
+  const plain = groundAnalysis({ frames }, track, ev, ts, 'male', 185);
+  assert.ok(Math.abs(plain.vxTO - v * 2 / 2.1) < 0.05, `without cones the board scale is 5 % short: ${plain.vxTO}`);
+  const g = groundAnalysis({ frames, cones }, track, ev, ts, 'male', 185);
+  assert.ok(!g.error, g.error);
+  assert.ok(Math.abs(g.splits.coneScale - 1.05) < 0.005, `cone scale ${g.splits.coneScale}`);
+  assert.ok(Math.abs(g.vxTO - v) < 0.05, `vxTO ${g.vxTO}`);
+  assert.ok(Math.abs(g.speedLast - v) < 0.1, `last ${g.speedLast}`);
+  const heelLand = (LAND * v) / FPS + 0.2 - 0.06;
+  assert.ok(Math.abs(g.jumpDirect - (heelLand - toeX)) < 0.02, `direct ${g.jumpDirect} vs ${heelLand - toeX}`);
+  assert.ok(Math.abs(g.splits.s1to11 - 10 / v) < 0.02, `1-11 m ${g.splits.s1to11}`);
+  assert.equal(plain.splits.s1to11, null, 'no cones, no split');
+});

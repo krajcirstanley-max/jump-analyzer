@@ -21,6 +21,30 @@ function slope(t, y) {
   return num / den;
 }
 
+// Cone sightings per frame -> one entry per cone: k (0 = 0.2 m, 1 = 10.2 m, 2 = 20.2 m from the
+// line), its median x in metres from the sand, and every sighting { i, x }.
+function coneClusters(conesByFrame, H, boardM) {
+  const obs = [];
+  for (const [k, list] of Object.entries(conesByFrame ?? {})) {
+    if (!H[k]) continue;
+    for (const c of list) {
+      const p = applyH(H[k], c);
+      if (p[1] > -1.2 && p[1] < RUNWAY_W + 1.2) obs.push({ i: +k, x: p[0] * boardM, img: [c[0], c[1]] });
+    }
+  }
+  obs.sort((a, b) => a.x - b.x);
+  const groups = [];
+  for (const o of obs) { const g = groups.at(-1); if (g && o.x - g.at(-1).x < 1.5) g.push(o); else groups.push([o]); }
+  const best = {};
+  for (const g of groups) {
+    if (g.length < 3) continue;
+    const x = median(g.map(o => o.x)), k = Math.round((x - boardM - 0.2) / 10);
+    if (k < 0 || k > 2 || Math.abs(x - (boardM + 0.2 + 10 * k)) > 0.8 + 1.2 * k) continue;
+    if (!best[k] || g.length > best[k].obs.length) best[k] = { k, x, obs: g };
+  }
+  return Object.values(best).sort((a, b) => a.k - b.k);
+}
+
 // ground: { frames: { [i]: [sandFar, sandNear, lineFar, lineNear] } } in image pixels.
 // Works in a unit where the take-off line is 1 from the sand, then picks the board distance
 // (1, 2 or 3 m) from the athlete's leg length and scales everything by it.
@@ -55,18 +79,46 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
 
   // Board distance from body size: the stance leg (hip-knee-ankle) against 0.491 x height.
   const legM = (0.491 * (height ?? (sex === 'female' ? 168 : 180))) / 100;
-  const legs = [];
-  for (const c of [ev.pen, { ...T, foot: s }].filter(Boolean)) {
-    for (let i = c.td + 2; i <= c.to - 2; i++) {
-      if (!ok(i) || !has(track[i], c.foot + 'hip', c.foot + 'knee', c.foot + 'ank')) continue;
-      const k = track[i], px = dist(P(k, c.foot + 'hip'), P(k, c.foot + 'knee')) + dist(P(k, c.foot + 'knee'), P(k, c.foot + 'ank'));
-      legs.push(px / pxPerUnit(i, comX(i)));
+  const legLength = () => {
+    const legs = [];
+    for (const c of [ev.pen, { ...T, foot: s }].filter(Boolean)) {
+      for (let i = c.td + 2; i <= c.to - 2; i++) {
+        if (!ok(i) || !has(track[i], c.foot + 'hip', c.foot + 'knee', c.foot + 'ank')) continue;
+        const k = track[i], px = dist(P(k, c.foot + 'hip'), P(k, c.foot + 'knee')) + dist(P(k, c.foot + 'knee'), P(k, c.foot + 'ank'));
+        legs.push(px / pxPerUnit(i, comX(i)));
+      }
     }
-  }
-  const legUnits = median(legs);
+    return median(legs);
+  };
+  let legUnits = legLength();
   if (!(legUnits > 0)) return { error: 'no leg length' };
   const implied = legM / legUnits; // metres per unit = the board distance the body implies
   const boardM = ground.boardM ?? BOARDS.reduce((b, d) => (Math.abs(d - implied) < Math.abs(b - implied) ? d : b));
+
+  // Freelap cones, when the clip shows them: 0.2, 10.2 and 20.2 m from the board, so a 10 m
+  // baseline against the 2 m from the sand. On IMG_4677 (far, oblique phone) the board scale
+  // put the two cones 9.53 m apart: every distance and speed 5 % short (6.44 m for a jump of
+  // about 6.80, 8.7 m/s against Freelap's 9.09). The run direction is rescaled about the
+  // take-off line, so the line and the board distance stay where they were found.
+  const cones = coneClusters(ground.cones, H, boardM);
+  let coneScale = null;
+  if (cones.length >= 2) {
+    const a = cones[0], b = cones.at(-1), sc = (10 * (b.k - a.k)) / (b.x - a.x);
+    if (sc > 0.85 && sc < 1.15) {
+      const u = 1 - sc, A = [sc, 0, u, 0, 1, 0, 0, 0, 1];
+      const mul = (M, N) => [0, 1, 2].flatMap(r => [0, 1, 2].map(c => M[r * 3] * N[c] + M[r * 3 + 1] * N[3 + c] + M[r * 3 + 2] * N[6 + c]));
+      const H0 = { ...H }, Hi0 = { ...Hi }, leg0 = legUnits;
+      for (const k of Object.keys(H)) { H[k] = mul(A, H[k]); Hi[k] = invertH(H[k]); }
+      legUnits = legLength();
+      // The far cone is read through tracking that has drifted 10 m from the board, so the body
+      // gets a veto: the rescale stays only if the leg then matches 0.491 x height at least as
+      // well as before (IMG_4677: 7 % off before, 2 % after).
+      if (Math.abs((legUnits * boardM) / legM - 1) <= Math.abs((leg0 * boardM) / legM - 1) + 0.01) {
+        coneScale = sc;
+        for (const c of cones) { c.x = boardM + sc * (c.x - boardM); c.obs = c.obs.map(o => ({ ...o, x: boardM + sc * (o.x - boardM) })); }
+      } else { Object.assign(H, H0); Object.assign(Hi, Hi0); legUnits = leg0; }
+    }
+  }
   const legRatio = (legUnits * boardM) / legM;
   const X = i => comX(i) * boardM;
 
@@ -188,13 +240,61 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     if (Number.isFinite(x) && Number.isFinite(h)) series.push({ i, t: ts[i] - ts[T.td], x: x * boardM, h });
   }
 
+  // The Freelap splits from the video: the centre of mass passing 80 cm before each cone (where
+  // the chip fires), read against the cone in the same frame when it was seen there, so the
+  // camera tracking's drift over 10 m cancels. IMG_4677: 1.07 s against Freelap's 1.10.
+  // Where the cone is in the frame, the distance is read in the image, on the athlete's own
+  // scale: CoM to cone along the run, after sliding the cone across the runway to the
+  // athlete's line (the across direction is the only thing taken from the homography there).
+  // Through the homography alone, 10 m from the board the tracking put the CoM about 1 m too
+  // far ahead of the 10.2 m cone (IMG_4677), and the 1-11 m time came out 1.16 s for Freelap's
+  // 1.10.
+  const run = (() => { const a = applyH(Hi[T.to], [1, yAth]), b = applyH(Hi[T.to], [0, yAth]); return Math.sign(b[0] - a[0]) || 1; })();
+  const footGround = i => median([-6, -4, -2, 0, 2, 4, 6].flatMap(d => { const q = track[i + d]; return q ? ['lbigtoe', 'rbigtoe', 'lheel', 'rheel'].filter(n => has(q, n)).map(n => P(q, n)[1]) : []; }).sort((a, b) => b - a).slice(0, 4));
+  // The across direction is read once, at the take-off line in the board frame, where the
+  // homography is good: 10 m away it claimed the runway's cross lines were nearly flat (dx/dy
+  // -13 to -35 against -1.7 at the board), the tracking's drift, not the scene.
+  const acrossRef = (() => { const a = applyH(Hi[T.td], [1, 0]), b = applyH(Hi[T.td], [1, RUNWAY_W]); return (b[0] - a[0]) / (b[1] - a[1] || 1); })();
+  const imgDist = (i, cone) => {
+    const c = ok(i) && centreOfMass(track[i], sex), m = legPxAt(i) / legMeasured; if (!c || !(m > 0)) return NaN;
+    const gy = footGround(i), q = cone.img;
+    const qx = q[0] + (Number.isFinite(gy) ? (gy - q[1]) * acrossRef : 0);
+    return ((c[0] - qx) * -run) / m; // metres before (upstream of) the cone
+  };
+  const crossing = k => {
+    const cone = cones.find(c => c.k === k);
+    const seen = cone ? new Map(cone.obs.map(o => [o.i, o])) : null;
+    // distance past the trigger point: + before it, - after it
+    // Without the cone there is no split: through the board's homography alone the 1-11 m time
+    // came out 1.22 s for Freelap's 1.10 (IMG_4677), far too loose to show.
+    if (!cone) return NaN;
+    const left = i => {
+      if (seen.has(i)) return imgDist(i, seen.get(i)) - 0.8;
+      const x = X(i); return Number.isFinite(x) ? x - (cone.x + 0.8) : NaN;
+    };
+    const d = []; for (const i of Object.keys(H).map(Number).sort((a, b) => a - b)) { if (i > T.td) break; const v = left(i); if (Number.isFinite(v)) d.push([i, v]); }
+    const n = d.findIndex(([, v], j) => j > 0 && d[j - 1][1] > 0 && v <= 0);
+    if (n < 0) return NaN;
+    const win = d.filter(([i]) => Math.abs(i - d[n][0]) <= 8);
+    if (win.length < 6 || win[0][1] < 0 || win.at(-1)[1] > 0) return NaN;
+    const tt = win.map(([i]) => ts[i]), vv = win.map(([, v]) => v), sl = slope(tt, vv);
+    const mt = tt.reduce((a, b) => a + b, 0) / tt.length, mv = vv.reduce((a, b) => a + b, 0) / vv.length;
+    return mt - mv / sl;
+  };
+  const t1 = crossing(0), t11 = crossing(1), t21 = crossing(2);
+  const splits = {
+    s1to11: Number.isFinite(t1 - t11) ? t1 - t11 : null, s11to21: Number.isFinite(t11 - t21) ? t11 - t21 : null,
+    source: cones.length >= 2 && coneScale ? 'cones' : 'board',
+    cones: cones.map(c => ({ k: c.k, x: +c.x.toFixed(2), n: c.obs.length })), coneScale,
+  };
+
   const board = steps.find(st => st.id === 'take');
   if (board) board.speed = vxTO; // the board contact's speed is the take-off speed
 
   const pxPerM = pxPerUnit(T.td, comX(T.td)) / boardM;
   return {
     steps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
-    boardM, implied, legRatio, yAth, pxPerM,
+    boardM, implied, legRatio, yAth, pxPerM, splits,
     speedLast, vxTO, speedLoss: vxTO - speedLast, speedLossPct: ((vxTO - speedLast) / speedLast) * 100,
     // + behind the take-off line (legal, distance given away), - past it towards the sand.
     toeToLine: toeTO - boardM, takeoffDist, landingReach: reach, jump, jumpDirect: direct, flightTime, partsGap: agree,

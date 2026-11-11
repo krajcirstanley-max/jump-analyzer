@@ -55,8 +55,15 @@ function speedHtml(s) {
     : `<div><span>Strata</span><b>${pctText ?? '–'}</b></div>`;
   const hiddenOne = [s.last, s.takeoff, s.loss].find(m => m && !shown(m));
   const jumpLine = s.jumpFromToe != null ? `<p class="note">Skok od odrazovej špičky po prvú stopu v piesku: <b>${num(s.jumpFromToe, 2)} m</b></p>` : "";
-  return `<h2>Rýchlosť <small>${s.board ? 'z dosky' : 'odhad'}</small></h2>
-    <div class="big">${cell('Do odrazu', s.last)}${cell('Odraz', s.takeoff)}${lossCell}</div>${jumpLine}
+  // Stanley reads speed as a time over a distance (Freelap 1-11 m), so that leads when the
+  // cones are in the video; the last step in m/s moves under it.
+  const sec = v => `${num(v, 2)} s`;
+  const first = s.split1to11 != null
+    ? `<div><span>1–11 m</span><b>${sec(s.split1to11)}</b>${shown(s.last) ? `<small>posledný krok ${value(s.last, Math.abs(s.last.value))}</small>` : ''}</div>`
+    : cell('Do odrazu', s.last);
+  const split2 = s.split11to21 != null ? `<p class="note">11–21 m: <b>${sec(s.split11to21)}</b></p>` : '';
+  return `<h2>Rýchlosť <small>${s.cones ? 'z kužeľov' : s.board ? 'z dosky' : 'odhad'}</small></h2>
+    <div class="big">${first}${cell('Odraz', s.takeoff)}${lossCell}</div>${split2}${jumpLine}
     ${hiddenOne ? `<p class="met-why">${esc(hiddenReason(hiddenOne))}</p>` : ''}
     <details><summary>Ako isté to je?</summary><p>Istota: <b>${esc(s.sure)}</b>. ${esc(s.note)}</p></details>`;
 }
