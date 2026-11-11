@@ -300,11 +300,12 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     return mt - mv / sl;
   };
   const t1 = crossing(0), t11 = crossing(1), t21 = crossing(2);
-  // The 1-11 m time has to agree with the speed into the board: its average speed (10 m over the
-  // time) may sit a little under the last step's, never far from it. On IMG_4658 (filmed from
-  // 40 m) the cone crossings gave 1.17 s, 8.5 m/s, while the run read 9.4-10 m/s at both ends
-  // and Freelap said 1.06 s: such a time is withheld, not shown.
-  const fits = (sec) => Number.isFinite(sec) && !(Number.isFinite(speedLast) && Math.abs(10 / sec / speedLast - 1) > 0.12);
+  // The 1-11 m time has to agree with the speed into the board: from 11 m to 1 m out the run is
+  // at its top speed, so 10 m over the time sits within a few percent of the last step (IMG_4677:
+  // 9.34 against 9.44 m/s, 1 %). On IMG_4658 (filmed from 40 m) the cone crossings gave 1.17 s,
+  // 8.6 m/s, against a last step of 9.3 (server) or 10.2 m/s (local) and Freelap's 1.06 s: such a
+  // time is withheld, not shown.
+  const fits = (sec) => Number.isFinite(sec) && !(Number.isFinite(speedLast) && Math.abs(10 / sec / speedLast - 1) > 0.06);
   const s1 = t1 - t11, s2 = t11 - t21;
   const splits = {
     s1to11: fits(s1) ? s1 : null, s11to21: Number.isFinite(s2) && fits(s1) ? s2 : null,
