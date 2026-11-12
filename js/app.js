@@ -12,6 +12,7 @@ import { initRsi } from './rsi-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud } from './cloud.js';
 import * as hist from './history.js';
+import { sessions, sessionPlace, skoky } from './sessions.js';
 
 const APP_VERSION = '0.3.0';
 const $ = id => document.getElementById(id);
@@ -130,6 +131,13 @@ function setWho(a) {
   resultAthlete = a;
   $('res-who').textContent = a ? ATHLETES[a].name : '';
   $('res-who').classList.toggle('hidden', tab !== 'result' || !a);
+}
+
+// "Stanley · 3. skok z 5": where the attempt on screen sits in its training day.
+async function showPlace(id, a) {
+  const p = sessionPlace(await hist.listAttempts(a), id);
+  if (id !== resultId || a !== resultAthlete) return;
+  $('res-who').textContent = ATHLETES[a].name + (p ? ` · ${p.n}. skok z ${p.total}` : '');
 }
 
 let isBusy = false;
@@ -520,6 +528,7 @@ function showJump() {
   $('res-del').dataset.del = rec.id;
   saved = hist.saveAttempt(rec, { clip: currentFile, pose }).then(out => {
     renderLists();
+    if (out.ok) showPlace(rec.id, rec.athlete);
     if (out.ok && !out.media.clip) console.warn('Replay not kept: no space for the clip');
   });
   present(null);
@@ -554,6 +563,7 @@ async function openAttempt(id) {
   jump.feel = rec.feel;
   awaitingCoach = !!rec.coachPending;
   resultId = id;
+  showPlace(id, rec.athlete);
   pose = media.pose;
   $('res-del').dataset.del = id;
   let note = null;
@@ -590,7 +600,7 @@ async function renderLists() {
     el.dataset.open = last.id;
     el.innerHTML = `<span class="latest-l">Posledné skóre</span>
       <span class="latest-n">${waiting || last.score == null ? '–' : Math.round(last.score)}<small>/ 100</small></span>
-      <span class="latest-s">${waiting ? 'Klepni a povedz, ako sa to cítilo' : esc(hist.fmtDate(last.recordedAt))}</span>`;
+      <span class="latest-s">${waiting ? 'Klepni a povedz, ako sa to cítilo' : `${esc(hist.fmtDate(last.recordedAt))} · ${skoky(sessions(records).at(-1).records.length)} na tréningu`}</span>`;
   }
   const root = $('progress');
   root.innerHTML = hist.progressHtml(records, profiles[a], name);

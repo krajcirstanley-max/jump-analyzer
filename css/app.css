@@ -196,6 +196,11 @@ h2 + .met, .all-h + .met { border-top: 0; padding-top: 2px; }
 .spark-none { font-size: 12px; }
 .att { display: flex; align-items: stretch; border-top: 1px solid var(--line); gap: 6px; }
 .atts .att:first-child { border-top: 0; }
+.sess { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 0 4px; font-size: 15px; }
+.sess:first-child { padding-top: 0; }
+.sess b { text-transform: capitalize; }
+.sess span { color: var(--muted); font-size: 14px; }
+.sess + .att { border-top: 0; }
 .att-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 6px 0; background: none; border: 0; text-align: left; cursor: pointer; touch-action: manipulation; }
 div.att-open { cursor: default; }
 .att-score { flex: 0 0 40px; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }

@@ -3,6 +3,7 @@
 // its replay without re-analysis.
 
 import { fromWire } from './cloud.js';
+import { sessions, skoky, dayLabel } from './sessions.js';
 
 const DB = 'jump-analyzer', STORE = 'attempts', BLOBS = 'blobs', DIR = 'attempts';
 export const SCHEMA = 2;   // records without `schema` predate v1: numbers only, no replay
@@ -310,13 +311,16 @@ export function wireTrend(root) {
   el.addEventListener('pointermove', move);
 }
 
-function attemptRow(r) {
+const fmtTime = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+// n: the attempt's number in its training day.
+function attemptRow(r, n) {
   const legacy = !(r.schema >= SCHEMA);
   const waiting = needsFeel(r);
   const sub = waiting ? 'Čaká na tvoj pocit'
     : [r.feel ? `Pocit ${r.feel}/5` : null, legacy ? 'starší pokus, bez záznamu' : null, r.cue ? `„${r.cue}“` : null].filter(Boolean).join(' · ');
   const body = `<b class="att-score">${waiting || r.score == null ? '–' : Math.round(r.score)}</b>
-    <span class="att-meta"><span>${esc(fmtDate(r.recordedAt))}</span><small>${esc(sub)}</small></span>`;
+    <span class="att-meta"><span>${n}. skok${fmtTime(r.recordedAt) ? ` · ${esc(fmtTime(r.recordedAt))}` : ''}</span><small>${esc(sub)}</small></span>`;
   return `<div class="att">
     ${legacy ? `<div class="att-open">${body}</div>` : `<button class="att-open" data-open="${esc(r.id)}">${body}<span class="att-go" aria-hidden="true">›</span></button>`}
     <button class="att-del" data-del="${esc(r.id)}" aria-label="Zmazať pokus">Zmazať</button>
@@ -331,10 +335,14 @@ export function progressHtml(records, profile, name) {
     const last = vals.findLast(v => v != null);
     return `<div class="trend"><span>${label}</span>${sparkline(vals)}<b>${last == null ? '–' : Math.round(last)}</b></div>`;
   }).join('');
-  const list = records.length ? [...records].reverse().map(attemptRow).join('') : `<p class="note">${esc(name)} zatiaľ nemá žiadny pokus.</p>`;
+  // Newest training first, one heading per day with its jump count.
+  const list = records.length
+    ? sessions(records).reverse().map(s => `<div class="sess"><b>${esc(dayLabel(s.day))}</b><span>${skoky(s.records.length)}</span></div>`
+      + s.records.map((r, i) => attemptRow(r, i + 1)).reverse().join('')).join('')
+    : `<p class="note">${esc(name)} zatiaľ nemá žiadny pokus.</p>`;
   return `
     <div class="card"><h2>Skóre</h2>${trendChart(scored)}</div>
     <div class="card"><h2>PB a cieľ</h2>${pbBarHtml(profile, 'PB a cieľ zapíšeš na Domove.')}</div>
     <div class="card"><h2>Fázy</h2><div class="trends">${rows}</div></div>
-    <div class="card"><h2>Všetky pokusy</h2><div class="atts">${list}</div></div>`;
+    <div class="card"><h2>Tréningy</h2><div class="atts">${list}</div></div>`;
 }
