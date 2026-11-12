@@ -14,10 +14,11 @@ function frame(lUp, rUp) {
   return kp;
 }
 
-// phases: [foot, from, to] = that foot is the lower one (the other up 0.6 torso); level elsewhere.
+// phases: [foot, from, to, up] = that foot is the lower one, the other `up` torso lengths higher
+// (1.2 by default, a driven run-up stride); level elsewhere.
 function track(n, phases, missing = []) {
   const t = Array.from({ length: n }, () => frame(0, 0));
-  for (const [foot, a, b] of phases) for (let i = a; i <= b; i++) t[i] = foot === 'l' ? frame(0, 0.6 * TORSO) : frame(0.6 * TORSO, 0);
+  for (const [foot, a, b, up = 1.2] of phases) for (let i = a; i <= b; i++) t[i] = foot === 'l' ? frame(0, up * TORSO) : frame(up * TORSO, 0);
   for (const [a, b] of missing) for (let i = a; i <= b; i++) t[i] = null;
   return t;
 }
@@ -92,6 +93,33 @@ test('step count: a short hole in the track does not break the rhythm, a long on
   const long = countSteps(track(td + 40, [['l', 100, 106], ['r', 110, 122], ...steps], [[190, 260]]), { td, foot: 'r', fps: FPS });
   assert.equal(long.seen, false);
   assert.equal(long.why, 'hole');
+});
+
+test('step count: a jog onto the mark in the same rhythm is not counted (IMG_4596, IMG_2674)', () => {
+  // five low run-in contacts (feet 0.4 torso apart) ending on the right foot at the mark, then ten driven steps
+  const runIn = run(0, 5).map(([f, a, b]) => [f, a + 15, b + 15, 0.4]);
+  const steps = run(165, 10);
+  const td = steps.at(-1)[1];
+  const c = countSteps(track(td + 40, [...runIn, ...steps]), { td, foot: 'r', fps: FPS });
+  assert.equal(c.seen, true);
+  assert.equal(c.count, 10);
+  assert.equal(c.first, 165);
+  // on the real clips the free leg already drives up while the take-off foot is on the mark
+  runIn[4][3] = 1.2;
+  const d = countSteps(track(td + 40, [...runIn, ...steps]), { td, foot: 'r', fps: FPS });
+  assert.equal(d.count, 10);
+  assert.equal(d.first, 165);
+});
+
+test('step count: the first readable step without a mark contact before it is not a seen start (IMG_4677)', () => {
+  // the far start is unreadable; two flickers as the feet come apart, then ten steps on the left first
+  const steps = run(200, 10);
+  const td = steps.at(-1)[1];
+  const c = countSteps(track(td + 40, [['l', 170, 175], ['r', 182, 189], ...steps]), { td, foot: 'r', fps: FPS });
+  assert.equal(c.seen, false);
+  assert.equal(c.why, 'blind');
+  assert.equal(c.count, 10);
+  assert.deepEqual(c.range, [10, 18]);
 });
 
 test('step count: no count when the board phase is not the take-off foot', () => {

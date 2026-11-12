@@ -54,7 +54,7 @@ function stepCountHtml(c) {
   if (!c?.count) return '';
   return c.seen
     ? `<p class="note">Rozbeh: <b>${kroky(c.count)}</b> (od prvého kroku po dosku, bez naskočenia)</p>`
-    : `<p class="note">Rozbeh: štart nie je v zábere, vidno posledných <b>${kroky(c.count)}</b>${c.range ? `, celý rozbeh ${c.range[0] === c.range[1] - 2 ? `${c.range[0]} alebo ${c.range[1]}` : `${c.range[0]} až ${c.range[1]}`} krokov` : ''}</p>`;
+    : `<p class="note">Rozbeh: ${{ blind: 'začiatok je príliš ďaleko na prečítanie', hole: 'časť rozbehu v zábere chýba' }[c.why] ?? 'štart nie je v zábere'}, vidno posledných <b>${kroky(c.count)}</b>${c.range ? `, celý rozbeh ${c.range[0] === c.range[1] - 2 ? `${c.range[0]} alebo ${c.range[1]}` : `${c.range[0]} až ${c.range[1]}`} krokov` : ''}</p>`;
 }
 
 function speedHtml(s, sc) {
