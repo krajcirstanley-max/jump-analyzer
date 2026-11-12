@@ -33,7 +33,7 @@ Set run_through to true if this is a run-through (pop-up) instead of a full jump
 
 const image = jpeg => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } });
 
-async function ask(client, model, prompt, images, schema) {
+export async function ask(client, model, prompt, images, schema) {
   let timer;
   const res = await Promise.race([
     client.beta.messages.create({

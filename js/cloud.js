@@ -212,7 +212,7 @@ export function warmCloud() {
   fetch(`${base()}/warm`, { method: 'POST', headers: auth() }).catch(() => {});
 }
 
-export async function analyzeInCloud(file, { sex, name, height, history, mode = 'jump', boxCm = null, onProgress, onResult, signal } = {}) {
+export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, onProgress, onResult, signal } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
   if (file.size > MAX_UPLOAD) throw statusError(413);
   const t0 = Date.now();
@@ -224,6 +224,12 @@ export async function analyzeInCloud(file, { sex, name, height, history, mode = 
   let h = (history || []).slice(-5);
   while (h.length && JSON.stringify(h).length > 6000) h = h.slice(1);
   if (h.length) params.set('history', JSON.stringify(h));
+  // Everyone who may be in the clip: the server tells who it is. Same bound on the histories.
+  if (athletes?.length) {
+    const r = athletes.map(a => ({ ...a, history: (a.history || []).slice(-5) }));
+    while (JSON.stringify(r).length > 6000 && r.some(a => a.history.length)) for (const a of r) a.history = a.history.slice(1);
+    params.set('athletes', JSON.stringify(r));
+  }
   const { jobId } = await upload(file, params, { signal, onProgress });
   // RSI jobs take seconds and the jump screen would not know what to do with one on resume.
   if (mode !== 'rsi') rememberJob(jobId);

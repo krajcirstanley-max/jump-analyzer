@@ -17,6 +17,7 @@ SK = {
     "mode": "Neznámy druh analýzy.",
     "name": "Meno je príliš dlhé.",
     "history": "História pokusov má zlý formát.",
+    "athletes": "Zoznam atlétov má zlý formát.",
     "missing": "Táto analýza neexistuje.",
     "start": "Analýzu sa nepodarilo spustiť. Skús to znova.",
     "stale": "Analýza sa na serveri prerušila. Skús to znova.",
@@ -52,6 +53,33 @@ def owner_of(header, tokens):
         if hmac.compare_digest(given, tok.encode()):
             found = user
     return found
+
+
+def parse_athletes(raw):
+    """The athletes the server may find in the clip (the app has no athlete switch): a JSON list
+    of {id, sex, name, height, history}. Empty means the old single-athlete parameters."""
+    if not raw:
+        return []
+    items = json.loads(raw)
+    if not isinstance(items, list) or len(items) > 4:
+        raise ValueError
+    out = []
+    for a in items:
+        if not isinstance(a, dict):
+            raise ValueError
+        aid, sex, name = a.get("id"), a.get("sex"), a.get("name", "")
+        if not isinstance(aid, str) or not 0 < len(aid) <= 20 or sex not in ("male", "female"):
+            raise ValueError
+        if not isinstance(name, str) or len(name) > 60:
+            raise ValueError
+        height = a.get("height") or 0
+        if not isinstance(height, (int, float)) or not 120 <= height <= 230:
+            height = 0
+        history = a.get("history") or []
+        if not isinstance(history, list):
+            raise ValueError
+        out.append({"id": aid, "sex": sex, "name": name, "history": history[-5:], **({"height": height} if height else {})})
+    return out
 
 
 def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time):
@@ -94,6 +122,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         height: float = Query(0),
         mode: str = Query("jump"),
         box: float = Query(0),
+        athletes: str = Query(""),
         owner=Depends(user),
     ):
         if mode not in ("jump", "rsi"):
@@ -112,6 +141,10 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
                 raise ValueError
         except ValueError:
             raise HTTPException(400, SK["history"])
+        try:
+            roster = parse_athletes(athletes)
+        except ValueError:
+            raise HTTPException(400, SK["athletes"])
         length = request.headers.get("content-length")
         if length and length.isdigit() and int(length) > MAX_UPLOAD:
             raise HTTPException(413, SK["too_big"])
@@ -138,7 +171,8 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
             jobs.put(job_key(job_id), {"state": "queued", "stage": "queued", "done": 0, "total": 1, "owner": owner, "createdAt": t, "updatedAt": t})
             try:
                 start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {}),
-                                          **({"mode": "rsi"} if mode == "rsi" else {}), **({"boxCm": box} if box else {})})
+                                          **({"mode": "rsi"} if mode == "rsi" else {}), **({"boxCm": box} if box else {}),
+                                          **({"athletes": roster} if roster else {})})
             except Exception as e:
                 print("job start failed:", e)
                 path.unlink(missing_ok=True)

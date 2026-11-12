@@ -393,6 +393,25 @@ def test_sweep_removes_only_old_files():
     assert [f.name for f in p.iterdir()] == ["new"] and commits == [1]
 
 
+def test_athletes_roster_goes_to_the_job():
+    import urllib.parse as u
+    e = Env()
+    roster = [{"id": "stanley", "sex": "male", "name": "Stanley", "height": 186, "history": [{"score": i} for i in range(8)]},
+              {"id": "miska", "sex": "female", "name": "Miška", "height": 500}]
+    assert e.post(q="sex=male&athletes=" + u.quote(json.dumps(roster))).status_code == 200
+    got = e.started[0][2]["athletes"]
+    assert [a["id"] for a in got] == ["stanley", "miska"]
+    assert [h["score"] for h in got[0]["history"]] == [3, 4, 5, 6, 7]
+    assert got[0]["height"] == 186 and "height" not in got[1]   # nonsense height dropped
+
+
+def test_bad_athletes_roster_is_refused():
+    import urllib.parse as u
+    e = Env()
+    for bad in ['{"id":"x"}', '[{"id":"x","sex":"other"}]', '[{"sex":"male"}]', "[1]", "nope"]:
+        assert e.post(q="athletes=" + u.quote(bad)).status_code == 400
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
@@ -406,3 +425,4 @@ if __name__ == "__main__":
                 print("FAIL", name)
                 traceback.print_exc()
     sys.exit(1 if fails else 0)
+

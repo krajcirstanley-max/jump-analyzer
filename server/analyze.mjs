@@ -1,6 +1,7 @@
 // The one entry point on the server: pose, analyzeJump, coaching, all through the same JS the
 // phone runs. One shot: node server/analyze.mjs <clip> <out.json> --sex male|female --name <n> [--history file]
 // Long-lived (Modal keeps models on the GPU between jobs): node server/analyze.mjs --serve
+import { identifyAthlete } from './identify.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname, join, basename } from 'node:path';
@@ -52,7 +53,9 @@ export function coachClient({ token, localLogin = false } = {}) {
 
 // onResult fires before any coaching work, so a slow or failed coaching call can't hold up
 // or lose the numbers. coachFallback is what to show if the coaching step never comes back.
-export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, history = [], client, onProgress, onResult }) {
+// athletes: [{ id, sex, name, height, history }] when the app leaves it to the server to tell who
+// is in the clip; the one found replaces sex, name, height and history.
+export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, history = [], athletes = null, client, onProgress, onResult }) {
   const t = { start: performance.now() };
   const mark = k => { t[k] = Math.round(performance.now() - t.start); };
   const meta = probe(clip);
@@ -68,8 +71,14 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     const result = toWire(res, meta.ts);
     // Claude watches the frames and names the key frames; the pose track's guess only says
     // where to look. Without a client, or if it fails, the pose track's own frames stand.
+    let who = null;
     if (client) {
       const guess = analyzeJump(fromWire(result), sex, meta.ts, { height });
+      // Who is in the clip, read alongside the key frames.
+      const whoP = athletes?.length > 1
+        ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, near: guess.error ? null : guess.takeoff.td, athletes, client })
+          .catch(e => ({ id: null, error: String(e?.message || e).slice(0, 200) }))
+        : null;
       try {
         const loc = await locateEvents({
           frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, client, onProgress,
@@ -82,7 +91,13 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
         console.error('locate failed:', e?.message || e);
         result.locate = { error: String(e?.message || e).slice(0, 300) };
       }
+      who = await whoP;
       mark('located');
+    }
+    if (athletes?.length > 1) {
+      const a = athletes.find(x => x.id === who?.id);
+      if (a) ({ sex, name, height = null, history = [] } = a);
+      result.who = { id: a?.id ?? null, said: who?.said ?? null, ms: who?.ms, error: who?.error };
     }
     // Metres from the runway: the take-off line, the sand and the runway lines in every frame.
     // Without them the analysis falls back to the gravity fit.
@@ -175,7 +190,7 @@ async function serve() {
       };
       // RSI drills: contacts and flights only, no coaching text, so the numbers are the end.
       const out = job.mode === 'rsi'
-        ? await analyzeRsiClip(engine, { clip: job.clip, sex: job.sex, height: job.height ?? null, boxCm: job.boxCm ?? null, client: coachClient({ token: claudeToken }), onProgress })
+        ? await analyzeRsiClip(engine, { clip: job.clip, sex: job.sex, height: job.height ?? null, boxCm: job.boxCm ?? null, athletes: job.athletes ?? null, client: coachClient({ token: claudeToken }), onProgress })
         : await analyzeClip(engine, {
           ...job,
           client: coachClient({ token: claudeToken }),

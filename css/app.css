@@ -18,7 +18,13 @@ button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent
 
 /* Shell */
 .top { display: flex; align-items: center; min-height: 56px; padding: 8px 16px 0; max-width: 640px; margin: 0 auto; }
-.top-who { font-size: 17px; font-weight: 700; }
+.top-who { font-size: 17px; font-weight: 700; color: var(--text); background: none; border: 0; padding: 8px 0; min-height: 44px; cursor: pointer; touch-action: manipulation; text-align: left; }
+.who-swap { margin-left: 8px; color: var(--accent); font-weight: 600; }
+.ath + .ath { margin-top: 28px; }
+.rsi-who { font-size: 17px; font-weight: 800; margin: 14px 0 4px; }
+
+.rsi-swap { display: block; margin: -6px 0 4px; }
+.ath-name { font-size: 22px; font-weight: 800; margin: 4px 2px 0; }
 main { padding: 10px 16px calc(88px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
 .view, .stack { display: flex; flex-direction: column; gap: 12px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }

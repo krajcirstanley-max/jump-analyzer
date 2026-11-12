@@ -43,11 +43,28 @@ function saveProfile(a) {
   try { localStorage.setItem(profileKey(a), JSON.stringify(profiles[a])); } catch { /* storage blocked: kept for this session */ }
 }
 
+// No athlete switch (Stanley, 2026-11-12): the server tells who is in each clip. `athlete` is only
+// the guess until it answers, or when it can't tell: whoever was in the last clip.
 let athlete = 'stanley';
 try { const a = localStorage.getItem('athlete'); if (a in ATHLETES) athlete = a; } catch { /* storage blocked */ }
+function rememberAthlete(a) {
+  athlete = a;
+  try { localStorage.setItem('athlete', a); } catch { /* storage blocked */ }
+}
+const otherAthlete = a => Object.keys(ATHLETES).find(x => x !== a);
 
-// RSI tab: its own screen and storage; it only asks who is jumping.
-const rsiView = initRsi({ root: document.getElementById('rsi'), getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }) });
+// Everyone who may be in a clip, with the numbers-only history the coach gets.
+async function roster() {
+  return Promise.all(Object.entries(ATHLETES).map(async ([id, a]) => ({
+    id, sex: a.sex, name: a.name, height: a.height, history: hist.coachHistory(await hist.listAttempts(id)),
+  })));
+}
+
+// RSI tab: its own screen and storage.
+const rsiView = initRsi({
+  root: document.getElementById('rsi'), athletes: ATHLETES,
+  getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster, rememberAthlete,
+});
 
 // Blank clears the field; anything outside a plausible jump is ignored.
 function parseMetres(s) {
@@ -56,26 +73,17 @@ function parseMetres(s) {
 }
 const metresField = x => (x == null ? '' : x.toFixed(2).replace('.', ','));
 
-function renderPb() {
-  const { name } = ATHLETES[athlete], p = profiles[athlete];
-  const note = p.goal == null ? `${name}, aký je tvoj cieľ? Zapíš ho sem.` : 'Zapíš svoj PB a uvidíš, koľko chýba.';
-  $('pb-bar').innerHTML = hist.pbBarHtml(p, note);
-}
-function fillPbFields() {
-  $('pb').value = metresField(profiles[athlete].pb);
-  $('goal').value = metresField(profiles[athlete].goal);
-  renderPb();
-}
-for (const key of ['pb', 'goal']) {
-  $(key).addEventListener('change', () => {
-    const v = parseMetres($(key).value);
-    profiles[athlete][key] = v;
-    $(key).value = metresField(v);
-    saveProfile(athlete);
-    renderPb();
-    renderLists();
-  });
-}
+// PB and goal are edited on Progres, one pair per athlete.
+document.addEventListener('change', e => {
+  const f = e.target.closest('[data-pb]');
+  if (!f) return;
+  const a = f.dataset.pb, key = f.dataset.key;
+  if (!(a in ATHLETES) || !['pb', 'goal'].includes(key)) return;
+  profiles[a][key] = parseMetres(f.value);
+  f.value = metresField(profiles[a][key]);
+  saveProfile(a);
+  renderLists();
+});
 
 // ---------- tabs ----------
 let tab = 'home';
@@ -91,7 +99,6 @@ function showTab(name) {
     b.classList.toggle('on', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
-  $('athlete-switch').classList.toggle('hidden', name === 'result');
   $('res-who').classList.toggle('hidden', name !== 'result' || !resultAthlete);
   if (name !== 'result') player?.pause();
   scrollTo(0, tabScroll[name] ?? 0);
@@ -129,15 +136,57 @@ let poseWorker = null;
 
 function setWho(a) {
   resultAthlete = a;
-  $('res-who').textContent = a ? ATHLETES[a].name : '';
+  $('res-who').innerHTML = a ? whoHtml(a) : '';
   $('res-who').classList.toggle('hidden', tab !== 'result' || !a);
 }
 
-// "Stanley · 3. skok z 5": where the attempt on screen sits in its training day.
+// "Stanley · 3. skok z 5": where the attempt on screen sits in its training day. The name is a
+// button: one tap gives the attempt to the other athlete when the server got it wrong.
+const whoHtml = (a, tail = '') => `${esc(ATHLETES[a].name)}${tail}<span class="who-swap" aria-hidden="true">⇄</span>`;
 async function showPlace(id, a) {
   const p = sessionPlace(await hist.listAttempts(a), id);
   if (id !== resultId || a !== resultAthlete) return;
-  $('res-who').textContent = ATHLETES[a].name + (p ? ` · ${p.n}. skok z ${p.total}` : '');
+  $('res-who').innerHTML = whoHtml(a, p ? ` · ${p.n}. skok z ${p.total}` : '');
+}
+
+// The server found someone else than the guess: the attempt is theirs. The clip stored under the
+// guess goes once the attempt is saved under the right name.
+let staleClip = null;
+function adoptWho(result) {
+  const id = result?.who?.id;
+  if (!(id in ATHLETES)) return;
+  rememberAthlete(id);
+  if (id === resultAthlete) return;
+  if (held) { staleClip = held.id; hold({ ...held, id: hist.attemptId(id, held.file), athlete: id }); }
+  setWho(id);
+}
+
+$('res-who').addEventListener('click', () => swapAthlete());
+async function swapAthlete() {
+  if (!resultId || !pose || !jump || jump.error || isBusy) return;
+  const oldId = resultId, to = otherAthlete(resultAthlete);
+  await saved;
+  const old = await hist.getAttempt(oldId);
+  if (!old) return;
+  rememberAthlete(to);
+  setWho(to);
+  if (!currentFile) {            // opened from Progres: the clip is the stored one
+    currentFile = (await hist.loadMedia(oldId)).clip;
+    currentClip = { file: { name: old.file, size: old.size }, recordedAt: old.recordedAt };
+  }
+  // The numbers again with the other athlete's sex; the coaching from the server named the wrong
+  // person, so the template stands in.
+  cloudCoach = null; awaitingCoach = false;
+  if (!showJump()) return;
+  await saved;
+  const newId = resultId;
+  if (old.feel != null) await hist.patchAttempt(newId, { feel: old.feel });
+  if (newId === oldId) return;
+  // The player still reads the old clip: let go of it, drop the old attempt, open the new one.
+  runId++;
+  clearResult();
+  await hist.deleteAttempt(oldId);
+  openAttempt(newId);
 }
 
 let isBusy = false;
@@ -282,14 +331,16 @@ async function runAnalysis(file, run, forceLocal) {
 
   const who = ATHLETES[resultAthlete];
   showProgress('Posielam video', 0);
+  staleClip = null;
   // The clip goes on the phone first: if the app is closed after the upload, the job can
   // be picked up again and still has its replay.
   const id = hist.attemptId(resultAthlete, currentClip.file);
   await hist.storeClip(id, file);
   if (!stillCurrent()) return;
   hold({ id, athlete: resultAthlete, ...currentClip });
-  const history = hist.coachHistory(await hist.listAttempts(resultAthlete));
-  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, ...opts }));
+  const athletes = await roster();
+  const history = athletes.find(a => a.id === resultAthlete).history;
+  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, athletes, ...opts }));
 }
 
 async function followCloud(run, start) {
@@ -302,6 +353,7 @@ async function followCloud(run, start) {
     if (numbersUp || !stillCurrent()) return;
     numbersUp = true;
     abort = null;              // from here the job outlives this screen: only the coach is left
+    adoptWho(result);
     pose = result;
     awaitingCoach = true;
     attempt = finishPose();
@@ -312,6 +364,7 @@ async function followCloud(run, start) {
     const out = await start({ signal, onResult, onProgress: p => { if (stillCurrent() && !numbersUp) progressFrom(p); } });
     if (numbersUp) return void landCoach(attempt, out.coach);
     if (!stillCurrent()) return;
+    adoptWho(out.result);
     pose = out.result;
     cloudCoach = out.coach ?? null;
     finishPose();
@@ -526,7 +579,10 @@ function showJump() {
   rec.coachJob = awaitingCoach ? pendingCloudJob()?.jobId ?? null : null;
   resultId = rec.id;
   $('res-del').dataset.del = rec.id;
+  const stale = staleClip !== rec.id ? staleClip : null;
+  staleClip = null;
   saved = hist.saveAttempt(rec, { clip: currentFile, pose }).then(out => {
+    if (stale) hist.dropIfOrphan(stale);
     renderLists();
     if (out.ok) showPlace(rec.id, rec.athlete);
     if (out.ok && !out.media.clip) console.warn('Replay not kept: no space for the clip');
@@ -584,41 +640,15 @@ async function openAttempt(id) {
   present(rec.feel, note);
 }
 
-// ---------- Domov and Progres ----------
+// ---------- Progres ----------
+// Both athletes, one after the other.
 async function renderLists() {
-  const a = athlete, { name } = ATHLETES[a];
-  const records = await hist.listAttempts(a);
-  if (a !== athlete) return;
-  const last = records.at(-1);
-  const el = $('latest');
-  if (!last) {
-    el.disabled = true;
-    el.innerHTML = `<span class="latest-l">Posledné skóre</span><span class="latest-n">–</span><span class="latest-s">${esc(name)} zatiaľ nemá žiadny pokus.</span>`;
-  } else {
-    const waiting = hist.needsFeel(last);
-    el.disabled = !(last.schema >= hist.SCHEMA);
-    el.dataset.open = last.id;
-    el.innerHTML = `<span class="latest-l">Posledné skóre</span>
-      <span class="latest-n">${waiting || last.score == null ? '–' : Math.round(last.score)}<small>/ 100</small></span>
-      <span class="latest-s">${waiting ? 'Klepni a povedz, ako sa to cítilo' : `${esc(hist.fmtDate(last.recordedAt))} · ${skoky(sessions(records).at(-1).records.length)} na tréningu`}</span>`;
-  }
+  const ids = Object.keys(ATHLETES);
+  const all = await Promise.all(ids.map(a => hist.listAttempts(a)));
   const root = $('progress');
-  root.innerHTML = hist.progressHtml(records, profiles[a], name);
-  hist.wireTrend(root);
+  root.innerHTML = ids.map((a, i) => hist.progressHtml(all[i], profiles[a], ATHLETES[a].name, a)).join('');
+  root.querySelectorAll('[data-ath]').forEach(hist.wireTrend);
 }
-
-function setAthlete(a) {
-  athlete = a;
-  try { localStorage.setItem('athlete', a); } catch { /* storage blocked */ }
-  document.querySelectorAll('[data-athlete]').forEach(b => {
-    b.classList.toggle('on', b.dataset.athlete === a);
-    b.setAttribute('aria-checked', String(b.dataset.athlete === a));
-  });
-  fillPbFields();
-  renderLists();
-  rsiView.athleteChanged();
-}
-document.querySelectorAll('[data-athlete]').forEach(b => b.addEventListener('click', () => setAthlete(b.dataset.athlete)));
 
 document.addEventListener('click', e => {
   const open = e.target.closest('[data-open]');
@@ -680,7 +710,7 @@ $('file').addEventListener('change', e => {
   e.target.value = '';
 });
 
-setAthlete(athlete);
+renderLists();
 resumeCoaches();
 resumeHeld();
 

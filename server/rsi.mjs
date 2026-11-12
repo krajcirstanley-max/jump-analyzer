@@ -1,6 +1,7 @@
 // RSI jobs: pose on every frame, contacts and flights from the feet (js/analysis/rsi.js), and
 // Claude naming the exercise from a contact sheet. Claude never sets a frame edge: on the long
 // jump its contact edges were 3-8 frames off where the pose track was within one.
+import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
 import { rsiAnalysis } from '../js/analysis/rsi.js';
@@ -35,7 +36,7 @@ async function nameExercise({ frames, first, last, boxes, client }) {
   return JSON.parse(res.content?.find(b => b.type === 'text')?.text ?? 'null');
 }
 
-export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null, boxCm = null, client, onProgress }) {
+export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null, boxCm = null, athletes = null, client, onProgress }) {
   const t0 = performance.now();
   const meta = probe(clip);
   const frames = openFrames(clip, meta);
@@ -49,6 +50,15 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     let camera = null, cameraError = null;
     try { camera = await trackCamera(frames, { from: res.first, to: res.last, boxes: res.boxes }); } catch (e) { cameraError = String(e?.message || e).slice(0, 200); }
     const cam = camera && camera.moved >= 1.5 ? camera : null;
+    // Who is in the clip (no athlete switch in the app): their sex and height go into the numbers.
+    let who = null;
+    if (client && athletes?.length > 1) {
+      try { who = await identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, athletes, client }); }
+      catch (e) { who = { id: null, error: String(e?.message || e).slice(0, 200) }; }
+      const a = athletes.find(x => x.id === who.id);
+      if (a) ({ sex, height = null } = a);
+      who = { id: a?.id ?? null, said: who.said ?? null, ms: who.ms, error: who.error };
+    }
     onProgress?.({ stage: 'rsi', done: 0, total: 1 });
     const rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
     if (rsi.error) return { error: rsi.error };
@@ -64,7 +74,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     const exercise = named?.exercise ?? rsi.kind;
     const usesBox = named?.box ?? Boolean(rsi.boxEstCm);
     const result = {
-      ...rsi, exercise, named, nameError, usesBox,
+      ...rsi, exercise, named, nameError, usesBox, ...(who ? { who } : {}),
       camera: camera && { moved: camera.moved, rms: camera.rms, tracked: camera.tracked, step: camera.step, ms: camera.ms, used: !!cam }, cameraError,
       askBox: false, // RSI = jump height / contact time: the box never enters it, so nobody is asked
       W: meta.W, H: meta.H, N: meta.N, ts: wire.ts, ms: Math.round(performance.now() - t0),

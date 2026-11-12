@@ -327,7 +327,11 @@ function attemptRow(r, n) {
   </div>`;
 }
 
-export function progressHtml(records, profile, name) {
+const metresField = x => (x == null ? '' : x.toFixed(2).replace('.', ','));
+
+// One athlete's block on Progres (both are shown, one after the other). id: the athlete's key,
+// for the PB and goal fields.
+export function progressHtml(records, profile, name, id) {
   const seen = records.filter(r => !needsFeel(r));
   const scored = seen.filter(r => r.score != null);
   const rows = PHASE_LABELS.map(([id, label]) => {
@@ -340,9 +344,13 @@ export function progressHtml(records, profile, name) {
     ? sessions(records).reverse().map(s => `<div class="sess"><b>${esc(dayLabel(s.day))}</b><span>${skoky(s.records.length)}</span></div>`
       + s.records.map((r, i) => attemptRow(r, i + 1)).reverse().join('')).join('')
     : `<p class="note">${esc(name)} zatiaľ nemá žiadny pokus.</p>`;
-  return `
+  const field = (key, label) => `<label><span>${label}</span><input data-pb="${esc(id)}" data-key="${key}" type="text" inputmode="decimal" autocomplete="off" placeholder="zadaj" value="${metresField(profile[key])}"></label>`;
+  const note = profile.goal == null ? `${name}, aký je tvoj cieľ? Zapíš ho sem.` : 'Zapíš PB a uvidíš, koľko chýba.';
+  return `<section class="stack ath" data-ath="${esc(id)}">
+    <h2 class="ath-name">${esc(name)}</h2>
     <div class="card"><h2>Skóre</h2>${trendChart(scored)}</div>
-    <div class="card"><h2>PB a cieľ</h2>${pbBarHtml(profile, 'PB a cieľ zapíšeš na Domove.')}</div>
+    <div class="card"><h2>PB a cieľ</h2><div class="pb-fields">${field('pb', 'PB (m)')}${field('goal', 'Cieľ (m)')}</div>${pbBarHtml(profile, note)}</div>
     <div class="card"><h2>Fázy</h2><div class="trends">${rows}</div></div>
-    <div class="card"><h2>Tréningy</h2><div class="atts">${list}</div></div>`;
+    <div class="card"><h2>Tréningy</h2><div class="atts">${list}</div></div>
+  </section>`;
 }

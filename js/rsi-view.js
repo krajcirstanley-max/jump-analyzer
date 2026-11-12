@@ -1,6 +1,7 @@
 // The RSI tab: pick a clip of a plyometric drill, the server finds every contact and flight and
 // names the drill, and the screen shows contact time, flight, jump height and both RSI forms.
-// Results are kept per athlete in this browser (numbers only, no video) for the trend.
+// Results are kept per athlete in this browser (numbers only, no video) for the trend. The server
+// tells who is in the clip (no athlete switch since 2026-11-12); a tap on the name moves a result.
 import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
 
 const NAMES = {
@@ -84,10 +85,10 @@ function historyHtml(list) {
       return `<svg class="rsi-spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}"/></svg>`; })() : '';
     return `<div class="rsi-group"><div class="rsi-gh"><b>${esc(NAMES[ex] ?? ex)}</b><small>${esc(LEG[leg] ?? '')}</small>${spark}</div><ul>${items}</ul></div>`;
   }).join('');
-  return `<h2>História</h2>${groups}`;
+  return groups;
 }
 
-export function initRsi({ root, getAthlete }) {
+export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete }) {
   root.innerHTML = `
     <div class="card"><h2>RSI</h2>
       <p class="note">Natáčaj <b>spredu</b>, pokojne aj z ruky (pohyb telefónu odrátam podľa pozadia), v zábere celé chodidlá a kus okolia. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
@@ -99,16 +100,26 @@ export function initRsi({ root, getAthlete }) {
   const $ = id => root.querySelector(`#${id}`);
   let current = null, busy = false;
 
+  // Both athletes' histories, each under its name.
   const renderHistory = () => {
-    const list = load(getAthlete().id);
-    $('rsi-history').classList.toggle('hidden', !list.length);
-    $('rsi-history').innerHTML = historyHtml(list);
+    const parts = Object.keys(athletes).map(a => [a, load(a)]).filter(([, list]) => list.length);
+    $('rsi-history').classList.toggle('hidden', !parts.length);
+    $('rsi-history').innerHTML = '<h2>História</h2>' + parts.map(([a, list]) => `<p class="rsi-who">${esc(athletes[a].name)}</p>${historyHtml(list)}`).join('');
   };
-  const show = rec => {
-    current = rec;
+  const show = (rec, who) => {
+    current = { rec, who };
     $('rsi-result').classList.remove('hidden');
-    $('rsi-result').innerHTML = resultHtml(rec);
+    $('rsi-result').innerHTML = `<button class="top-who rsi-swap" data-rsi-swap>${esc(athletes[who].name)}<span class="who-swap" aria-hidden="true">⇄</span></button>${resultHtml(rec)}`;
   };
+  // Wrong person: the result moves to the other athlete's history.
+  root.addEventListener('click', e => {
+    if (!e.target.closest('[data-rsi-swap]') || !current) return;
+    const { rec, who } = current, to = Object.keys(athletes).find(a => a !== who);
+    save(who, load(who).filter(r => r.id !== rec.id));
+    const list = load(to); list.push(rec); list.sort((x, y) => String(x.at).localeCompare(String(y.at))); save(to, list);
+    rememberAthlete(to);
+    show(rec, to); renderHistory();
+  });
 
   $('rsi-file').addEventListener('change', async e => {
     const file = e.target.files?.[0]; e.target.value = '';
@@ -119,14 +130,16 @@ export function initRsi({ root, getAthlete }) {
     prog.classList.remove('hidden'); prog.textContent = 'Nahrávam video…';
     try {
       const { result } = await analyzeInCloud(file, {
-        sex: who.sex, name: who.name, height: who.height, mode: 'rsi', boxCm: null,
+        sex: who.sex, name: who.name, height: who.height, mode: 'rsi', boxCm: null, athletes: await roster(),
         onProgress: p => { prog.textContent = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`; },
       });
       if (result?.error) throw new CloudError(result.error);
       const rec = record(result, file);
-      const list = load(who.id); list.push(rec); save(who.id, list);
+      const id = result.who?.id in athletes ? result.who.id : who.id;
+      rememberAthlete(id);
+      const list = load(id); list.push(rec); save(id, list);
       prog.classList.add('hidden');
-      show(rec); renderHistory();
+      show(rec, id); renderHistory();
     } catch (err) {
       prog.textContent = err?.message || 'Analýza zlyhala. Skús to znova.';
     } finally {
@@ -134,9 +147,8 @@ export function initRsi({ root, getAthlete }) {
     }
   });
   // localhost only: lets a developer render a stored result without a server run
-  if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__rsiShow = rec => { show(rec); renderHistory(); };
+  if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__rsiShow = (rec, who = getAthlete().id) => { show(rec, who); renderHistory(); };
   return {
-    athleteChanged() { current = null; $('rsi-result').classList.add('hidden'); renderHistory(); },
     shown() { renderHistory(); },
   };
 }

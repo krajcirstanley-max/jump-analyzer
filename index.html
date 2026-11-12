@@ -16,29 +16,16 @@
 </head>
 <body>
 <header class="top">
-  <div class="seg" id="athlete-switch" role="radiogroup" aria-label="Atlét">
-    <button data-athlete="stanley" role="radio" aria-checked="true">Stanley</button>
-    <button data-athlete="miska" role="radio" aria-checked="false">Miška</button>
-  </div>
-  <div class="top-who hidden" id="res-who"></div>
+  <button class="top-who hidden" id="res-who" aria-label="Zmeniť atléta pri tomto pokuse"></button>
 </header>
 
 <main>
   <!-- Domov -->
   <section class="view" id="view-home">
-    <button class="card latest" id="latest"></button>
-
-    <label class="btn primary go" for="file">Analyzovať skok</label>
+    <label class="btn primary go" for="file">Nahrať video</label>
+    <p class="hint">Kto skáče, appka zistí z videa sama.</p>
     <input type="file" id="file" accept="video/*,.mov,.mp4" hidden>
     <p class="hint">Vyber originál: <b>Photos → Share → Export Unmodified Original → Files</b>, potom tu <b>Choose File</b>. Photo Library dá len 30 fps kópiu.</p>
-
-    <div class="card pb">
-      <div class="pb-fields">
-        <label><span>PB (m)</span><input id="pb" type="text" inputmode="decimal" autocomplete="off" placeholder="zadaj"></label>
-        <label><span>Cieľ (m)</span><input id="goal" type="text" inputmode="decimal" autocomplete="off" placeholder="zadaj"></label>
-      </div>
-      <div id="pb-bar"></div>
-    </div>
 
     <details class="card settings">
       <summary>Nastavenia</summary>
@@ -55,7 +42,7 @@
   <section class="view hidden" id="view-result">
     <div class="card empty" id="res-empty">
       <p>Zatiaľ tu nič nie je.</p>
-      <button class="btn" data-tab="home">Analyzovať skok</button>
+      <button class="btn" data-tab="home">Nahrať video</button>
     </div>
 
     <div class="card hidden" id="res-progress" aria-live="polite">
