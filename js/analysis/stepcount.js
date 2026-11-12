@@ -21,6 +21,7 @@ export const STEP = {
   minStep: 0.17,   // s: faster than this is a skip or a hop, not a run-up step
   maxStep: 0.45,   // s: slower than this is walking in
   hole: 0.15,      // s: missing track longer than this breaks the count
+  max: 18,         // steps: "nikdy nechodíme viac ako 18 krokov" (Stanley, 2026-11-12), both athletes
 };
 
 // Phases of one foot being clearly lower, up to the board touchdown.
@@ -47,8 +48,11 @@ export function lowFootPhases(track, from, to, fps, o = STEP) {
 }
 
 // track: cleaned keypoints. td: board touchdown frame, foot: take-off foot.
-// Returns { count, seen, first, contacts: [{ foot, frame }], why } or null when the board phase
-// isn't the take-off foot (signal not usable on this clip).
+// Returns { count, seen, first, contacts: [{ foot, frame }], why, range } or null when the board
+// phase isn't the take-off foot or the count is more than the longest run-up (a miscount).
+// range: [lo, hi] for the whole run-up when the start isn't seen. It is even, at least what the
+// video shows and at most o.max; when that pins it (IMG_4676: 18 visible, the clip opens on the
+// landing on the mark) the start counts as seen.
 export function countSteps(track, { td, foot, fps, first = 0 }, o = STEP) {
   if (td == null || !(fps > 0)) return null;
   let start = first;
@@ -78,5 +82,12 @@ export function countSteps(track, { td, foot, fps, first = 0 }, o = STEP) {
   // the skip (an even count starts with the other foot), which Stanley doesn't count.
   if (seen && chain.length % 2 === 1 && chain[0].foot === foot) chain = chain.slice(1);
   const contacts = chain.map(p => ({ foot: p.foot, frame: p.a }));
-  return { count: contacts.length, seen, first: contacts[0]?.frame ?? null, contacts, why };
+  if (contacts.length > o.max) return null;
+  const out = { count: contacts.length, seen, first: contacts[0]?.frame ?? null, contacts, why, range: null };
+  if (!seen) {
+    const lo = contacts.length + (contacts.length % 2);
+    if (lo >= o.max) Object.assign(out, { count: o.max, seen: true, why: 'max' });
+    else out.range = [lo, o.max];
+  }
+  return out;
 }

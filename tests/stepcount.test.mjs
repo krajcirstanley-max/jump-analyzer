@@ -61,6 +61,25 @@ test('step count: a clip that starts mid run-up only reports what it shows', () 
   const c = countSteps(t, { td, foot: 'r', fps: FPS });
   assert.equal(c.seen, false);
   assert.equal(c.count, 14); // the first phase is cut by the clip start
+  assert.deepEqual(c.range, [14, 18]);
+});
+
+test('step count: never more than 18, so 18 visible steps are the whole run-up', () => {
+  // IMG_4676: the clip opens on the landing on the mark, then 18 steps
+  const steps = run(30, 18);
+  const td = steps.at(-1)[1];
+  const c = countSteps(track(td + 40, [['r', 0, 8], ...steps]), { td, foot: 'r', fps: FPS });
+  assert.equal(c.count, 18);
+  assert.equal(c.seen, true);
+  assert.equal(c.why, 'max');
+  // 17 visible after a cut first step: the hidden one makes 18
+  const s17 = run(0, 18);
+  const c17 = countSteps(track(s17.at(-1)[1] + 40, s17), { td: s17.at(-1)[1], foot: 'r', fps: FPS });
+  assert.equal(c17.count, 18);
+  assert.equal(c17.seen, true);
+  // more than 18 is a miscount: no line rather than a wrong one
+  const s20 = run(135, 20);
+  assert.equal(countSteps(track(s20.at(-1)[1] + 40, [['l', 100, 106], ['r', 110, 122], ...s20]), { td: s20.at(-1)[1], foot: 'r', fps: FPS }), null);
 });
 
 test('step count: a short hole in the track does not break the rhythm, a long one does', () => {
