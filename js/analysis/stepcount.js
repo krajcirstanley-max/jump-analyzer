@@ -9,9 +9,9 @@
 //
 // Walking back from the board, phases count as long as they alternate feet at a running rhythm.
 // Checked against Stanley's own counts (2026-11-12): IMG_4677 14, IMG_4594 8, IMG_4596 10,
-// IMG_2674 10, IMG_4676 18.
-//  - The run-in onto the mark is often in the same rhythm (IMG_4596, IMG_2674: 4-5 jog steps), so
-//    the mark is found by the feet lifting: low in the run-in, high from the mark (runInSplit).
+// IMG_2674 10, IMG_4676 14.
+//  - The run-in onto the mark is often in the same rhythm (IMG_4596, IMG_2674, IMG_4676: 4-5 jog
+//    steps), so the mark is found by the feet lifting: low in the run-in, high from the mark.
 //  - A slow contact (walking in, IMG_4594) or a quick one on the take-off foot is the mark.
 //  - No mark contact in view (the far start of IMG_4677 is unreadable: four steps where the feet
 //    never come apart in the picture), the first tracked frame, or a hole that breaks the
@@ -26,8 +26,9 @@ export const STEP = {
   hole: 0.15,      // s: missing track longer than this breaks the count
   max: 18,         // steps: "nikdy nechodíme viac ako 18 krokov" (Stanley, 2026-11-12), both athletes
   blip: 0.08,      // s: a lower-foot phase shorter than this is pose noise, not a contact
-  runInPeak: 0.65, // torso lengths: mean foot gap of a run-in stays under this
+  runInPeak: 0.8,  // torso lengths: mean foot gap of a run-in stays under this (0.5-0.7 on our clips)
   runInGap: 0.4,   // torso lengths: the run-up from the mark lifts the feet at least this much more
+  markPeak: 1.0,   // torso lengths: the first phase this high is the mark contact
 };
 
 // Phases of one foot being clearly lower, up to the board touchdown.
@@ -54,22 +55,20 @@ export function lowFootPhases(track, from, to, fps, o = STEP) {
 }
 
 // The mark contact splits a run-in from the run-up when both are in the chain: the run-in is a
-// relaxed jog with the feet low (IMG_4596, IMG_2674: mean foot gap 0.5 torso), the run-up from the
-// mark drives them high (1.2-1.4). On our clips the first high phase is the mark contact itself
-// (the free leg drives up for the first step while the take-off foot is on the mark); when it is
-// the first step instead, the mark is the contact before it. Returns the chain index of the mark
-// contact, or null.
+// relaxed jog with the feet low (peak foot gap 0.3-0.9 torso), and from the mark they drive high.
+// The first phase at 1.0 or more was the mark contact itself on every clip Stanley counted
+// (IMG_4596 1.10, IMG_2674 1.33, IMG_4676 1.41, IMG_4594 1.03: the free leg drives up for the first
+// step while the take-off foot is on the mark). Later run-up steps can dip under 1.0 (IMG_4596:
+// 0.74, 0.92 right after the mark), so it is the first high phase, not a best split. When that
+// first high phase is the first step instead, the mark is the contact before it.
+// Returns the chain index of the mark contact, or null when no run-in is in the chain.
 function runInSplit(chain, foot, o) {
-  const pk = chain.map(p => p.peak), end = chain.length - 3;   // the last steps lean in and lift less
-  const mean = (a, b) => { let t = 0; for (let i = a; i < b; i++) t += pk[i]; return t / (b - a); };
-  const sse = (a, b, m) => { let t = 0; for (let i = a; i < b; i++) t += (pk[i] - m) ** 2; return t; };
-  let best = null;
-  for (let k = 2; k <= end - 4; k++) {
-    const lo = mean(0, k), hi = mean(k, end), cost = sse(0, k, lo) + sse(k, end, hi);
-    if (lo <= o.runInPeak && hi - lo >= o.runInGap && (!best || cost < best.cost)) best = { k, cost };
-  }
-  if (!best) return null;
-  return chain[best.k].foot === foot ? best.k : best.k - 1;
+  const k = chain.findIndex(p => p.peak >= o.markPeak);
+  if (k < 2 || k > chain.length - 5) return null;              // a run-in is at least two contacts
+  const mean = (a, b) => chain.slice(a, b).reduce((t, p) => t + p.peak, 0) / (b - a);
+  const lo = mean(0, k), hi = mean(k, chain.length - 3);         // the last steps lean in and lift less
+  if (lo > o.runInPeak || hi - lo < o.runInGap) return null;
+  return chain[k].foot === foot ? k : k - 1;
 }
 
 // track: cleaned keypoints. td: board touchdown frame, foot: take-off foot.
@@ -79,7 +78,7 @@ function runInSplit(chain, foot, o) {
 // Returns { count, seen, first, contacts: [{ foot, frame }], why, range } or null when the board
 // phase isn't the take-off foot or the count is more than the longest run-up (a miscount).
 // range: [lo, hi] for the whole run-up when the start isn't seen. It is even, at least what the
-// video shows and at most o.max; when that pins it (IMG_4676: 18 visible) the start counts as seen.
+// video shows and at most o.max; when that pins it (17 or 18 visible) the start counts as seen.
 export function countSteps(track, { td, foot, fps, first = 0 }, o = STEP) {
   if (td == null || !(fps > 0)) return null;
   let start = first;
@@ -114,12 +113,11 @@ export function countSteps(track, { td, foot, fps, first = 0 }, o = STEP) {
   let chain = ph.slice(k);
   if (why === 'clip' && chain[0].a <= start + 2) chain = chain.slice(1);
   let seen = false;
-  if (why === 'start' && chain[0].foot === foot) {
-    // The chain starts on the mark, or on the run-in before it.
-    const m = runInSplit(chain, foot, o);
-    chain = chain.slice((m ?? 0) + 1);
-    seen = true;
-  } else if (why === 'start') why = 'blind';             // first step in view, no mark contact before it
+  // A run-in in view gives the mark however the chain ended (IMG_4676 opens on the run-in).
+  const m = runInSplit(chain, foot, o);
+  if (m != null) { chain = chain.slice(m + 1); seen = true; why = 'mark'; }
+  else if (why === 'start' && chain[0].foot === foot) { chain = chain.slice(1); seen = true; }   // the chain starts on the mark
+  else if (why === 'start') why = 'blind';               // first step in view, no mark contact before it
   const contacts = chain.map(p => ({ foot: p.foot, frame: p.a }));
   if (contacts.length > o.max) return null;
   const out = { count: contacts.length, seen, first: contacts[0]?.frame ?? null, contacts, why, range: null };

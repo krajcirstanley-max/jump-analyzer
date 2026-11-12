@@ -66,7 +66,7 @@ test('step count: a clip that starts mid run-up only reports what it shows', () 
 });
 
 test('step count: never more than 18, so 18 visible steps are the whole run-up', () => {
-  // IMG_4676: the clip opens on the landing on the mark, then 18 steps
+  // the clip opens on the landing on the mark, then 18 steps
   const steps = run(30, 18);
   const td = steps.at(-1)[1];
   const c = countSteps(track(td + 40, [['r', 0, 8], ...steps]), { td, foot: 'r', fps: FPS });
@@ -109,6 +109,17 @@ test('step count: a jog onto the mark in the same rhythm is not counted (IMG_459
   const d = countSteps(track(td + 40, [...runIn, ...steps]), { td, foot: 'r', fps: FPS });
   assert.equal(d.count, 10);
   assert.equal(d.first, 165);
+});
+
+test('step count: a clip that opens on the run-in still finds the mark (IMG_4676)', () => {
+  const runIn = run(0, 5).map(([f, a, b]) => [f, a, b, 0.5]);   // the first one is cut by the clip start
+  runIn[4][3] = 1.4;                                              // the mark contact drives the free leg up
+  const steps = run(150, 14);
+  const td = steps.at(-1)[1];
+  const c = countSteps(track(td + 40, [...runIn, ...steps]), { td, foot: 'r', fps: FPS });
+  assert.equal(c.seen, true);
+  assert.equal(c.count, 14);
+  assert.equal(c.first, 150);
 });
 
 test('step count: the first readable step without a mark contact before it is not a seen start (IMG_4677)', () => {
