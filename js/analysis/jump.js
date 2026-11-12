@@ -1,6 +1,7 @@
 // The jump analysis as data: no DOM, importable in Node, so phone and server cannot disagree.
 // Shape: docs/v1-contract.md.
 import { detectContacts, keyFrames, withEvents } from './events.js';
+import { countSteps } from './stepcount.js';
 import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from './metrics.js';
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
@@ -207,6 +208,9 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
     speed: speedCard(flight, by, ev, smooth),
     // The last three contacts in metres and milliseconds, only when the runway gave the scale.
     steps: flight?.ground?.steps ?? null, stepsHeightCm: height ?? null,
+    // Run-up step count from the start to the board (stepcount.js); seen=false when the clip
+    // begins mid run-up and the number is only what the video shows.
+    stepCount: countSteps(clean, { td: ev.takeoff.td, foot: ev.takeoffFoot, fps, first: result.first ?? 0 }),
     profile: profileData(flight, ev),
     lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.comDropBoard } : null,
     replay: {

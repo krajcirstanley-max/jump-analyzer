@@ -46,8 +46,19 @@ function tile(p) {
   </button>`;
 }
 
-function speedHtml(s) {
-  if (!s) return '<h2>Rýchlosť <small>odhad</small></h2><p class="met-why">Z tohto záberu sa rýchlosť nedá odhadnúť.</p>';
+// 1 krok, 2-4 kroky, 5+ krokov
+const kroky = n => `${n} ${n === 1 ? 'krok' : n >= 2 && n <= 4 ? 'kroky' : 'krokov'}`;
+
+// Run-up step count, counted the way Stanley does: every contact from the first step to the board.
+function stepCountHtml(c) {
+  if (!c?.count) return '';
+  return c.seen
+    ? `<p class="note">Rozbeh: <b>${kroky(c.count)}</b> (od prvého kroku po dosku, bez naskočenia)</p>`
+    : `<p class="note">Rozbeh: štart nie je v zábere, vidno posledných <b>${kroky(c.count)}</b></p>`;
+}
+
+function speedHtml(s, sc) {
+  if (!s) return `<h2>Rýchlosť <small>odhad</small></h2><p class="met-why">Z tohto záberu sa rýchlosť nedá odhadnúť.</p>${stepCountHtml(sc)}`;
   const cell = (label, m, extra = '') => `<div><span>${label}</span><b>${shown(m) ? value(m, Math.abs(m.value)) : '–'}</b>${extra}</div>`;
   // The percentage survives a bad metre scale: it is a ratio of two speeds.
   const pctText = s.lossPct == null ? null : `${num(Math.abs(s.lossPct), 0)} %`;
@@ -63,7 +74,7 @@ function speedHtml(s) {
     : cell('Do odrazu', s.last);
   const split2 = s.split11to21 != null ? `<p class="note">11–21 m: <b>${sec(s.split11to21)}</b></p>` : '';
   return `<h2>Rýchlosť <small>${s.cones ? 'z kužeľov' : s.board ? 'z dosky' : 'odhad'}</small></h2>
-    <div class="big">${first}${cell('Odraz', s.takeoff)}${lossCell}</div>${split2}${jumpLine}
+    <div class="big">${first}${cell('Odraz', s.takeoff)}${lossCell}</div>${split2}${stepCountHtml(sc)}${jumpLine}
     ${hiddenOne ? `<p class="met-why">${esc(hiddenReason(hiddenOne))}</p>` : ''}
     <details><summary>Ako isté to je?</summary><p>Istota: <b>${esc(s.sure)}</b>. ${esc(s.note)}</p></details>`;
 }
@@ -163,7 +174,7 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   const s = scoreOf(jump);
   els.score.innerHTML = `<div class="score"><span class="score-n">${s == null ? '–' : Math.round(s)}</span><span class="score-of">/ 100</span>${feel != null ? `<span class="score-feel" data-feel-shown>Pocit ${feel}/5</span>` : '<span class="score-feel" data-feel-shown></span>'}</div>`;
   els.tiles.innerHTML = phases.map(tile).join('');
-  els.speed.innerHTML = speedHtml(jump.speed) + profileHtml(jump.profile) + rhythmHtml(jump.profile) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
+  els.speed.innerHTML = speedHtml(jump.speed, jump.stepCount) + profileHtml(jump.profile) + rhythmHtml(jump.profile) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
   wireCharts(els.speed);
   els.coach.innerHTML = awaitingCoach ? COACH_WAIT : coachHtml(jump.coach);
   els.all.innerHTML = allNumbers(jump);
