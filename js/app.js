@@ -7,7 +7,7 @@ import { analyzeJump } from './analysis/jump.js';
 import { coaching } from './analysis/coach.js';
 import { jointLabels, idealOverlay } from './analysis/labels.js';
 import { idealFor } from './analysis/ideal.js';
-import { renderResult, showCoach } from './analysis/view.js';
+import { renderResult, showCoach, runupHtml } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud } from './cloud.js';
@@ -180,7 +180,7 @@ async function swapAthlete() {
   if (!showJump()) return;
   await saved;
   const newId = resultId;
-  if (old.feel != null) await hist.patchAttempt(newId, { feel: old.feel });
+  if (old.feel != null || old.runup != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null });
   if (newId === oldId) return;
   // The player still reads the old clip: let go of it, drop the old attempt, open the new one.
   runId++;
@@ -591,9 +591,42 @@ function showJump() {
   return { id: rec.id, athlete: resultAthlete, jump, job: rec.coachJob, saved };
 }
 
+// ---------- run-up steps: prefilled, confirmed or changed by the athlete ----------
+// The athlete's last confirmed run-up, kept fresh by renderLists.
+const lastRunup = {};
+let runup = null;            // { value, confirmed, from } for the attempt on screen
+function prefillRunup() {
+  const c = jump?.stepCount, a = resultAthlete ?? athlete, last = lastRunup[a] ?? null;
+  if (jump?.runup != null) return { value: jump.runup, confirmed: true };
+  if (c?.seen) return { value: c.count, from: 'count' };
+  // Start not seen: the same run-up as last time when it fits what the video shows.
+  if (c?.range) return last != null && last >= c.range[0] && last <= c.range[1] ? { value: last, from: 'last' } : { value: c.range[0], from: 'range' };
+  return last != null ? { value: last, from: 'last' } : { value: null };
+}
+const redrawRunup = () => { const el = $('runup'); if (el) el.outerHTML = runupHtml(jump?.stepCount, runup); };
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-runup]');
+  if (!b || !runup || !resultId) return;
+  if (b.dataset.runup === 'ok') {
+    if (runup.value == null) return;
+    const id = resultId, a = resultAthlete;
+    runup = { ...runup, confirmed: true };
+    jump.runup = runup.value;
+    lastRunup[a] = runup.value;
+    redrawRunup();
+    await saved;
+    await hist.patchAttempt(id, { runup: runup.value });
+    return;
+  }
+  const v = Math.max(2, Math.min(18, (runup.value ?? 12) + Number(b.dataset.runup)));
+  runup = { value: v, confirmed: false, from: 'edit' };
+  redrawRunup();
+});
+
 function present(feel, noReplayNote) {
+  runup = prefillRunup();
   renderResult(els, jump, player, {
-    feel, noReplayNote, awaitingCoach,
+    feel, noReplayNote, awaitingCoach, runup,
     onFeel: async n => {
       const id = resultId;
       await saved;
@@ -617,6 +650,7 @@ async function openAttempt(id) {
   if (run !== runId) return;
   jump = rec.jump;
   jump.feel = rec.feel;
+  jump.runup = rec.runup ?? null;
   awaitingCoach = !!rec.coachPending;
   resultId = id;
   showPlace(id, rec.athlete);
@@ -645,6 +679,7 @@ async function openAttempt(id) {
 async function renderLists() {
   const ids = Object.keys(ATHLETES);
   const all = await Promise.all(ids.map(a => hist.listAttempts(a)));
+  ids.forEach((a, i) => { lastRunup[a] = all[i].findLast(r => r.runup != null)?.runup ?? null; });
   const root = $('progress');
   root.innerHTML = ids.map((a, i) => hist.progressHtml(all[i], profiles[a], ATHLETES[a].name, a)).join('');
   root.querySelectorAll('[data-ath]').forEach(hist.wireTrend);

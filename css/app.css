@@ -280,6 +280,16 @@ div.att-open { cursor: default; }
 .rsi-box label { display: block; font-weight: 600; margin-bottom: 8px; }
 .rsi-box input { width: 80px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; margin: 0 4px; }
 .btn.small { min-height: 36px; padding: 0 14px; }
+.runup { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+.runup-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.runup-l { font-weight: 700; margin-right: auto; }
+.runup-step { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); font-size: 22px; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+.runup-step:disabled { opacity: .35; cursor: default; }
+.runup-n { font-size: 28px; font-weight: 800; min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
+.runup-u { color: var(--muted); font-size: 14px; margin-left: -4px; }
+.runup-ok { color: var(--accent); font-weight: 700; font-size: 14px; }
+.runup .note { margin-top: 6px; }
+.runup .btn.primary { width: auto; }
 .rsi-box .note { margin-top: 8px; font-size: 13px; }
 .rsi-bars { display: flex; gap: 2px; align-items: flex-end; height: 70px; margin: 14px 0 4px; }
 .rsi-bars div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }

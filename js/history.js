@@ -55,7 +55,7 @@ export function attemptRecord(jump, { athlete, file, recordedAt }) {
     id: attemptId(athlete, file),
     athlete, file: file.name, size: file.size, recordedAt: recordedAt || now, analysedAt: now,
     score, phases: (jump.phases ?? []).map(p => ({ id: p.id, score: p.score })),
-    metrics, cue: jump.coach?.nextCue ?? null, feel: jump.feel ?? null,
+    metrics, cue: jump.coach?.nextCue ?? null, feel: jump.feel ?? null, runup: jump.runup ?? null,
     jump, media: { clip: null, pose: null },
   };
 }
@@ -318,7 +318,7 @@ function attemptRow(r, n) {
   const legacy = !(r.schema >= SCHEMA);
   const waiting = needsFeel(r);
   const sub = waiting ? 'Čaká na tvoj pocit'
-    : [r.feel ? `Pocit ${r.feel}/5` : null, legacy ? 'starší pokus, bez záznamu' : null, r.cue ? `„${r.cue}“` : null].filter(Boolean).join(' · ');
+    : [r.runup ? `${r.runup} ${r.runup <= 4 ? "kroky" : "krokov"}` : null, r.feel ? `Pocit ${r.feel}/5` : null, legacy ? 'starší pokus, bez záznamu' : null, r.cue ? `„${r.cue}“` : null].filter(Boolean).join(' · ');
   const body = `<b class="att-score">${waiting || r.score == null ? '–' : Math.round(r.score)}</b>
     <span class="att-meta"><span>${n}. skok${fmtTime(r.recordedAt) ? ` · ${esc(fmtTime(r.recordedAt))}` : ''}</span><small>${esc(sub)}</small></span>`;
   return `<div class="att">
