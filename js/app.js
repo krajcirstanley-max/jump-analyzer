@@ -4,6 +4,7 @@ import { FrameSource } from './frames.js';
 import { Player } from './player.js';
 import { skeletonOverlay } from './pose/overlay.js';
 import { analyzeJump } from './analysis/jump.js';
+import { expectedDistance } from './analysis/runup.js';
 import { coaching } from './analysis/coach.js';
 import { jointLabels, idealOverlay } from './analysis/labels.js';
 import { idealFor } from './analysis/ideal.js';
@@ -56,7 +57,7 @@ const otherAthlete = a => Object.keys(ATHLETES).find(x => x !== a);
 // Everyone who may be in a clip, with the numbers-only history the coach gets.
 async function roster() {
   return Promise.all(Object.entries(ATHLETES).map(async ([id, a]) => ({
-    id, sex: a.sex, name: a.name, height: a.height, history: hist.coachHistory(await hist.listAttempts(id)),
+    id, sex: a.sex, name: a.name, height: a.height, pb: profiles[id].pb ?? null, history: hist.coachHistory(await hist.listAttempts(id)),
   })));
 }
 
@@ -180,7 +181,7 @@ async function swapAthlete() {
   if (!showJump()) return;
   await saved;
   const newId = resultId;
-  if (old.feel != null || old.runup != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null });
+  if (old.feel != null || old.runup != null || old.measured != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null, measured: old.measured ?? null });
   if (newId === oldId) return;
   // The player still reads the old clip: let go of it, drop the old attempt, open the new one.
   runId++;
@@ -561,8 +562,8 @@ function setOverlays() {
 }
 
 function showJump() {
-  const who = ATHLETES[resultAthlete ?? athlete];
-  jump = analyzeJump(pose, who.sex, player.ts, { height: who.height });
+  const a = resultAthlete ?? athlete, who = ATHLETES[a];
+  jump = analyzeJump(pose, who.sex, player.ts, { height: who.height, pb: profiles[a].pb });
   setOverlays();
   player.refresh();
   if (jump.error) {
@@ -597,13 +598,49 @@ const lastRunup = {};
 let runup = null;            // { value, confirmed, from } for the attempt on screen
 function prefillRunup() {
   const c = jump?.stepCount, a = resultAthlete ?? athlete, last = lastRunup[a] ?? null;
-  if (jump?.runup != null) return { value: jump.runup, confirmed: true };
-  if (c?.seen) return { value: c.count, from: 'count' };
-  // Start not seen: the same run-up as last time when it fits what the video shows.
-  if (c?.range) return last != null && last >= c.range[0] && last <= c.range[1] ? { value: last, from: 'last' } : { value: c.range[0], from: 'range' };
-  return last != null ? { value: last, from: 'last' } : { value: null };
+  const pick = () => {
+    if (jump?.runup != null) return { value: jump.runup, confirmed: true };
+    if (c?.seen) return { value: c.count, from: 'count' };
+    // Start not seen: the same run-up as last time when it fits what the video shows.
+    if (c?.range) return last != null && last >= c.range[0] && last <= c.range[1] ? { value: last, from: 'last' } : { value: c.range[0], from: 'range' };
+    return last != null ? { value: last, from: 'last' } : { value: null };
+  };
+  return withExpected(pick());
+}
+// What a full effort from that run-up should reach, from the athlete's PB (runup.js).
+function withExpected(r) {
+  const pb = profiles[resultAthlete ?? athlete]?.pb ?? null;
+  return { ...r, pb, judged: jump?.runupJudged ?? null, measured: jump?.measured ?? null, expected: r.value != null && r.value < 18 ? expectedDistance(r.value, pb) : null };
 }
 const redrawRunup = () => { const el = $('runup'); if (el) el.outerHTML = runupHtml(jump?.stepCount, runup); };
+
+// The confirmed run-up differs from the one the numbers were judged at: judge them again (the
+// speed-dependent norms move with it). The coaching text stays as it was written.
+async function rejudge(id, v) {
+  if (!pose || !jump || jump.error || (jump.runupJudged ?? null) === v) return;
+  const a = resultAthlete, who = ATHLETES[a];
+  const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v });
+  if (next.error || id !== resultId) return;
+  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, runup: v });
+  if (player) { setOverlays(); player.refresh(); }
+  await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump });
+  if (id === resultId) present(jump.feel ?? null);
+  renderLists();
+}
+
+// The distance from the tape, if the athlete wants to write it in. Blank clears it.
+document.addEventListener('change', async e => {
+  const f = e.target.closest('[data-measured]');
+  if (!f || !resultId || !jump) return;
+  const x = parseFloat(String(f.value).trim().replace(',', '.'));
+  const v = x >= 1 && x <= 12 ? Math.round(x * 100) / 100 : null;
+  f.value = v == null ? '' : v.toFixed(2).replace('.', ',');
+  jump.measured = v;
+  const id = resultId;
+  await saved;
+  await hist.patchAttempt(id, { measured: v });
+  renderLists();
+});
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-runup]');
   if (!b || !runup || !resultId) return;
@@ -616,10 +653,11 @@ document.addEventListener('click', async e => {
     redrawRunup();
     await saved;
     await hist.patchAttempt(id, { runup: runup.value });
+    rejudge(id, runup.value);
     return;
   }
   const v = Math.max(2, Math.min(18, (runup.value ?? 12) + Number(b.dataset.runup)));
-  runup = { value: v, confirmed: false, from: 'edit' };
+  runup = withExpected({ value: v, confirmed: false, from: 'edit' });
   redrawRunup();
 });
 
@@ -651,6 +689,7 @@ async function openAttempt(id) {
   jump = rec.jump;
   jump.feel = rec.feel;
   jump.runup = rec.runup ?? null;
+  jump.measured = rec.measured ?? null;
   awaitingCoach = !!rec.coachPending;
   resultId = id;
   showPlace(id, rec.athlete);

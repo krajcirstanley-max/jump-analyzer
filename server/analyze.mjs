@@ -55,7 +55,7 @@ export function coachClient({ token, localLogin = false } = {}) {
 // or lose the numbers. coachFallback is what to show if the coaching step never comes back.
 // athletes: [{ id, sex, name, height, history }] when the app leaves it to the server to tell who
 // is in the clip; the one found replaces sex, name, height and history.
-export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, history = [], athletes = null, client, onProgress, onResult }) {
+export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, pb = null, history = [], athletes = null, client, onProgress, onResult }) {
   const t = { start: performance.now() };
   const mark = k => { t[k] = Math.round(performance.now() - t.start); };
   const meta = probe(clip);
@@ -73,7 +73,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     // where to look. Without a client, or if it fails, the pose track's own frames stand.
     let who = null;
     if (client) {
-      const guess = analyzeJump(fromWire(result), sex, meta.ts, { height });
+      const guess = analyzeJump(fromWire(result), sex, meta.ts, { height, pb });
       // Who is in the clip, read alongside the key frames.
       const whoP = athletes?.length > 1
         ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, near: guess.error ? null : guess.takeoff.td, athletes, client })
@@ -96,13 +96,13 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     }
     if (athletes?.length > 1) {
       const a = athletes.find(x => x.id === who?.id);
-      if (a) ({ sex, name, height = null, history = [] } = a);
+      if (a) ({ sex, name, height = null, pb = null, history = [] } = a);
       result.who = { id: a?.id ?? null, said: who?.said ?? null, ms: who?.ms, error: who?.error };
     }
     // Metres from the runway: the take-off line, the sand and the runway lines in every frame.
     // Without them the analysis falls back to the gravity fit.
     {
-      const pre = analyzeJump(fromWire(result), sex, meta.ts, { height });
+      const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb });
       if (!pre.error) {
         onProgress?.({ stage: 'ground', done: 0, total: 1 });
         try {
@@ -117,7 +117,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
       }
     }
     onProgress?.({ stage: 'analysis', done: 0, total: 1 });
-    const jump = analyzeJump(fromWire(result), sex, meta.ts, { height });
+    const jump = analyzeJump(fromWire(result), sex, meta.ts, { height, pb });
     mark('analysis');
     const coachFallback = jump.error ? null : await writeCoaching({ jump, name, sex });
     await onResult?.({ result, coachFallback, ms: t });

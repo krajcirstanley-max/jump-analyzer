@@ -52,8 +52,10 @@ const kroky = n => `${n} ${n === 1 ? 'krok' : n >= 2 && n <= 4 ? 'kroky' : 'krok
 // Run-up step count, counted the way Stanley does: every contact from the mark to the board.
 // The number is prefilled and the athlete confirms it or changes it in steps of 2 (Stanley,
 // 2026-11-12: "nech je predvyplnené a ja len potvrdím alebo zmením"); run-ups are even, at most 18.
-// c: the detected count (stepcount.js). r: { value, confirmed, from } where from says where the
-// prefilled number came from: 'count', 'range', 'last' (the athlete's last confirmed run-up).
+// c: the detected count (stepcount.js). r: { value, confirmed, from, expected, pb, measured } where
+// from says where the prefilled number came from: 'count', 'range', 'last' (the athlete's last
+// confirmed run-up); expected: runup.js expectedDistance for that run-up.
+const metres = x => `${num(x, 2)} m`;
 export function runupHtml(c, r) {
   const v = r?.value ?? null;
   const seenLine = c?.seen ? `Appka napočítala ${kroky(c.count)}.`
@@ -69,6 +71,9 @@ export function runupHtml(c, r) {
       ${r?.confirmed ? '<span class="runup-ok">✓ potvrdené</span>' : `<button class="btn small primary" data-runup="ok"${v == null ? ' disabled' : ''}>Potvrdiť</button>`}
     </div>
     <p class="note">${seenLine}${fromLine} Počíta sa od značky po dosku vrátane.</p>
+    ${r?.expected ? `<p class="note runup-exp">Naplno z ${kroky(r.expected.steps)} je strop okolo <b>${metres(r.expected.mid)}</b> (${num(r.expected.lo, 2)}–${num(r.expected.hi, 2)} m), ${Math.round(r.expected.pct * 100)} % tvojho PB ${metres(r.expected.pb)}.${r.judged === r.value ? ' Uhol odrazu, koleno a rýchlosti sú posudzované pre tento rozbeh.' : ' Po potvrdení sa uhol odrazu, koleno a rýchlosti posúdia pre tento rozbeh.'}</p>`
+      : v >= 6 && v < 18 && !(r?.pb > 0) ? '<p class="note runup-exp">Zapíš PB v Progrese a appka povie, koľko by mal skok z tohto rozbehu merať.</p>' : ''}
+    <label class="measured"><span>Nameraná dĺžka</span><input data-measured type="text" inputmode="decimal" autocomplete="off" placeholder="nepovinné" value="${r?.measured != null ? num(r.measured, 2) : ''}"><span>m</span></label>
   </div>`;
 }
 

@@ -4,6 +4,7 @@
 
 import { fromWire } from './cloud.js';
 import { sessions, skoky, dayLabel } from './sessions.js';
+import { runupTable, FULL } from './analysis/runup.js';
 
 const DB = 'jump-analyzer', STORE = 'attempts', BLOBS = 'blobs', DIR = 'attempts';
 export const SCHEMA = 2;   // records without `schema` predate v1: numbers only, no replay
@@ -46,16 +47,24 @@ async function tx(mode, fn, store = STORE) {
 // One record per athlete + clip: re-analysing the same clip replaces it.
 export const attemptId = (athlete, file) => `${athlete}:${file.name}:${file.size}`;
 
+// The numbers a record keeps from a jump (also after the jump is judged again for its run-up).
+export function attemptNumbers(jump) {
+  return {
+    metrics: Object.fromEntries(jump.metrics.map(m => [m.key, { v: m.value, s: m.status }])),
+    score: typeof jump.score === 'number' ? jump.score : jump.score?.score ?? null,
+    phases: (jump.phases ?? []).map(p => ({ id: p.id, score: p.score })),
+  };
+}
+
 export function attemptRecord(jump, { athlete, file, recordedAt }) {
-  const metrics = Object.fromEntries(jump.metrics.map(m => [m.key, { v: m.value, s: m.status }]));
-  const score = typeof jump.score === 'number' ? jump.score : jump.score?.score ?? null;
+  const { metrics, score } = attemptNumbers(jump);
   const now = new Date().toISOString();
   return {
     schema: SCHEMA,
     id: attemptId(athlete, file),
     athlete, file: file.name, size: file.size, recordedAt: recordedAt || now, analysedAt: now,
     score, phases: (jump.phases ?? []).map(p => ({ id: p.id, score: p.score })),
-    metrics, cue: jump.coach?.nextCue ?? null, feel: jump.feel ?? null, runup: jump.runup ?? null,
+    metrics, cue: jump.coach?.nextCue ?? null, feel: jump.feel ?? null, runup: jump.runup ?? null, measured: jump.measured ?? null,
     jump, media: { clip: null, pose: null },
   };
 }
@@ -329,6 +338,20 @@ function attemptRow(r, n) {
 
 const metresField = x => (x == null ? '' : x.toFixed(2).replace('.', ','));
 
+// Run-up length against distance, the athlete's own short-run-up curve (Béres 2014 method): best and
+// mean per step count, as % of PB next to what the study expects, and the full run-up it points to.
+function runupCard(records, pb, name) {
+  const t = runupTable(records, pb);
+  if (!t.rows.length) return `<div class="card"><h2>Rozbeh a dĺžka</h2><p class="note">Keď potvrdíš počet krokov pri skokoch, tu sa ukáže, koľko skáčeš z ktorého rozbehu.</p></div>`;
+  const pct = x => (x == null ? '–' : `${Math.round(x * 100)} %`);
+  const rows = t.rows.map(r => `<tr><td>${r.steps}</td><td>${r.jumps}</td><td><b>${metres(r.best)}</b></td><td>${metres(r.mean)}</td><td>${pct(r.pctPb)}</td><td>${pct(r.expectedPct)}</td></tr>`).join('');
+  const full = t.full ? `<p class="note">Z týchto skokov vychádza plný rozbeh (${FULL} krokov) na <b>${metres(t.full)}</b>${pb ? ` (PB ${metres(pb)})` : ''}. Odhad podľa krivky z výskumu, spresní sa s každým ďalším rozbehom.</p>` : '';
+  const src = t.rows.some(r => r.taped) ? 'Dĺžka z pásma, kde je zapísaná, inak z videa.' : 'Dĺžka z videa; nameranú z pásma zapíšeš pri skoku.';
+  return `<div class="card"><h2>Rozbeh a dĺžka</h2>
+    <div class="runup-table"><table><thead><tr><th>Kroky</th><th>Skokov</th><th>Najlepší</th><th>Priemer</th><th>% PB</th><th>Čakať</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${full}<p class="note">${src} „Čakať“ je podiel plného výkonu, ktorý z toho rozbehu dosiahli skokani vo výskume (naplno).</p></div>`;
+}
+
 // One athlete's block on Progres (both are shown, one after the other). id: the athlete's key,
 // for the PB and goal fields.
 export function progressHtml(records, profile, name, id) {
@@ -350,6 +373,7 @@ export function progressHtml(records, profile, name, id) {
     <h2 class="ath-name">${esc(name)}</h2>
     <div class="card"><h2>Skóre</h2>${trendChart(scored)}</div>
     <div class="card"><h2>PB a cieľ</h2><div class="pb-fields">${field('pb', 'PB (m)')}${field('goal', 'Cieľ (m)')}</div>${pbBarHtml(profile, note)}</div>
+    ${runupCard(records, profile.pb, name)}
     <div class="card"><h2>Fázy</h2><div class="trends">${rows}</div></div>
     <div class="card"><h2>Tréningy</h2><div class="atts">${list}</div></div>
   </section>`;

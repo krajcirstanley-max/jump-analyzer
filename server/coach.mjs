@@ -106,6 +106,8 @@ Honesty. Base fixes on measurements with status low or high. Never mention a met
 Look at the 5 images for what the numbers can't show: arm action, posture, head position, where the eyes go. A fix based only on an image has metricKey null and must describe something clearly visible. These are single 2D frames from one phone: they can't show force, foot pressure, or anything out of the camera plane, and motion blur or a slightly wrong moment is common. When you rely on a frame, say so ("na snímke to vyzerá"), never report a joint angle you read off an image, and never let an image overrule a measured number.
 Previous jumps are context. If the same fault keeps coming back, say that.
 
+Run-up length. Every jump is a full effort, but often from a shortened run-up (runup in the facts: the steps from the mark to the board, and what a full effort from that run-up should reach). Where runup.steps is given, the norms for take-off angle, knee at touchdown, speeds and speed losses are already adjusted to that run-up: a shorter run-up gives a higher take-off angle, a more bent knee and a smaller speed loss, and that is normal, not a fault. Judge the distance only against runup.expected (a share of the athlete's own PB from that many steps), never against competition distances. If runup.expected is missing, don't judge the distance at all. Mention the run-up length in the take when the distance is discussed (e.g. „z 10 krokov").
+
 Cues. Copy one exactly from this list, or use null:
 ${APPROVED_CUES.map(c => `- ${c}`).join('\n')}
 „${MISKA_ONLY_CUE}" is only for Miška, and it replaces „predposledný naplocho" for her. Cues are external images. Numbers go in the body, never in the cue. A landing or flight fix has no cue.
@@ -120,12 +122,26 @@ Feel before clock: end the first fix's why with one short sentence telling the a
 
 Write it the way a coach talks at the pit, not like a report. Use "ty". Vary the sentence length, and a short fragment is fine. Lead with the specific thing you saw, not a topic sentence. Don't end a paragraph by restating it. No parallel lists of three, no "je dôležité", "treba poznamenať", "celkovo", "navyše", "v neposlednom rade", "kľúčové", no praise for its own sake. Numbers belong in the body with the norm next to them, written the Slovak way (0,12 s). Use the athlete's grammatical gender in past-tense verbs. Direct quotes stay in their source language. Never use the word AI or any product name.`;
 
+// The run-up the numbers were judged at and what a full effort from it should reach (runup.js).
+function runupFacts(jump) {
+  const sc = jump.stepCount;
+  if (!jump.runupJudged && !sc) return null;
+  const e = jump.expected;
+  const r2 = x => Math.round(x * 100) / 100;
+  return {
+    steps: jump.runupJudged ?? null,
+    counted: sc ? { count: sc.count, startSeen: sc.seen, wholeRunupRange: sc.range ?? null } : null,
+    expected: e ? { shareOfFullPb: r2(e.pct), metres: r2(e.mid), band: [r2(e.lo), r2(e.hi)], pb: e.pb } : null,
+  };
+}
+
 function userContent({ jump, snapshots, name, sex, history, errors, previous }) {
   const metrics = (jump.metrics ?? []).filter(m => m.status !== 'hidden')
     .map(({ key, label, unit, value, norm, status, score, target, estimate }) => ({ key, label, unit, value, norm, status, score, target, estimate }));
   const hidden = (jump.metrics ?? []).filter(m => m.status === 'hidden').map(m => m.key);
   const phases = (jump.phases ?? []).map(({ id, label, score }) => ({ id, label, score }));
-  const facts = { athlete: name, sex, attempt: jump.kind === 'runthrough' ? 'run-through (pop-up): lands on one foot and runs out of the pit; there is no landing and no full flight, so do not coach the landing, flight time or distance' : 'full jump', score: jump.score?.score ?? null, phases, speed: jump.speed ?? null, metrics, hiddenDoNotMention: hidden, previousJumps: history ?? [] };
+  const facts = { athlete: name, sex, attempt: jump.kind === 'runthrough' ? 'run-through (pop-up): lands on one foot and runs out of the pit; there is no landing and no full flight, so do not coach the landing, flight time or distance' : 'full jump', score: jump.score?.score ?? null, phases, speed: jump.speed ?? null, metrics, hiddenDoNotMention: hidden, previousJumps: history ?? [],
+    runup: runupFacts(jump) };
 
   const out = [];
   for (const s of snapshots ?? []) {

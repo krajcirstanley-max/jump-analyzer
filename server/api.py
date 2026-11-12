@@ -78,7 +78,10 @@ def parse_athletes(raw):
         history = a.get("history") or []
         if not isinstance(history, list):
             raise ValueError
-        out.append({"id": aid, "sex": sex, "name": name, "history": history[-5:], **({"height": height} if height else {})})
+        pb = a.get("pb") or 0
+        if not isinstance(pb, (int, float)) or not 1 <= pb <= 12:
+            pb = 0  # a PB outside 1-12 m is a typo; no distance expectation then
+        out.append({"id": aid, "sex": sex, "name": name, "history": history[-5:], **({"height": height} if height else {}), **({"pb": pb} if pb else {})})
     return out
 
 

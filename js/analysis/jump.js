@@ -2,6 +2,7 @@
 // Shape: docs/v1-contract.md.
 import { detectContacts, keyFrames, withEvents } from './events.js';
 import { countSteps } from './stepcount.js';
+import { adjustForRunup, judgedSteps, expectedDistance } from './runup.js';
 import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from './metrics.js';
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
@@ -172,7 +173,9 @@ function speedCard(flight, by, ev, track) {
 
 // ts: the clip's real frame timestamps, used when the result doesn't carry a frame rate.
 // height: the athlete's height in cm (centre-of-mass lowering in cm); optional.
-export function analyzeJump(result, sex, ts, { height = null } = {}) {
+// pb: the athlete's full run-up PB in metres; runup: the run-up steps the athlete confirmed. With a
+// run-up shorter than the full one the speed-dependent norms move to it (runup.js).
+export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null } = {}) {
   const clean = result.clean, smooth = result.smooth;
   if (!clean || !smooth) return { error: 'Chýba vyčistený záznam pohybu.' };
   const fps = result.fps ?? (ts ? (ts.length - 1) / (ts.at(-1) - ts[0]) : NaN);
@@ -196,7 +199,11 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
   const runThrough = result.events?.kind === 'runthrough';
   const base = [...measure(sharpen(clean, fps), ev, fps, sex, dir, clean), ...flightMetrics(flight, ev, sex)];
-  const metrics = [...base, ...derivedMetrics(base, ev, flight, fps, sex, height)]
+  // Run-up step count from the start to the board (stepcount.js); seen=false when the clip
+  // begins mid run-up and the number is only what the video shows.
+  const stepCount = countSteps(clean, { td: ev.takeoff.td, foot: ev.takeoffFoot, fps, first: result.first ?? 0 });
+  const steps = judgedSteps(runup, stepCount);
+  const metrics = adjustForRunup([...base, ...derivedMetrics(base, ev, flight, fps, sex, height)], steps, { pb })
     .filter(m => !(runThrough && NO_LANDING.has(m.key))).map(finish);
   const score = techniqueScore(metrics);
   const by = Object.fromEntries(metrics.map(m => [m.key, m]));
@@ -208,9 +215,9 @@ export function analyzeJump(result, sex, ts, { height = null } = {}) {
     speed: speedCard(flight, by, ev, smooth),
     // The last three contacts in metres and milliseconds, only when the runway gave the scale.
     steps: flight?.ground?.steps ?? null, stepsHeightCm: height ?? null,
-    // Run-up step count from the start to the board (stepcount.js); seen=false when the clip
-    // begins mid run-up and the number is only what the video shows.
-    stepCount: countSteps(clean, { td: ev.takeoff.td, foot: ev.takeoffFoot, fps, first: result.first ?? 0 }),
+    stepCount,
+    // The run-up the norms were judged at, and the distance a full effort from it should reach.
+    runupJudged: steps, expected: steps ? expectedDistance(steps, pb) : null,
     profile: profileData(flight, ev),
     lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.comDropBoard } : null,
     replay: {

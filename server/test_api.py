@@ -396,13 +396,14 @@ def test_sweep_removes_only_old_files():
 def test_athletes_roster_goes_to_the_job():
     import urllib.parse as u
     e = Env()
-    roster = [{"id": "stanley", "sex": "male", "name": "Stanley", "height": 186, "history": [{"score": i} for i in range(8)]},
+    roster = [{"id": "stanley", "sex": "male", "name": "Stanley", "height": 186, "pb": 7.0, "history": [{"score": i} for i in range(8)]},
               {"id": "miska", "sex": "female", "name": "Miška", "height": 500}]
     assert e.post(q="sex=male&athletes=" + u.quote(json.dumps(roster))).status_code == 200
     got = e.started[0][2]["athletes"]
     assert [a["id"] for a in got] == ["stanley", "miska"]
     assert [h["score"] for h in got[0]["history"]] == [3, 4, 5, 6, 7]
     assert got[0]["height"] == 186 and "height" not in got[1]   # nonsense height dropped
+    assert got[0]["pb"] == 7.0 and "pb" not in got[1]
 
 
 def test_bad_athletes_roster_is_refused():
