@@ -92,14 +92,19 @@ export async function measureMotion({ getRGBA, W, H, track, from, to }) {
     // one just under the feet. A close athlete fills the width, so each is cut to what is in frame.
     const toes = ['l', 'r'].map(s => pt(kp, `${s}bigtoe`)).filter(Boolean);
     const low = (toes.length ? Math.max(...toes.map(p => p[1])) : box.y1) / d;
-    const sh = Math.max(9, Math.round(0.12 * hs)), gap = 0.12 * hs, R = Math.max(6, Math.round(0.08 * hs)), edge = R + 2;
+    const sh = Math.max(9, Math.round(0.12 * hs)), gap = 0.08 * hs, R = Math.max(6, Math.round(0.08 * hs)), edge = R + 2;
     const strips = [];
-    const lx0 = edge, lx1 = box.x0 / d - gap, rx0 = box.x1 / d + gap, rx1 = A.w - edge;
+    // Beside the feet, not beside the whole body: filmed close from the front (RSI, IMG_3521) the
+    // body and arms fill the width and no strip beside them fits, while the floor next to the
+    // feet is in view.
+    const fp = ['l', 'r'].flatMap(s => ['bigtoe', 'smalltoe', 'heel', 'ank'].map(n => pt(kp, s + n))).filter(Boolean);
+    const fx0 = fp.length ? Math.min(...fp.map(p => p[0])) : box.x0, fx1 = fp.length ? Math.max(...fp.map(p => p[0])) : box.x1;
+    const lx0 = edge, lx1 = fx0 / d - gap, rx0 = fx1 / d + gap, rx1 = A.w - edge;
     const sw = x => Math.min(Math.round(0.6 * hs), Math.floor(x));
     if (lx1 - lx0 >= 0.25 * hs) { const w = sw(lx1 - lx0); strips.push([lx1 - w / 2, low + 0.03 * hs, w]); }
     if (rx1 - rx0 >= 0.25 * hs) { const w = sw(rx1 - rx0); strips.push([rx0 + w / 2, low + 0.03 * hs, w]); }
     const by = low + 0.06 * hs + sh / 2;
-    if (by + sh / 2 + edge < A.h) strips.push([(box.x0 + box.x1) / 2 / d, by, Math.min(Math.round(0.8 * hs), A.w - 2 * edge)]);
+    if (by + sh / 2 + edge < A.h) strips.push([(fx0 + fx1) / 2 / d, by, Math.min(Math.round(0.8 * hs), A.w - 2 * edge)]);
     const gs = [];
     for (const [cx, cy, w] of strips) {
       const m = match(A, B, cx, cy, w, sh, cx + g0[0] / d, cy + g0[1] / d, R, 2);

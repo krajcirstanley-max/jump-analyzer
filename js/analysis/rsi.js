@@ -208,3 +208,66 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     edgeMs: 1000 / fps, rsiErrPct: fps >= 200 ? [4, 6] : [7, 12],
   };
 }
+
+// Contact edges from the toe against the floor (server/sprint.mjs measureMotion + sprint.js
+// footContacts): a foot is down only while its toe stands still relative to the floor beside it.
+// The level-and-stillness rule above counted the frames just before touchdown and after toe-off
+// as ground: IMG_3521 read 283 ms on the ground and 617 ms in the air where Stanley counted
+// 240 / 640 (2026-11-14), the same mistake the sprint had (0.16 s by eye, 0.10 s by toe motion).
+// toe: [{ foot, a, b }] with a the first and b the last frame on the ground.
+// land: touchdown frames only (touchdowns below): landing on bent legs the toe keeps moving after
+// it lands, so a still-run rule misses it.
+// Edges move at most 8 frames: a toe that stood still on the box and then on the floor must not
+// pull the floor contact back to the start of the clip (IMG_4186).
+export function refineEdges(r, toe, fps, land = toe) {
+  if (!r?.events?.length || !toe?.length) return r;
+  const G0 = 9.81, W = 8;
+  const edge = (e, list) => {
+    const near = list.filter(c => c.b >= e.td - W && c.a <= e.to + W);
+    if (!near.length) return null;
+    return { td: Math.max(e.td - W, Math.min(...near.map(c => c.a))), to: Math.min(e.to + W, Math.max(...near.map(c => c.b))) };
+  };
+  const events = r.events.map((e, k) => {
+    if (e.onBox) return { ...e };
+    const full = edge(e, toe);
+    const out = { ...e, ...(full ?? {}) };
+    // The landing after a rebound: its touchdown frame, from the foot that jumped when one did
+    // (Miška's free leg swung down at 366, her right foot landed at 368).
+    const jumped = r.jumps.find(j => j.td === r.events[k - 1]?.td);
+    if (jumped) {
+      const first = edge(e, land.filter(c => jumped.feet.length > 1 || c.foot === jumped.feet));
+      if (first) out.td = first.td;
+    }
+    // Straight off the box with no flight between, the toe stood still on the box and then on the
+    // floor: the level step found the touchdown (IMG_4186: 288), the toe can't move it earlier.
+    const prev = r.events[k - 1];
+    if (prev?.onBox && prev.to >= e.td - 1) out.td = Math.max(out.td, e.td);
+    return out;
+  });
+  const jumps = r.jumps.map(j => {
+    const k = r.events.findIndex(e => e.td === j.td), e = events[k], next = events[k + 1];
+    if (!e || !next || e.onBox) return j;
+    const contactMs = ((e.to - e.td + 1) / fps) * 1000, flightMs = ((next.td - e.to - 1) / fps) * 1000;
+    if (!(contactMs > 40 && flightMs > 60)) return j;
+    const t = flightMs / 1000, h = (G0 * t * t) / 8;
+    return { ...j, raw: { td: j.td, to: j.to, contactMs: j.contactMs, flightMs: j.flightMs }, td: e.td, to: e.to,
+      contactMs, flightMs, heightCm: h * 100, rsi: h / (contactMs / 1000), ri: flightMs / contactMs, slow: contactMs > 250, edges: 'toe' };
+  });
+  const best = jumps.reduce((b, j) => (!b || j.rsi > b.rsi ? j : b), null);
+  const top5 = jumps.length >= 5 ? [...jumps].sort((a, b) => b.rsi - a.rsi).slice(0, 5) : null;
+  const best5 = top5 && { rsi: top5.reduce((a, j) => a + j.rsi, 0) / 5, ri: top5.reduce((a, j) => a + j.ri, 0) / 5, contactMs: top5.reduce((a, j) => a + j.contactMs, 0) / 5 };
+  return { ...r, jumps, best, best5, events: events.map(e => ({ ...e, ms: Math.round(((e.to - e.td + 1) / fps) * 1000) })) };
+}
+
+// Touchdowns from the toe against the floor: the first frame where a toe that was coming down
+// (over 0.4 %h per 1/120 s for two frames) stops (0.2 or less). Landing on bent legs the toe
+// keeps creeping afterwards, so how long it then stays still says nothing (IMG_3521 landed at 202
+// on one server run and "208" on the next with a still-run rule).
+export function touchdowns(motion, foot, fps) {
+  const k = 120 / fps, vy = motion.map(m => (m?.g && m[foot] ? ((m[foot][1] - m.g[1]) / m.h) * 100 * k : null));
+  const out = [];
+  for (let i = 2; i < motion.length; i++) {
+    if (vy[i] != null && vy[i] <= 0.2 && vy[i - 1] > 0.4 && vy[i - 2] > 0.4) out.push({ foot, a: motion[i].f, b: motion[i].f });
+  }
+  return out;
+}

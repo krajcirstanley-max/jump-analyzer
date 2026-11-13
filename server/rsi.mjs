@@ -4,7 +4,10 @@
 import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
-import { rsiAnalysis } from '../js/analysis/rsi.js';
+import { rsiAnalysis, refineEdges, touchdowns } from '../js/analysis/rsi.js';
+import { footContacts, SPRINT } from '../js/analysis/sprint.js';
+import { measureMotion } from './sprint.mjs';
+import { applyH, invertH } from '../js/analysis/homography.js';
 import { contactSheet } from './grid.mjs';
 import { probe, openFrames } from './frames.mjs';
 import { trackCamera } from './ground.mjs';
@@ -66,8 +69,38 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       who = { id: a?.id ?? null, said: who.said ?? null, ms: who.ms, error: who.error };
     }
     onProgress?.({ stage: 'rsi', done: 0, total: 1 });
-    const rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
+    let rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
     if (rsi.error) return { error: rsi.error };
+    // Contact edges from the toe against the floor, as for sprints (refineEdges explains why).
+    let motion = null, toeError = null;
+    try {
+      const track = fromWire(wire).clean;
+      const it = frames.sequential(res.first, res.last, 1);
+      let at = -1, cur = null;
+      const getRGBA = async f => { while (at < f) { const x = await it.next(); if (x.done) throw new Error('clip ended'); at = x.value.i; cur = x.value.rgba; } return cur; };
+      try { motion = await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); } finally { await it.return?.(); }
+      // Filmed close from the front, no floor strip fits beside the feet while they are down
+      // (IMG_3521, frames 96-125). There the camera's own motion, from the whole background, stands
+      // in for the floor's: a still phone moved nothing.
+      const keys = Object.keys(cam?.h ?? {}).map(Number).sort((a, b) => a - b);
+      for (const m of motion) {
+        if (!m || m.g) continue;
+        const a = keys.findLast(k => k <= m.f), b = keys.find(k => k > m.f);
+        const p = m.l?.slice(3, 5) ?? m.r?.slice(3, 5);
+        if (!cam) m.g = [0, 0];
+        else if (a != null && b != null && p) {
+          const q = applyH(invertH(cam.h[a]), p), pa = applyH(cam.h[a], q), pb = applyH(cam.h[b], q);
+          m.g = [(pb[0] - pa[0]) / (b - a), (pb[1] - pa[1]) / (b - a)];
+        }
+        if (m.g) m.gFrom = 'camera';
+      }
+      // Tighter than for sprints: the phone hardly moves on a drop jump, so the floor estimate is
+      // clean, and 0.55 %h took a toe still sinking for planted (IMG_3521 frame 94). 0.12 gives
+      // 250 ms / 642 ms there; Stanley counted 240 / 640 by hand (2026-11-14).
+      const toe = ['l', 'r'].flatMap(s => footContacts(motion, s, meta.ts, meta.fps, { ...SPRINT, planted: 0.12 }));
+      const land = ['l', 'r'].flatMap(s => touchdowns(motion, s, meta.fps));
+      rsi = refineEdges(rsi, toe, meta.fps, land);
+    } catch (e) { toeError = String(e?.message || e).slice(0, 200); }
     // Claude names the drill; the pattern of contacts is the fallback and the cross-check.
     let named = null, nameError = null;
     if (client) {
@@ -91,6 +124,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       // asked for only when the video could not show it (Stanley 2026-11-13: "ak nie tak treba
       // napísať že nevieš, treba dopísať").
       askBox: usesBox && boxCm == null && !boxSeen,
+      toeError, motion: motion?.map(m => m && { f: m.f, h: +m.h.toFixed(1), g: m.g && m.g.map(v => +v.toFixed(2)), l: m.l && m.l.slice(0, 3).map(v => +v.toFixed(2)), r: m.r && m.r.slice(0, 3).map(v => +v.toFixed(2)) }),
       W: meta.W, H: meta.H, N: meta.N, ts: wire.ts, ms: Math.round(performance.now() - t0),
     };
     return { result };
