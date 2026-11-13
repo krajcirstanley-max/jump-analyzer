@@ -84,3 +84,11 @@ test('a failed track match takes its neighbours\' motion', () => {
   near(out[1].g[0], -11, 0.6, 'filled');
   assert.ok(out[4].g[0] < 0, 'outlier replaced by the median');
 });
+
+test('the same clip through the server (GPU pose): no contact split by a bad pan estimate', async () => {
+  const m = load('3480-gpu');
+  const v = sprintFromMotion({ motion: smoothGround(m.motion), ts: m.ts, fps: m.fps });
+  assert.equal(v.steps.length, 14);
+  assert.ok(v.steps.every(s => s.contact >= 0.09), v.steps.map(s => s.contact).join(' '));
+  near(v.steps[10].frames[0], 1497, 1.5, 'touchdown 11');
+});

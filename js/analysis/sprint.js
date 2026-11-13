@@ -8,7 +8,7 @@
 // Checked by hand on IMG_3479 (Stanley, 20 m fly) and IMG_3480 (Miška, 20 m accel), 2026-11-13.
 
 export const SPRINT = {
-  planted: 0.45,  // %h per 1/120 s: the toe's vertical motion relative to the track while it is down
+  planted: 0.55,  // %h per 1/120 s: the toe's vertical motion relative to the track while it is down (0.45 split a GPU-pose contact on 0.46-0.47)
   plantedX: 4,    // the same sideways, loose: only to reject a swinging foot (5-10 %h) when its height pauses; the track match is noisier along the pan
   minContact: 4,  // frames at 120 fps (0.033 s): shorter is a match glitch, not a contact
   longContact: 0.24, // s: a foot down this long is the set position or the push, not a running step

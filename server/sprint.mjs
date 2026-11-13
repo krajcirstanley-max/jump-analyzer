@@ -122,7 +122,7 @@ export async function measureMotion({ getRGBA, W, H, track, from, to }) {
 }
 
 // The camera turns smoothly: a frame whose track match failed takes its neighbours' motion, and
-// one odd match is replaced by the median of five.
+// odd matches are replaced by the median around them.
 export function smoothGround(out) {
   const idx = out.map((r, i) => (r?.g ? i : -1)).filter(i => i >= 0);
   if (!idx.length) return out;
@@ -137,10 +137,12 @@ export function smoothGround(out) {
     out[i].g = [raw[a][0] + t * (raw[b][0] - raw[a][0]), raw[a][1] + t * (raw[b][1] - raw[a][1])];
     out[i].gFill = true;
   }
+  // The pan changes slowly: a median over 13 frames (0.1 s) rides out a run of up to six bad
+  // matches (IMG_3480 on the GPU: -18 px, then -34, then +8..+38 for a few frames).
   const filled = out.map(r => r?.g ?? null);
   for (let i = 0; i < out.length; i++) {
     if (!filled[i]) continue;
-    const win = filled.slice(Math.max(0, i - 2), i + 3).filter(Boolean);
+    const win = filled.slice(Math.max(0, i - 6), i + 7).filter(Boolean);
     if (win.length < 3) continue;
     const med = k => win.map(g => g[k]).sort((x, y) => x - y)[Math.floor(win.length / 2)];
     out[i].g = [med(0), med(1)];
@@ -188,6 +190,10 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, client,
     if (sprint.error) return { error: sprint.error };
     const result = {
       kind: 'sprint', ...sprint, ...(who ? { who } : {}),
+      // The raw toe/track motion, rounded: lets a better contact rule be re-run on the phone or
+      // checked here without another upload. The phone does not keep it.
+      motion: motion.map(m => m && { f: m.f, h: +m.h.toFixed(1), g: m.g && m.g.map(v => +v.toFixed(2)), l: m.l && m.l.slice(0, 3).map(v => +v.toFixed(2)), r: m.r && m.r.slice(0, 3).map(v => +v.toFixed(2)) }),
+      ts0: meta.ts[0],
       recordedAt: recordedAt(clip), duration: +(meta.ts[meta.N - 1] - meta.ts[0]).toFixed(3),
       W: meta.W, H: meta.H, N: meta.N, fps: +meta.fps.toFixed(3), ms: Math.round(performance.now() - t0),
     };
