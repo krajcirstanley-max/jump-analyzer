@@ -16,8 +16,14 @@ const n2 = x => (x == null ? '–' : Number(x).toFixed(2).replace('.', ','));
 const n1 = x => (x == null ? '–' : Number(x).toFixed(1).replace('.', ','));
 const n3 = x => (x == null ? '–' : Number(x).toFixed(3).replace('.', ','));
 const when = t => new Date(t).toLocaleString('sk-SK', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
-const KEY = 'jump.sprint';
-const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; } };
+// Own key: 'jump.sprint' already held something else on Stanley's phone, and reading it as
+// analyses broke the app at start (r.video undefined, 2026-11-13). Anything malformed is skipped.
+const KEY = 'jump.sprint.analyses';
+try { // keep the analyses made under the old key, drop whatever else was there
+  const old = JSON.parse(localStorage.getItem('jump.sprint') || 'null');
+  if (Array.isArray(old) && !localStorage.getItem('jump.sprint.analyses')) localStorage.setItem('jump.sprint.analyses', JSON.stringify(old.filter(r => r?.id && Array.isArray(r.video?.steps))));
+} catch { /* storage blocked or not a list */ }
+const load = () => { try { const v = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(v) ? v.filter(r => r?.id && Array.isArray(r.video?.steps)) : []; } catch { return []; } };
 const store = v => { try { localStorage.setItem(KEY, JSON.stringify(v.slice(0, 60))); } catch { /* storage blocked */ } };
 const FOOT = { l: 'L', r: 'P' };
 const KIND = { accel: 'akcelerácia', fly: 'letmých' };
