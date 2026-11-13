@@ -101,7 +101,8 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {})
   }
   // runs that touch or overlap after growing are one contact
   const merged = [];
-  for (const r of runs) { const p = merged.at(-1); if (p && r.td <= p.to + 1) { p.to = Math.max(p.to, r.to); p.level = Math.max(p.level, r.level); } else merged.push({ ...r }); }
+  // ...unless the foot went down a level: stepping off a box onto the floor is two contacts
+  for (const r of runs) { const p = merged.at(-1); if (p && r.td <= p.to + 1 && Math.abs(r.level - p.level) <= 0.08 * pxM) { p.to = Math.max(p.to, r.to); p.level = Math.max(p.level, r.level); } else merged.push({ ...r }); }
   return merged;
 }
 
@@ -118,14 +119,23 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // Ground contacts of the body: any foot down. Each keeps which feet were down and its level.
   const n = track.length, down = new Array(n).fill(null);
   for (const s of ['l', 'r']) for (const r of runs[s]) for (let i = r.td; i <= r.to; i++) (down[i] ??= {})[s] = r.level;
-  // A foot held still more than 5 cm above the other one is the free leg of a single-leg contact.
-  for (const d of down) if (d && d.l != null && d.r != null) { const lo = Math.max(d.l, d.r); for (const s of ['l', 'r']) if (d[s] < lo - 0.05 * pxM) delete d[s]; }
+  // A foot held still more than 12 cm above the other one is the free leg of a single-leg
+  // contact. (5 cm took one of two planted feet for a free leg from the front, IMG_3521: the foot
+  // nearer the phone sits lower in the picture.)
+  for (const d of down) if (d && d.l != null && d.r != null) { const lo = Math.max(d.l, d.r); for (const s of ['l', 'r']) if (d[s] < lo - 0.12 * pxM) delete d[s]; }
+  // A foot landing a box-height lower than the contact so far starts a new contact: stepping off
+  // a box on one leg, the other foot is still on the box when the first lands on the floor
+  // (IMG_4186, Miška single-leg off a ~15 cm box, 2026-11-13: the floor contact had been merged
+  // into the standing on the box). The foot still up on the box is not part of the new contact.
+  const STEP = 0.08 * pxM; // 8 cm
+  const lowest = d => Math.max(...Object.values(d));
   const contacts = [];
   for (let i = 0; i < n; i++) {
     if (!down[i]) continue;
-    let j = i; while (j + 1 < n && down[j + 1]) j++;
+    let j = i, lvl = lowest(down[i]);
+    while (j + 1 < n && down[j + 1] && lowest(down[j + 1]) <= lvl + STEP) { lvl = Math.max(lvl, lowest(down[j + 1])); j++; }
     const lv = [], used = new Set();
-    for (let k = i; k <= j; k++) for (const [s, l] of Object.entries(down[k])) { used.add(s); lv.push(l); }
+    for (let k = i; k <= j; k++) for (const [s, l] of Object.entries(down[k])) if (l >= lvl - STEP) { used.add(s); lv.push(l); }
     contacts.push({ td: i, to: j, level: Math.max(...lv), feet: [...used].sort().join('') });
     i = j;
   }
@@ -133,10 +143,14 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
 
   // The floor is the lowest level (largest y) used by contacts; a level well above it is a box.
   const floor = Math.max(...contacts.map(c => c.level));
-  for (const c of contacts) {
-    c.onBox = floor - c.level > 0.12 * pxM;               // more than 12 cm above the floor
+  // On the box: standing there (300 ms or more) at the start, with the next contact a step lower.
+  // Not "highest level in the clip": from the front a landing nearer the phone sits lower in the
+  // picture, and the real floor contact then looked like a box (IMG_4186, IMG_3521).
+  contacts.forEach((c, k) => {
     c.ms = ((c.to - c.td + 1) / fps) * 1000;
-  }
+    const next = contacts[k + 1];
+    c.onBox = c.ms >= 300 && !!next && next.level - c.level > STEP && (k === 0 || contacts[k - 1].onBox);
+  });
   // Flights between contacts, and what each contact did: reactive (air before and after, short),
   // a standing start or finish, a drop from the box.
   const events = contacts.map((c, k) => {
@@ -145,7 +159,8 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     const flightAfter = next ? ((next.td - c.to - 1) / fps) * 1000 : null;
     return { ...c, flightBefore, flightAfter };
   });
-  const reactive = events.filter(e => !e.onBox && e.flightBefore > 60 && e.flightAfter > 60 && e.ms < 600);
+  // Air before, or straight off the box (stepping down one foot at a time leaves no flight).
+  const reactive = events.filter((e, k) => !e.onBox && (e.flightBefore > 60 || events[k - 1]?.onBox) && e.flightAfter > 60 && e.ms < 600);
   // Hip height (image) at a frame: landing on bent knees or ankles shows as a lower hip at the
   // touchdown after the flight than at the toe-off, and it inflates the flight time.
   const hipY = i => { const a = at(track[i], 'lhip'), b = at(track[i], 'rhip'); return a && b ? (a[1] + b[1]) / 2 : NaN; };

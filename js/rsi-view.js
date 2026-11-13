@@ -18,10 +18,12 @@ const save = (a, list) => { try { localStorage.setItem(key(a), JSON.stringify(li
 
 // Keep only what the screen and the trend need.
 function record(r, file) {
-  const leg = r.named?.leg ?? r.leg;
+  // Which foot: the pose's own when it saw one foot on every rebound (left/right keypoints don't
+  // mirror); Claude's reading of the frames otherwise.
+  const leg = r.singleLeg ? r.leg : (r.named?.leg ?? r.leg);
   return {
     id: `${Date.now()}`, at: new Date().toISOString(), file: file?.name ?? '', fps: Math.round(r.fps),
-    exercise: r.exercise, leg, boxCm: r.boxCm ?? null, boxEstCm: r.boxEstCm == null ? null : Math.round(r.boxEstCm),
+    exercise: r.exercise, leg, noRebound: !!r.noRebound, boxCm: r.boxCm ?? null, boxFrom: r.boxFrom ?? null, boxEstCm: r.boxEstCm == null ? null : Math.round(r.boxEstCm),
     askBox: r.askBox, rsiErrPct: r.rsiErrPct, camera: r.camera ?? null,
     jumps: r.jumps.map(j => ({ contactMs: Math.round(j.contactMs), flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1), rsi: +j.rsi.toFixed(2), ri: +j.ri.toFixed(2), slow: j.slow, landingFlexed: j.landingFlexed })),
     standing: (r.standing ?? []).map(j => ({ flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1) })),
@@ -35,9 +37,14 @@ function tile(label, value, sub = '') { return `<div><span>${label}</span><b>${v
 function resultHtml(rec) {
   const b = bestOf(rec), st = rec.standing?.[0];
   const odd = rec.exercise === 'other' ? '<p class="note">Toto nevyzerá ako drop jump, odrazy ani výskok. Čísla nižšie sú len z dotykov, ktoré som našiel.</p>' : '';
-  const head = odd + `<h2>${esc(NAMES[rec.exercise] ?? rec.exercise)} <small>${esc(LEG[rec.leg] ?? '')}${rec.boxCm ? ` · debna ${rec.boxCm} cm` : ''} · ${rec.fps} fps</small></h2>`;
-  // No box question: RSI is jump height / contact time, the box never enters it (Stanley).
-  const box = '';
+  const head = odd + `<h2>${esc(NAMES[rec.exercise] ?? rec.exercise)} <small>${esc(LEG[rec.leg] ?? '')}${rec.boxCm ? ` · debna ${rec.boxFrom === 'estimate' ? '≈ ' : ''}${rec.boxCm} cm` : ''} · ${rec.fps} fps</small></h2>`;
+  // RSI is jump height / contact time, the box never enters it (Stanley). Its height is only
+  // noted: read off the video, or typed in when the video could not show it.
+  const box = rec.askBox && !rec.boxCm ? `<p class="note">Výšku debničky som z videa nevedel odhadnúť. Dopíš ju:</p>
+    <label class="measured"><span>Výška debničky</span><input data-rsi-box type="text" inputmode="numeric" autocomplete="off" placeholder="napr. 30"><span>cm</span></label>` : '';
+  if (!b && rec.noRebound) {
+    return `${head}${box}<p class="banner warn">Vo videu je zoskok a dopad, ale odraz po ňom nie je vidieť: video končí skôr, alebo po dopade nebol výskok. RSI sa bez odrazu nedá vyrátať. Natoč aj výskok po dopade.</p>`;
+  }
   if (!b) {
     return `${head}${box}<div class="big">${tile('Výška výskoku', st ? `${num(st.heightCm, 1)} cm` : '–')}${tile('Let', st ? `${st.flightMs} ms` : '–')}${tile('RSI', '–', 'z výskoku z miesta sa nepočíta')}</div>
       <p class="note">Pri výskoku z miesta je výška z času letu. RSI-mod by potreboval začiatok pohybu, ten sa z videa číta neisto.</p>`;
@@ -111,6 +118,16 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete })
     $('rsi-result').classList.remove('hidden');
     $('rsi-result').innerHTML = `<button class="top-who rsi-swap" data-rsi-swap>${esc(athletes[who].name)}<span class="who-swap" aria-hidden="true">⇄</span></button>${resultHtml(rec)}`;
   };
+  // The box height typed in when the video could not show it.
+  root.addEventListener('change', e => {
+    if (!e.target.matches('[data-rsi-box]') || !current) return;
+    const cm = Math.round(parseFloat(String(e.target.value).replace(',', '.')));
+    if (!(cm >= 5 && cm <= 120)) { e.target.value = ''; return; }
+    const { rec, who } = current;
+    rec.boxCm = cm; rec.boxFrom = 'typed';
+    save(who, load(who).map(r => (r.id === rec.id ? rec : r)));
+    show(rec, who); renderHistory();
+  });
   // Wrong person: the result moves to the other athlete's history.
   root.addEventListener('click', e => {
     if (!e.target.closest('[data-rsi-swap]') || !current) return;
