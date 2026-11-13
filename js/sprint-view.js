@@ -3,6 +3,8 @@
 // hears while filming goes onto the video as a ring timer. The camera and the overlay are native
 // (ios/App/App/SprintCamera.swift); this page opens it and passes the runs. Videos go to Photos.
 
+import { CHIPS } from './freelap/listen.js';
+
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // The app's own camera plugin, through Capacitor's bridge. null in Safari.
@@ -30,7 +32,9 @@ export function initSprint({ root, athletes, freelap, cam = camera() }) {
     const on = freelap.listening();
     unsub?.();
     if (on) unsub = freelap.onRun(send);   // runs heard while the camera is open go to it
-    try { await cam.open({ fps: 120, freelap: on }); } catch (e) { unsub?.(); unsub = null; alert(`Kameru sa nepodarilo otvoriť: ${e?.message ?? e}`); }
+    // The recorder also hears the chips itself, to time each run exactly; it names them from this.
+    const chips = Object.fromEntries(Object.entries(CHIPS).map(([chip, who]) => [chip, athletes[who]?.name ?? chip]));
+    try { await cam.open({ fps: 120, freelap: on, chips }); } catch (e) { unsub?.(); unsub = null; alert(`Kameru sa nepodarilo otvoriť: ${e?.message ?? e}`); }
   }
 
   function draw() {

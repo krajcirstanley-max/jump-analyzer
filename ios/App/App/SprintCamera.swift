@@ -18,6 +18,7 @@ import AVFoundation
 import Photos
 import CoreImage
 import Capacitor
+import CoreBluetooth
 
 /// The app's root view controller: Capacitor plus the app's own plugin.
 class MainViewController: CAPBridgeViewController {
@@ -49,11 +50,12 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func open(_ call: CAPPluginCall) {
         let fps = call.getInt("fps") ?? 120
         let freelapOn = call.getBool("freelap") ?? false
+        let chips = (call.getObject("chips") ?? [:]).compactMapValues { $0 as? String }
         DispatchQueue.main.async {
             guard let host = self.bridge?.viewController else { call.reject("No view"); return }
-            let vc = RecorderViewController(fps: fps, freelapOn: freelapOn)
+            let vc = RecorderViewController(fps: fps, freelapOn: freelapOn, chips: chips)
             vc.onEvent = { [weak self] name, data in self?.notifyListeners(name, data: data) }
-            vc.modalPresentationStyle = .fullScreen
+            vc.modalPresentationStyle = .overFullScreen   // keeps the web page in the window, so it keeps running
             host.present(vc, animated: true)
             self.recorder = vc
             call.resolve()
@@ -316,6 +318,64 @@ final class ShutterButton: UIControl {
     override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.75 : 1 } }
 }
 
+// MARK: - Freelap heard by the recorder itself
+
+/// The recorder listens for the chips itself (Stanley, 2026-11-13: the ring closed only at the end
+/// of the video). Runs passed on from the web page could arrive late while the camera covers it,
+/// and the overlay is placed by the moment a run arrives, so that moment is taken here, where the
+/// broadcast lands. Same frame layout as js/freelap/frame.js (vault: "Freelap FxChip BLE - format").
+final class FreelapEar: NSObject, CBCentralManagerDelegate {
+    struct Frame { let key: String; let chip: String; let lap: Double; let legs: [Double] }
+
+    private var central: CBCentralManager?
+    private var firstSeen: [String: CFTimeInterval] = [:]
+    var onFrame: ((Frame, CFTimeInterval) -> Void)?   // the frame and when its run was first heard
+
+    func start() {
+        central = CBCentralManager(delegate: self, queue: nil, options: [CBCentralManagerOptionShowPowerAlertKey: false])
+    }
+    func stop() {
+        if central?.state == .poweredOn { central?.stopScan() }
+        central = nil
+    }
+    func seen(_ key: String) -> CFTimeInterval? { firstSeen[key] }
+
+    func centralManagerDidUpdateState(_ c: CBCentralManager) {
+        guard c.state == .poweredOn else { return }
+        c.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+    }
+
+    func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData ad: [String: Any], rssi: NSNumber) {
+        let now = CACurrentMediaTime()
+        guard let data = ad[CBAdvertisementDataManufacturerDataKey] as? Data, let f = FreelapEar.frame(data) else { return }
+        if firstSeen[f.key] == nil { firstSeen[f.key] = now }
+        onFrame?(f, firstSeen[f.key] ?? now)
+    }
+
+    /// Manufacturer data as iOS gives it: company ID 0x0363 (63 03), then the chip frame.
+    static func frame(_ data: Data) -> Frame? {
+        let all = [UInt8](data)
+        guard all.count >= 26, all[0] == 0x63, all[1] == 0x03 else { return nil }
+        let b = Array(all[2...])
+        guard b[0] == 0x58, (65...90).contains(b[2]), (65...90).contains(b[3]) else { return nil }
+        func u32(_ i: Int) -> Int64 { Int64(b[i]) | Int64(b[i + 1]) << 8 | Int64(b[i + 2]) << 16 | Int64(b[i + 3]) << 24 }
+        let id = Int(b[4]) | Int(b[5]) << 8
+        let chip = String(UnicodeScalar(b[2])) + String(UnicodeScalar(b[3])) + "-" + String(format: "%04d", id)
+        let mask: Int64 = 0x7fffffff
+        let fromLap = u32(10), block = u32(14)
+        var laps: [Int64] = []
+        var i = 24
+        while i + 4 <= b.count, laps.count < 10 { let v = u32(i); if v == 0 { break }; laps.append(v); i += 4 }
+        let sec: (Int64) -> Double = { (Double($0) / 10.24).rounded() / 100 }   // 1/1024 s ticks, to the hundredth
+        var legs: [Double] = [], prev = fromLap & mask
+        for v in laps { legs.append(sec(v - prev)); prev = v }
+        legs.append(sec((block & mask) - prev))
+        let lap = sec((block & mask) - (fromLap & mask))
+        guard lap > 0, lap < 600 else { return nil }
+        return Frame(key: "\(chip):\(fromLap):\(block)", chip: chip, lap: lap, legs: legs)
+    }
+}
+
 // MARK: - The recorder
 
 final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordingDelegate {
@@ -323,6 +383,9 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
 
     private let fps: Int
     private let freelapOn: Bool
+    private let chips: [String: String]   // chip ID -> athlete name
+    private let ear = FreelapEar()
+    private var saving = 0                // videos still being written; filming goes on meanwhile
     private let session = AVCaptureSession()
     private let output = AVCaptureMovieFileOutput()
     private let queue = DispatchQueue(label: "sprint.camera")
@@ -330,7 +393,6 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private var actualFps: Double = 0
     private var startedAt: CFTimeInterval?
     private var runs: [SprintRun] = []
-    private var busy = false            // writing the video: no new recording, no closing
     private var ticker: Timer?
     private var held: UIDeviceOrientation = .portrait   // how the phone is held (the screen stays portrait)
 
@@ -349,9 +411,10 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private var liveKey = ""
     private var liveRun: (name: String, lap: Double, legs: [Double]) = ("", 0, [])
 
-    init(fps: Int, freelapOn: Bool) {
+    init(fps: Int, freelapOn: Bool, chips: [String: String] = [:]) {
         self.fps = fps
         self.freelapOn = freelapOn
+        self.chips = chips
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -369,6 +432,8 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         buildUI()
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         NotificationCenter.default.addObserver(self, selector: #selector(turned), name: UIDevice.orientationDidChangeNotification, object: nil)
+        ear.onFrame = { [weak self] f, at in self?.note(key: f.key, name: self?.chips[f.chip] ?? f.chip, lap: f.lap, legs: f.legs, heard: at) }
+        ear.start()
         AVCaptureDevice.requestAccess(for: .video) { ok in
             DispatchQueue.main.async {
                 if ok { self.configure() } else { self.show("Skok nemá povolenú kameru. Zapni ju v Nastavenia → Skok → Kamera.", hold: true) }
@@ -387,6 +452,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         UIApplication.shared.isIdleTimerDisabled = false
         NotificationCenter.default.removeObserver(self)
         reveal?.invalidate(); reveal = nil
+        ear.stop()
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
         queue.async { self.session.stopRunning() }
     }
@@ -490,7 +556,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
 
     @objc private func turned() {
         let o = UIDevice.current.orientation
-        guard !output.isRecording, !busy, o == .portrait || o == .landscapeLeft || o == .landscapeRight else { return }
+        guard !output.isRecording, o == .portrait || o == .landscapeLeft || o == .landscapeRight else { return }
         held = o
         let angle: CGFloat = o == .landscapeLeft ? .pi / 2 : o == .landscapeRight ? -.pi / 2 : 0
         UIView.animate(withDuration: 0.25) {
@@ -555,7 +621,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     }
 
     private func start() {
-        guard !busy, actualFps > 0 else { return }
+        guard actualFps > 0, !output.isRecording else { return }
         runs = []
         startedAt = nil
         reveal?.invalidate(); reveal = nil
@@ -595,49 +661,44 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
             self.timeLabel.backgroundColor = .clear
             self.timeLabel.text = "00:00:00"
             self.shutter.recording = false
-            if ok { self.finish(url) } else { self.done("Natáčanie sa nepodarilo.", burned: false) }
+            if ok { self.finish(url) } else { self.saving += 1; self.done("Natáčanie sa nepodarilo.", burned: false) }
         }
     }
 
-    // A run that ends just before Stop reaches the phone a moment later, so with Freelap on the
-    // recorder waits briefly before writing the video.
+    // No waiting after Stop (Stanley: "čakám na časy je zbytočné a zdržuje, časy vždy dorazili"):
+    // the runs heard so far go into the video, which is written in the background while the
+    // next sprint can already be filmed.
     private func finish(_ url: URL) {
-        busy = true
-        shutter.isEnabled = false
-        show(freelapOn ? "Čakám na čas z Freelapu…" : "Ukladám…", hold: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + (freelapOn ? 2.5 : 0)) {
-            let runs = self.runs
-            self.show(runs.isEmpty ? "Ukladám…" : "Pridávam časy do videa…", hold: true)
-            guard !runs.isEmpty else { self.save(url, burned: false); return }
-            SprintBurner.burn(url, runs: runs, fps: self.actualFps) { out in
-                DispatchQueue.main.async { self.save(out ?? url, burned: out != nil) }
-            }
+        let runs = self.runs
+        saving += 1
+        closeButton.isHidden = false
+        UIApplication.shared.isIdleTimerDisabled = false
+        show(runs.isEmpty ? "Ukladám video…" : "Ukladám video s časmi…")
+        guard !runs.isEmpty else { save(url, runs: runs, burned: false); return }
+        SprintBurner.burn(url, runs: runs, fps: actualFps) { out in
+            DispatchQueue.main.async { self.save(out ?? url, runs: runs, burned: out != nil) }
         }
     }
 
-    private func save(_ url: URL, burned: Bool) {
+    private func save(_ url: URL, runs: [SprintRun], burned: Bool) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async { self.done("Skok nemá povolené ukladať do Fotiek. Zapni to v Nastavenia → Skok → Fotky.", burned: burned, path: url) }
+                DispatchQueue.main.async { self.done("Skok nemá povolené ukladať do Fotiek. Zapni to v Nastavenia → Skok → Fotky.", runs: runs, burned: burned, path: url) }
                 return
             }
             PHPhotoLibrary.shared().performChanges({
                 PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: url, options: nil)
             }) { ok, _ in
                 DispatchQueue.main.async {
-                    let n = self.runs.count
-                    let what = burned ? (n == 1 ? "s časom" : "s časmi") : "bez časov"
-                    self.done(ok ? "Uložené do Fotiek \(what)" : "Do Fotiek sa video uložiť nepodarilo.", burned: burned, path: url)
+                    let what = burned ? (runs.count == 1 ? "s časom" : "s časmi") : "bez časov"
+                    self.done(ok ? "Uložené do Fotiek \(what)" : "Do Fotiek sa video uložiť nepodarilo.", runs: runs, burned: burned, path: url)
                 }
             }
         }
     }
 
-    private func done(_ message: String, burned: Bool, path: URL? = nil) {
-        busy = false
-        shutter.isEnabled = true
-        closeButton.isHidden = false
-        UIApplication.shared.isIdleTimerDisabled = false
+    private func done(_ message: String, runs: [SprintRun] = [], burned: Bool, path: URL? = nil) {
+        saving = max(0, saving - 1)
         show(message)
         var data: [String: Any] = ["message": message, "burned": burned, "runs": runs.count, "fps": actualFps]
         if let path { data["path"] = path.path }
@@ -648,12 +709,20 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     /// A run from Freelap. It is noted against the recording when one is running (or just ended
     /// and the video isn't written yet), and always shown live.
     func takeRun(key: String, name: String, lap: Double, legs: [Double]) {
-        if let s = startedAt, output.isRecording || busy {
-            if let i = runs.firstIndex(where: { $0.key == key }) {
-                runs[i].lap = lap; runs[i].legs = legs
-            } else {
-                runs.append(SprintRun(key: key, name: name, lap: lap, legs: legs, arrived: CACurrentMediaTime() - s))
-            }
+        note(key: key, name: name, lap: lap, legs: legs, heard: ear.seen(key) ?? CACurrentMediaTime())
+    }
+
+    /// One run, heard by the recorder itself or passed on by the page. heard: when the chip's
+    /// broadcast of it first landed. The same run again only adds its intermediate.
+    private func note(key: String, name: String, lap: Double, legs: [Double], heard: CFTimeInterval) {
+        if let i = runs.firstIndex(where: { $0.key == key }) {
+            if legs.count <= runs[i].legs.count { return }
+            runs[i].legs = legs
+            runs[i].lap = lap
+        } else if let s = startedAt, output.isRecording, heard >= s {
+            runs.append(SprintRun(key: key, name: name, lap: lap, legs: legs, arrived: heard - s))
+        } else if key == liveKey, legs.count <= liveRun.legs.count {
+            return
         }
         // Freelap sends a run only after the finish, so live the ring can't run during the sprint:
         // when the time comes in, it fills in 0.6 s and closes green. The saved video has it in
@@ -684,7 +753,8 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     }
 
     @objc private func close() {
-        guard !output.isRecording, !busy else { return }
+        guard !output.isRecording else { return }
+        ear.stop()
         dismiss(animated: true) { self.onEvent?("closed", [:]) }
     }
 }
