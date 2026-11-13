@@ -33,22 +33,30 @@ function planted(motion, foot, fps, o) {
   for (const m of motion) {
     if (!m || !m.g || !m[foot]) { out.push(null); continue; }
     const vx = ((m[foot][0] - m.g[0]) / m.h) * 100 * k, vy = ((m[foot][1] - m.g[1]) / m.h) * 100 * k;
-    out.push({ f: m.f, vx, vy, down: Math.abs(vy) <= o.planted && Math.abs(vx) <= o.plantedX });
+    const score = m[foot][2] ?? 1;
+    out.push({ f: m.f, vx, vy, score, down: Math.abs(vy) <= o.planted && Math.abs(vx) <= o.plantedX });
   }
   return out;
 }
 
-// Runs of a planted toe. One frame out of line inside a run is a match glitch, not a lift.
+// Runs of a planted toe. Up to three frames out of line between planted ones are a match glitch,
+// not a lift, when they move little or matched badly: a lift rises fast and keeps rising (on the
+// GPU's pose, IMG_3480 step 11 split into 1497-1500 and 1501-1507 without this).
 export function footContacts(motion, foot, ts, fps, o = SPRINT) {
   const p = planted(motion, foot, fps, o), runs = [];
   const minLen = Math.max(3, Math.round((o.minContact * fps) / 120));
+  const maxGap = Math.max(1, Math.round((3 * fps) / 120));
+  const glitch = q => q && (Math.abs(q.vy) <= 2.5 * o.planted || q.score < 0.6);
   let a = null, last = null;
   const close = () => { if (a != null && last - a + 1 >= minLen) runs.push([a, last]); a = null; };
   for (let i = 0; i < p.length; i++) {
     const q = p[i];
     if (q?.down) { if (a == null) a = i; last = i; continue; }
-    if (a != null && p[i + 1]?.down && i - last === 1) continue; // single glitch
-    if (a != null) close();
+    if (a != null) {
+      let j = i; while (j < p.length && j - last <= maxGap && !p[j]?.down && glitch(p[j])) j++;
+      if (j < p.length && j - last <= maxGap && p[j]?.down) { i = j - 1; continue; } // bridged
+      close();
+    }
   }
   close();
   // A run of motions a..b means the toe stood still from frame a to frame b+1: it landed between
