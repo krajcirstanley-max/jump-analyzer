@@ -38,7 +38,7 @@ main { padding: 10px 16px calc(88px + env(safe-area-inset-bottom)); max-width: 6
 .empty p { margin: 4px 0 12px; color: var(--muted); }
 
 .tabs {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
   background: var(--card); border-top: 1px solid var(--line);
   padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
@@ -316,3 +316,22 @@ div.att-open { cursor: default; }
 .rsi-group ul { list-style: none; margin: 6px 0 0; padding: 0; }
 .rsi-group li { display: grid; grid-template-columns: 1fr auto 70px; gap: 8px; font-size: 14px; padding: 3px 0; font-variant-numeric: tabular-nums; }
 .rsi-group li small { color: var(--muted); text-align: right; }
+
+/* Freelap */
+.fl-head { display: flex; flex-direction: column; gap: 12px; }
+.fl-status { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.fl-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--line); }
+.fl-dot.live { background: var(--accent); animation: fl-pulse 1.2s ease-in-out infinite; }
+@keyframes fl-pulse { 50% { opacity: .35; } }
+.btn.fl-start { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.fl-stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+.fl-day { font-size: 13px; color: var(--muted); font-weight: 700; margin: 14px 0 2px; text-transform: capitalize; }
+.fl-day:first-of-type { margin-top: 0; }
+.fl-rep { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.fl-day + .fl-rep { border-top: 0; }
+.fl-who { display: flex; flex-direction: column; min-width: 0; }
+.fl-who small { color: var(--muted); font-size: 13px; }
+.fl-time { text-align: right; color: var(--muted); }
+.fl-time b { font-size: 26px; color: var(--text); font-variant-numeric: tabular-nums; }
+.fl-legs { display: block; font-size: 13px; font-variant-numeric: tabular-nums; }
+.fl-hex { font: 12px/1.5 ui-monospace, Menlo, monospace; word-break: break-all; }

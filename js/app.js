@@ -10,12 +10,13 @@ import { jointLabels, idealOverlay } from './analysis/labels.js';
 import { idealFor } from './analysis/ideal.js';
 import { renderResult, showCoach, runupHtml } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
+import { initFreelap } from './freelap-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud } from './cloud.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -67,6 +68,9 @@ const rsiView = initRsi({
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster, rememberAthlete,
 });
 
+// Freelap tab: Start listens for the chips, Stop takes nothing in.
+const freelapView = initFreelap({ root: document.getElementById('freelap'), athletes: ATHLETES });
+
 // Blank clears the field; anything outside a plausible jump is ignored.
 function parseMetres(s) {
   const x = parseFloat(String(s).trim().replace(',', '.'));
@@ -93,8 +97,9 @@ function showTab(name) {
   if (name === tab) return;
   tabScroll[tab] = scrollY;
   tab = name;
-  for (const t of ['home', 'result', 'progress', 'rsi']) $(`view-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['home', 'result', 'progress', 'rsi', 'freelap']) $(`view-${t}`).classList.toggle('hidden', t !== name);
   if (name === 'rsi') rsiView.shown();
+  if (name === 'freelap') freelapView.shown();
   document.querySelectorAll('.tab').forEach(b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
