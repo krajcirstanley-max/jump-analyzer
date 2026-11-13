@@ -138,8 +138,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   const send = (_, run) => cam.run({ key: run.key, name: name(run), lap: run.lap, legs: run.legs ?? [] }).catch(() => {});
   const runs = () => freelap?.runs?.() ?? [];
 
-  // Filmed here with Freelap on: the clean clip (no ring over the feet) goes for analysis at once,
-  // paired with the run the recorder heard. One at a time; filming can go on meanwhile.
+  // Filmed here: the clean clip (no ring over the feet) goes for analysis at once, paired with the
+  // run the recorder heard when Freelap was on. One at a time; filming can go on meanwhile.
   const queue = [];
   async function autoAnalyze(d) {
     queue.push(d);
@@ -159,7 +159,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   if (cam) {
     cam.on('saved', d => {
       last = d.message ?? ''; draw();
-      if (d.raw && d.times?.length && cloudReady()) autoAnalyze(d);
+      if (d.raw && cloudReady()) autoAnalyze(d); // with or without Freelap: without it, steps and contacts only
     });
     cam.on('closed', () => { unsub?.(); unsub = null; draw(); });
   }
@@ -195,7 +195,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       if (result?.error) throw new CloudError(result.error);
       const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
       let run = null;
-      if (filmed) {
+      if (filmed?.times?.length) {
         // the run the recorder heard: the athlete's own when two ran, else the first
         const who = result.who?.id, heard = filmed.times;
         const t = heard.find(x => who && CHIPS_BY_NAME(athletes)[x.name] === who) ?? heard[0];

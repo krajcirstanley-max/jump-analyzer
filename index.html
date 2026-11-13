@@ -1,6 +1,21 @@
 <!doctype html>
 <html lang="sk">
 <head>
+<script>
+// Anything that breaks while the app starts shows on screen: on the iPhone there is no console to
+// read (Stanley 2026-11-13: tabs dead on the phone, fine in every desktop browser).
+(() => {
+  const show = m => {
+    const d = document.getElementById('boot-err') || Object.assign(document.createElement('pre'), { id: 'boot-err' });
+    d.style.cssText = 'position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top) + 8px);z-index:99;margin:0;padding:10px;border-radius:10px;background:#a32d2d;color:#fff;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;max-height:45vh;overflow:auto';
+    d.textContent = (d.textContent ? d.textContent + '\n' : 'Chyba appky (pošli screenshot):\n') + m;
+    (document.body || document.documentElement).appendChild(d);
+  };
+  addEventListener('error', e => show(`${e.message} @ ${String(e.filename).split('/').pop()}:${e.lineno}:${e.colno}`));
+  addEventListener('unhandledrejection', e => show(`promise: ${e.reason?.stack || e.reason?.message || e.reason}`));
+  setTimeout(() => { if (!window.__appReady) show('Appka sa po 8 s nenačítala celá (app.js nedobehol).'); }, 8000);
+})();
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Skok</title>
