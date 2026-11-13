@@ -26,7 +26,7 @@ const ERRORS = {
 const errorText = e => ERRORS[e] ?? `Bluetooth sa nepodarilo zapnúť (${e}).`;
 
 export function initFreelap({ root, athletes, ble = nativeBle() }) {
-  let reps = load(), error = null, packets = 0, lastHex = '', armed = false;
+  let reps = load(), error = null, packets = 0, lastHex = '', armed = false, heard = null, lastChip = '';
   const listener = createListener(ble, {
     rep(r) {
       reps.unshift({ chip: r.chip, who: r.who, lap: r.lap, legs: r.legs, at: r.at, key: r.key });
@@ -34,9 +34,21 @@ export function initFreelap({ root, athletes, ble = nativeBle() }) {
       draw();
       navigator.vibrate?.(60);
     },
+    update(r) {   // the same run, now with its intermediate
+      const i = reps.findIndex(x => x.key === r.key);
+      if (i < 0) return;
+      reps[i] = { ...reps[i], lap: r.lap, legs: r.legs };
+      save(reps);
+      draw();
+    },
     packet(n, hex) { packets = n; lastHex = hex; drawCount(); },
-    state(s, err) { error = err; if (s === 'on') packets = 0; draw(); },
-  }, new Set(reps.map(r => r.key)));
+    heard(h) {
+      heard = h;
+      if (h.md !== undefined) lastChip = JSON.stringify(h.md);
+      drawCount();
+    },
+    state(s, err) { error = err; if (s === 'on') { packets = 0; heard = null; } draw(); },
+  }, new Map(reps.map(r => [r.key, r.legs?.length ?? 0])));
 
   const name = r => (r.who ? athletes[r.who]?.name : null) ?? r.chip;
 
@@ -64,12 +76,15 @@ export function initFreelap({ root, athletes, ble = nativeBle() }) {
       </div>
       <div class="card"><h2>Časy</h2>${repsHtml()}</div>
       ${reps.length ? `<button class="btn danger${armed ? ' armed' : ''}" data-fl="clear">${armed ? 'Naozaj vymazať všetky časy?' : 'Vymazať časy'}</button>` : ''}
-      ${lastHex ? `<details class="card"><summary>Posledné vysielanie z čipu</summary><p class="fl-hex">${esc(lastHex)}</p></details>` : ''}`;
+      <details class="card"><summary>Posledné vysielanie z čipu</summary><p class="fl-hex">${esc(lastHex || 'žiadne prečítané')}</p><p class="fl-hex" id="fl-raw">${esc(lastChip)}</p></details>`;
     drawCount();
   }
   function drawCount() {
     const el = root.querySelector('#fl-count');
-    if (el) el.textContent = listener.state === 'on' ? `Prijaté vysielania z čipov: ${packets}` : '';
+    if (el) el.textContent = listener.state === 'on'
+      ? `Bluetooth zariadení v okolí: ${heard?.devices ?? 0} · vysielaní Freelap: ${heard?.named ?? 0} · prečítaných: ${packets}` : '';
+    const raw = root.querySelector('#fl-raw');
+    if (raw && lastChip) raw.textContent = lastChip;
   }
 
   root.addEventListener('click', e => {

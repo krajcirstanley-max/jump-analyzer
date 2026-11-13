@@ -39,28 +39,76 @@ export function freelapBytes(result) {
 // One received broadcast to a rep, or null if it isn't a run (an empty or odd frame).
 export function readRep(bytes, at = Date.now()) {
   const ad = decodeAdvertisement(bytes);
-  if (!ad) return null;
-  const r = rep(ad);
+  return ad ? repOf(ad, ad.laps, at) : null;
+}
+function repOf(ad, laps, at) {
+  const r = rep(ad, laps);
   if (!(r.lap > 0 && r.lap < MAX_LAP_S)) return null;
   return { ...r, key: `${ad.chip}:${ad.fromLap}:${ad.block}`, who: CHIPS[ad.chip] ?? null, at };
 }
 
-// ble: nativeBle() or a stand-in. on: { rep(r), packet(count, hex), state(s, error) }.
-// seen: keys already kept (from a stored list), so a rep is never added twice.
-export function createListener(ble, on = {}, seen = new Set()) {
+// Intermediates sent apart from the run, read against the run they belong to. Two layouts are
+// tried: 4-byte crossings (as in the frames Stanley captured) and 3-byte ones (the garmin-freelap
+// layout for a scan response). iOS strips the company ID, so they start at byte 0. A reading is
+// kept only if every crossing falls, in order, between that run's start and finish.
+export function lapsFromScanResponse(bytes, ad) {
+  if (!bytes?.length || bytes[0] === 0x58) return null;
+  return readCrossings(bytes, ad, 4) ?? readCrossings(bytes, ad, 3);
+}
+function readCrossings(bytes, ad, width) {
+  const from = ad.fromLap >>> 0, to = ad.block >>> 0, laps = [];
+  for (let i = 0; i + width <= bytes.length && laps.length < 10; i += width) {
+    let v = 0;
+    for (let k = width - 1; k >= 0; k--) v = v * 256 + bytes[i + k];
+    if (!v) break;
+    let full = v;
+    if (width === 3) { full = (from - (from % 0x1000000)) + v; if (full < from) full += 0x1000000; }
+    if (!(full > from && full < to)) return null;
+    if (laps.length && full <= laps[laps.length - 1]) return null;
+    laps.push(full);
+  }
+  return laps.length ? laps : null;
+}
+
+// ble: nativeBle() or a stand-in. on: { rep(r), update(r), packet(count, hex), state(s, error) }.
+// seen: runs already kept (key -> how many legs), from the stored list, so a run is never added
+// twice. iPhone may hand over the short frame (start and finish) before the one that carries the
+// intermediate (Stanley, 2026-11-13: "len medzičas nejde"), so a later frame of the same run with
+// more legs updates it instead of being dropped as a repeat.
+export function createListener(ble, on = {}, seen = new Map()) {
+  if (seen instanceof Set) seen = new Map([...seen].map(k => [k, 0]));
+  const lastRun = new Map();   // device -> { ad, at }: the run a separate intermediate frame belongs to
   let state = ble ? 'off' : 'none', sub = null, packets = 0, ready = false;
   const set = (s, err = null) => { state = s; on.state?.(s, err); };
 
+  // For finding out why nothing arrives: every device heard, and whether a chip was heard by name.
+  const devices = new Set();
+  let named = 0;
   function take(result) {
     if (state !== 'on') return;   // Stop means nothing is taken in
+    devices.add(result?.device?.deviceId ?? JSON.stringify(result?.device ?? ''));
+    const isChip = /freelap/i.test(result?.localName ?? result?.device?.name ?? '');
+    if (isChip) named++;
+    on.heard?.({ devices: devices.size, named, md: isChip ? result.manufacturerData ?? null : undefined });
     const bytes = freelapBytes(result);
     if (!bytes) return;
     packets++;
     on.packet?.(packets, [...bytes].map(b => b.toString(16).padStart(2, '0')).join(' '));
-    const r = readRep(bytes);
-    if (!r || seen.has(r.key)) return;
-    seen.add(r.key);
-    on.rep?.(r);
+    const dev = result?.device?.deviceId ?? '';
+    const now = Date.now();
+    const ad = decodeAdvertisement(bytes);
+    let r = null;
+    if (ad) {
+      r = repOf(ad, ad.laps, now);
+      if (r) lastRun.set(dev, { ad, at: now });
+    } else {
+      const last = lastRun.get(dev);
+      const laps = last && now - last.at < 5000 && last.ad.laps.length === 0 ? lapsFromScanResponse(bytes, last.ad) : null;
+      if (laps) r = repOf(last.ad, laps, now);
+    }
+    if (!r) return;
+    if (!seen.has(r.key)) { seen.set(r.key, r.legs.length); on.rep?.(r); return; }
+    if (r.legs.length > seen.get(r.key)) { seen.set(r.key, r.legs.length); on.update?.(r); }
   }
 
   return {
@@ -81,7 +129,7 @@ export function createListener(ble, on = {}, seen = new Set()) {
           if (!/already scanning/i.test(e?.message ?? e)) throw e;
           return ble.start({ allowDuplicates: true });
         });
-        packets = 0;
+        packets = 0; named = 0; devices.clear();
         set('on');
       } catch (e) {
         set('off', e?.message ?? String(e));

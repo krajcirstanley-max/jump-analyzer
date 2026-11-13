@@ -95,3 +95,38 @@ test('freelap listen: no Bluetooth outside the iPhone app', async () => {
   await l.start();
   assert.equal(l.state, 'none');
 });
+
+// Stanley, 2026-11-13: the final time showed, the intermediate didn't. The phone can hand over the
+// short frame first; the later frame of the same run with the intermediate must update it.
+test('freelap listen: a later frame with the intermediate updates the run', async () => {
+  const ble = fakeBle(), reps = [], updates = [];
+  const l = createListener(ble, { rep: r => reps.push(r), update: r => updates.push(r) });
+  await l.start();
+  const short = ios('58 00 4244 1D10 24BF0400 24BF0400 F3DA0400 000DA1D23011');   // no intermediate
+  ble.emit(short);
+  assert.deepEqual(reps.map(r => r.legs), [[6.95]]);
+  ble.emit(MISKA);                                         // same run, with the intermediate
+  ble.emit(MISKA);
+  ble.emit(short);                                         // a short repeat doesn't undo it
+  assert.equal(reps.length, 1);
+  assert.deepEqual(updates.map(r => r.legs), [[1.94, 5.01]]);
+});
+
+test('freelap listen: intermediates in a separate frame join the run they belong to', async () => {
+  const short = ios('58 00 4244 1D10 24BF0400 24BF0400 F3DA0400 000DA1D23011');
+  for (const hex of ['E5C60400', 'E5C604']) {               // 4-byte and 3-byte crossings
+    const ble = fakeBle(), reps = [], updates = [];
+    const l = createListener(ble, { rep: r => reps.push(r), update: r => updates.push(r) });
+    await l.start();
+    ble.emit(short);
+    ble.emit({ device: short.device, manufacturerData: { 867: hex } });
+    assert.deepEqual(updates.map(r => r.legs), [[1.94, 5.01]], hex);
+  }
+  // a crossing outside the run is not taken
+  const ble = fakeBle(), updates = [];
+  const l = createListener(ble, { update: r => updates.push(r) });
+  await l.start();
+  ble.emit(short);
+  ble.emit({ device: short.device, manufacturerData: { 867: '01000000' } });
+  assert.equal(updates.length, 0);
+});
