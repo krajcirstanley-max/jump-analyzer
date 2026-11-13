@@ -143,6 +143,7 @@ const STAGES = {
   ground: 'Meriam dosku a piesok',
   camera: 'Sledujem pohyb telefónu',
   rsi: 'Počítam kontakty a lety',
+  contacts: 'Hľadám kontakty so zemou',
   analysis: 'Počítam výsledky',
   coach: 'Píšem odporúčania',
 };
@@ -220,6 +221,7 @@ export async function analyzeInCloud(file, { sex, name, height, history, athlete
   const params = new URLSearchParams({ sex: sex || 'male', name: name || '' });
   if (height) params.set('height', String(height));
   if (mode === 'rsi') { params.set('mode', 'rsi'); if (boxCm) params.set('box', String(boxCm)); }
+  if (mode === 'sprint') params.set('mode', 'sprint');
   // The query string is bounded, and the newest attempts matter most.
   let h = (history || []).slice(-5);
   while (h.length && JSON.stringify(h).length > 6000) h = h.slice(1);
@@ -231,8 +233,8 @@ export async function analyzeInCloud(file, { sex, name, height, history, athlete
     params.set('athletes', JSON.stringify(r));
   }
   const { jobId } = await upload(file, params, { signal, onProgress });
-  // RSI jobs take seconds and the jump screen would not know what to do with one on resume.
-  if (mode !== 'rsi') rememberJob(jobId);
+  // RSI and sprint jobs take seconds and the jump screen would not know what to do with one on resume.
+  if (mode === 'jump') rememberJob(jobId);
   return follow(jobId, { signal, onProgress, onResult, t0 });
 }
 

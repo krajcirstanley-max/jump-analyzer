@@ -17,6 +17,7 @@ import { probe, openFrames, jpeg } from './frames.mjs';
 import { locateEvents } from './locate.mjs';
 import { measureGround } from './ground.mjs';
 import { analyzeRsiClip } from './rsi.mjs';
+import { analyzeSprintClip } from './sprint.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MODELS_DIR = process.env.JUMP_MODELS_DIR || join(root, 'models');
@@ -189,15 +190,18 @@ async function serve() {
         if (now - last > 400) { last = now; say({ id: job.id, progress: p }); }
       };
       // RSI drills: contacts and flights only, no coaching text, so the numbers are the end.
+      // RSI and sprint jobs: numbers only, no coaching text, so the numbers are the end.
       const out = job.mode === 'rsi'
         ? await analyzeRsiClip(engine, { clip: job.clip, sex: job.sex, height: job.height ?? null, boxCm: job.boxCm ?? null, athletes: job.athletes ?? null, client: coachClient({ token: claudeToken }), onProgress })
+        : job.mode === 'sprint'
+        ? await analyzeSprintClip(engine, { clip: job.clip, athletes: job.athletes ?? null, client: coachClient({ token: claudeToken }), onProgress })
         : await analyzeClip(engine, {
           ...job,
           client: coachClient({ token: claudeToken }),
           onProgress,
           onResult: r => say({ id: job.id, ...r }),
         });
-      if (job.mode === 'rsi' && out.result) say({ id: job.id, result: out.result, coachFallback: null, ms: out.result.ms });
+      if ((job.mode === 'rsi' || job.mode === 'sprint') && out.result) say({ id: job.id, result: out.result, coachFallback: null, ms: out.result.ms });
       writeFileSync(job.out, JSON.stringify(out));
       say({ id: job.id, done: true });
     } catch (e) {

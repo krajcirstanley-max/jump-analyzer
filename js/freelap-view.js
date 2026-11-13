@@ -205,6 +205,7 @@ export function initFreelap({ root, athletes, ble = nativeBle() }) {
   return {
     shown: draw, listener,
     listening: () => listener.state === 'on',
+    runs: () => reps.slice(),   // the Sprint tab pairs uploaded videos with these
     onRun(f) { subs.add(f); return () => subs.delete(f); },
   };
 }

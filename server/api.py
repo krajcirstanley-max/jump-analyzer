@@ -128,7 +128,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         athletes: str = Query(""),
         owner=Depends(user),
     ):
-        if mode not in ("jump", "rsi"):
+        if mode not in ("jump", "rsi", "sprint"):
             raise HTTPException(400, SK["mode"])
         if box and not 5 <= box <= 120:
             box = 0  # a box height outside 5-120 cm is a typo; the app asks again
@@ -174,7 +174,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
             jobs.put(job_key(job_id), {"state": "queued", "stage": "queued", "done": 0, "total": 1, "owner": owner, "createdAt": t, "updatedAt": t})
             try:
                 start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {}),
-                                          **({"mode": "rsi"} if mode == "rsi" else {}), **({"boxCm": box} if box else {}),
+                                          **({"mode": mode} if mode != "jump" else {}), **({"boxCm": box} if box else {}),
                                           **({"athletes": roster} if roster else {})})
             except Exception as e:
                 print("job start failed:", e)

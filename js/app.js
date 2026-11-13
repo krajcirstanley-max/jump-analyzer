@@ -72,7 +72,10 @@ const rsiView = initRsi({
 // Freelap tab: Start listens for the chips, Stop takes nothing in.
 const freelapView = initFreelap({ root: document.getElementById('freelap'), athletes: ATHLETES });
 // Sprint tab: film in the app; Freelap runs heard while filming go onto the video.
-const sprintView = initSprint({ root: document.getElementById('sprint'), athletes: ATHLETES, freelap: freelapView });
+const sprintView = initSprint({
+  root: document.getElementById('sprint'), athletes: ATHLETES, freelap: freelapView,
+  getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
+});
 
 // Blank clears the field; anything outside a plausible jump is ignored.
 function parseMetres(s) {
