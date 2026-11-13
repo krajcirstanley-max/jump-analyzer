@@ -20,7 +20,7 @@ const STATE = {
   none: 'Freelap ide len v appke Skok v iPhone. Safari nemá Bluetooth.',
   off: 'Nepočúva. Časy z čipov sa neprijímajú.',
   starting: 'Zapínam Bluetooth…',
-  on: 'Počúvam čipy. Prebehni cez cieľ a čas sa ukáže tu.',
+  on: 'Počúvam čipy. Časy sa ukážu nižšie a pri natáčaní aj vo videu.',
 };
 
 // The plugin's messages, in words.
@@ -149,9 +149,10 @@ export function initFreelap({ root, athletes, ble = nativeBle() }) {
     const allArmed = armed === 'all';
     root.innerHTML = `
       <div class="card fl-head">
+        <h2>Freelap</h2>
         <div class="fl-status"><span class="fl-dot${s === 'on' ? ' live' : ''}"></span><span>${esc(STATE[s])}</span></div>
         ${error ? `<p class="banner bad">${esc(errorText(error))}</p>` : ''}
-        ${ble ? `<button class="btn go ${on ? 'fl-stop' : 'fl-start'}" data-fl="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>` : ''}
+        ${ble ? `<button class="btn ${on ? 'fl-stop' : 'fl-start'}" data-fl="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>` : ''}
         <p class="note" id="fl-count"></p>
       </div>
       ${trainingsHtml()}

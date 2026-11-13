@@ -100,10 +100,9 @@ function showTab(name) {
   if (name === tab) return;
   tabScroll[tab] = scrollY;
   tab = name;
-  for (const t of ['home', 'result', 'progress', 'rsi', 'sprint', 'freelap']) $(`view-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['home', 'result', 'progress', 'rsi', 'sprint']) $(`view-${t}`).classList.toggle('hidden', t !== name);
   if (name === 'rsi') rsiView.shown();
-  if (name === 'freelap') freelapView.shown();
-  if (name === 'sprint') sprintView.shown();
+  if (name === 'sprint') { sprintView.shown(); freelapView.shown(); }   // Freelap lives under Sprint
   document.querySelectorAll('.tab').forEach(b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
