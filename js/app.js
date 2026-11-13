@@ -766,6 +766,14 @@ function renderCloud() {
   $('cloud-state').textContent = cloudReady() ? 'Analýza pobeží na serveri.'
     : CLOUD_URL ? 'Vlož svoj prístupový kľúč, bez neho analýza nepobeží.' : 'Analýza pobeží v telefóne, trvá to niekoľko minút.';
 }
+// The native build for one person's phone carries their access code (tools/build-www.mjs
+// --token-for); the web app has no such file and the fetch just fails.
+fetch('build-config.json').then(r => (r.ok ? r.json() : null)).then(c => {
+  if (!c?.token || getCloudToken()) return;
+  setCloudToken(c.token);
+  $('cloud-token').value = getCloudToken();
+  renderCloud();
+}).catch(() => {});
 $('cloud-token').value = getCloudToken() ?? '';
 $('cloud-save').addEventListener('click', () => {
   setCloudToken($('cloud-token').value.trim());
