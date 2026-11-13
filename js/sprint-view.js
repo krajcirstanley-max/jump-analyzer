@@ -21,6 +21,8 @@ const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]');
 const store = v => { try { localStorage.setItem(KEY, JSON.stringify(v.slice(0, 60))); } catch { /* storage blocked */ } };
 const FOOT = { l: 'L', r: 'P' };
 const KIND = { accel: 'akcelerácia', fly: 'letmých' };
+const LATENCY = 0.2; // s from the chip crossing the last cone to the phone hearing it (SprintOverlay, a guess until measured)
+const CHIPS_BY_NAME = athletes => Object.fromEntries(Object.entries(athletes).map(([id, a]) => [a.name, id]));
 
 // The app's own camera plugin, through Capacitor's bridge. null in Safari.
 function camera(cap = globalThis.Capacitor) {
@@ -136,8 +138,29 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   const send = (_, run) => cam.run({ key: run.key, name: name(run), lap: run.lap, legs: run.legs ?? [] }).catch(() => {});
   const runs = () => freelap?.runs?.() ?? [];
 
+  // Filmed here with Freelap on: the clean clip (no ring over the feet) goes for analysis at once,
+  // paired with the run the recorder heard. One at a time; filming can go on meanwhile.
+  const queue = [];
+  async function autoAnalyze(d) {
+    queue.push(d);
+    if (queue.length > 1) return;
+    while (queue.length) {
+      const job = queue[0];
+      try {
+        const src = globalThis.Capacitor?.convertFileSrc?.(job.raw) ?? job.raw;
+        const blob = await (await fetch(src)).blob();
+        const file = new File([blob], 'sprint.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() });
+        await upload(file, job);
+      } catch (e) { progress = `Rozbor natočeného videa zlyhal: ${e?.message ?? e}`; draw(); }
+      queue.shift();
+    }
+  }
+
   if (cam) {
-    cam.on('saved', d => { last = d.message ?? ''; draw(); });
+    cam.on('saved', d => {
+      last = d.message ?? ''; draw();
+      if (d.raw && d.times?.length && cloudReady()) autoAnalyze(d);
+    });
     cam.on('closed', () => { unsub?.(); unsub = null; draw(); });
   }
 
@@ -159,10 +182,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     return { a, run, html: resultHtml(rec, a, run, all, athletes) };
   }
 
-  async function upload(file) {
-    if (busy) return;
+  async function upload(file, filmed = null) {
+    if (busy && !filmed) return;
     if (!cloudReady()) { progress = 'Najprv ulož prístupový kľúč v nastaveniach.'; draw(); return; }
-    busy = true; progress = 'Nahrávam video…'; draw();
+    busy = true; progress = filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…'; draw();
     try {
       const me = getAthlete() ?? {};
       const { result } = await analyzeInCloud(file, {
@@ -170,8 +193,15 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         onProgress: p => { progress = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`; draw(); },
       });
       if (result?.error) throw new CloudError(result.error);
-      const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, recordedAt: result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
-      const run = pairRun(runs(), video, null);
+      const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
+      let run = null;
+      if (filmed) {
+        // the run the recorder heard: the athlete's own when two ran, else the first
+        const who = result.who?.id, heard = filmed.times;
+        const t = heard.find(x => who && CHIPS_BY_NAME(athletes)[x.name] === who) ?? heard[0];
+        video.finishAt = +(t.arrived - LATENCY).toFixed(3);
+        run = runs().find(r => r.key === t.key) ?? { key: t.key, lap: t.lap, legs: t.legs, who: CHIPS_BY_NAME(athletes)[t.name] ?? who ?? null, at: video.recordedAt + t.arrived * 1000 };
+      } else run = pairRun(runs(), video, null);
       const rec = { id: `sp${Date.now()}`, at: video.recordedAt ?? Date.now(), video, runKey: run?.key ?? null, run: run ?? null, who: run?.who ?? result.who?.id ?? me.id ?? null, mode: null };
       const list = load(); list.unshift(rec); store(list);
       current = rec.id; progress = '';

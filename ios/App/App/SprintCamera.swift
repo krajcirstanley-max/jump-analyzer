@@ -392,6 +392,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private var preview: AVCaptureVideoPreviewLayer!
     private var actualFps: Double = 0
     private var startedAt: CFTimeInterval?
+    private var startedWall: Date?        // the same moment on the clock, for the page to pair the clip
     private var runs: [SprintRun] = []
     private var ticker: Timer?
     private var held: UIDeviceOrientation = .portrait   // how the phone is held (the screen stays portrait)
@@ -645,6 +646,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         let now = CACurrentMediaTime()
         DispatchQueue.main.async {
             self.startedAt = now
+            self.startedWall = Date()
             self.timeLabel.backgroundColor = UIColor(red: 1, green: 0.23, blue: 0.19, alpha: 1)
             self.ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
                 guard let self, let s = self.startedAt else { return }
@@ -669,21 +671,23 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     // the runs heard so far go into the video, which is written in the background while the
     // next sprint can already be filmed.
     private func finish(_ url: URL) {
-        let runs = self.runs
+        let runs = self.runs, wall = startedWall
         saving += 1
         closeButton.isHidden = false
         UIApplication.shared.isIdleTimerDisabled = false
         show(runs.isEmpty ? "Ukladám video…" : "Ukladám video s časmi…")
-        guard !runs.isEmpty else { save(url, runs: runs, burned: false); return }
+        guard !runs.isEmpty else { save(url, raw: url, wall: wall, runs: runs, burned: false); return }
         SprintBurner.burn(url, runs: runs, fps: actualFps) { out in
-            DispatchQueue.main.async { self.save(out ?? url, runs: runs, burned: out != nil) }
+            DispatchQueue.main.async { self.save(out ?? url, raw: url, wall: wall, runs: runs, burned: out != nil) }
         }
     }
 
-    private func save(_ url: URL, runs: [SprintRun], burned: Bool) {
+    // raw: the clip without the ring, kept in tmp for the page to analyse (the ring sits over the
+    // feet at the bottom of the frame).
+    private func save(_ url: URL, raw: URL, wall: Date?, runs: [SprintRun], burned: Bool) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async { self.done("Skok nemá povolené ukladať do Fotiek. Zapni to v Nastavenia → Skok → Fotky.", runs: runs, burned: burned, path: url) }
+                DispatchQueue.main.async { self.done("Skok nemá povolené ukladať do Fotiek. Zapni to v Nastavenia → Skok → Fotky.", runs: runs, burned: burned, path: url, raw: raw, wall: wall) }
                 return
             }
             PHPhotoLibrary.shared().performChanges({
@@ -691,18 +695,21 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
             }) { ok, _ in
                 DispatchQueue.main.async {
                     let what = burned ? (runs.count == 1 ? "s časom" : "s časmi") : "bez časov"
-                    self.done(ok ? "Uložené do Fotiek \(what)" : "Do Fotiek sa video uložiť nepodarilo.", runs: runs, burned: burned, path: url)
+                    self.done(ok ? "Uložené do Fotiek \(what)" : "Do Fotiek sa video uložiť nepodarilo.", runs: runs, burned: burned, path: url, raw: raw, wall: wall)
                 }
             }
         }
     }
 
-    private func done(_ message: String, runs: [SprintRun] = [], burned: Bool, path: URL? = nil) {
+    private func done(_ message: String, runs: [SprintRun] = [], burned: Bool, path: URL? = nil, raw: URL? = nil, wall: Date? = nil) {
         saving = max(0, saving - 1)
         show(message)
         var data: [String: Any] = ["message": message, "burned": burned, "runs": runs.count, "fps": actualFps]
         if let path { data["path"] = path.path }
-        data["times"] = runs.map { ["name": $0.name, "lap": $0.lap, "legs": $0.legs] }
+        if let raw { data["raw"] = raw.path }
+        if let wall { data["recordedAt"] = Int(wall.timeIntervalSince1970 * 1000) }
+        // arrived: seconds into the clip when the run reached the phone (the chip crossing the last cone + latency)
+        data["times"] = runs.map { ["key": $0.key, "name": $0.name, "lap": $0.lap, "legs": $0.legs, "arrived": $0.arrived] }
         onEvent?("saved", data)
     }
 

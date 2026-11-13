@@ -191,7 +191,12 @@ export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
 
   if (kind === 'fly') {
     // Top speed: the steps are even, so one frequency for the run, touchdown to touchdown.
-    const zone = flyZone(all.filter(s => s.step), run?.lap ?? null);
+    // Filmed in the app: the phone heard the run finish at a known second of the clip, so the timed
+    // stretch is exactly the steps before it. Otherwise the steady steps before the slow-down.
+    const full = all.filter(s => s.step), fin = video.finishAt, lap = run?.lap ?? null;
+    const timed = fin != null && lap ? full.filter(s => s.td >= fin - lap - 0.05 && s.td + s.step <= fin + 0.12) : [];
+    const zone = timed.length >= 3 ? timed : flyZone(full, lap);
+    out.zoneFrom = timed.length >= 3 ? 'freelap' : 'steps';
     const span = zone.length ? zone.at(-1).td + zone.at(-1).step - zone[0].td : NaN;
     out.steps = zone.map(s => ({ ...s }));
     out.freq = r3(zone.length / span);
@@ -204,8 +209,11 @@ export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
   }
 
   // Acceleration: timer zero is the hand leaving the Touch Pro, about 0.35 s before the first step.
+  // When the phone heard the finish (filmed in the app), the Freelap clock gives it too; both are
+  // kept so the run-arrival latency can be measured.
   out.steps = all.map(s => ({ ...s }));
   const zero = video.start?.release;
+  if (video.finishAt != null && run?.lap) out.zeroFromFinish = r3(video.finishAt - run.lap);
   if (legs.length && zero != null) {
     const fit = fitAccel(legs, { tau: TAU[who] ?? TAU_DEFAULT });
     out.fit = { vmax: r3(fit.vmax), tau: r3(fit.tau), r: r3(fit.r), rms: r3(fit.rms) };
