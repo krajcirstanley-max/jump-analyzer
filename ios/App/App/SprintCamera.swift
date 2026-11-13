@@ -86,30 +86,55 @@ enum SprintOverlay {
     static let blue = UIColor(red: 0.20, green: 0.71, blue: 0.94, alpha: 1)
     static let green = UIColor(red: 0.24, green: 0.86, blue: 0.59, alpha: 1)
 
+    /// One frame of the ring timer (Stanley, 2026-11-13: the ring fills once, from the start to
+    /// the finish, not round and round; it is on screen the whole time while filming).
     struct State: Equatable {
         var name: String
-        var clock: Double      // seconds, to the hundredth
-        var legs: [Double]     // the legs passed so far (all of them once finished)
+        var clock: Double        // seconds, to the hundredth
+        var progress: Double     // 0 at the start, 1 at the finish
+        var marks: [Double]      // where the intermediates sit on the ring (share of the run)
+        var legs: [Double]       // the legs passed so far (all of them once finished)
         var final: Bool
-        var key: String { "\(name)|\(clock)|\(legs)|\(final)" }
+        var idle: Bool           // waiting: empty ring, 0,00
+        var flash: Double = 0    // 1 right at the finish, fading to 0
+        var key: String {
+            "\(name)|\(clock)|\((progress * 400).rounded())|\(marks)|\(legs)|\(final)|\(idle)|\((flash * 10).rounded())"
+        }
+
+        static func waiting(_ name: String = "") -> State {
+            State(name: name, clock: 0, progress: 0, marks: [], legs: [], final: false, idle: true)
+        }
+        static func finished(_ name: String, lap: Double, legs: [Double], progress: Double = 1) -> State {
+            State(name: name, clock: lap, progress: progress, marks: marks(legs, lap), legs: legs.count > 1 ? legs : [], final: progress >= 1, idle: false)
+        }
+        static func marks(_ legs: [Double], _ lap: Double) -> [Double] {
+            guard lap > 0, legs.count > 1 else { return [] }
+            var acc = 0.0
+            return legs.dropLast().map { acc += $0; return acc / lap }
+        }
     }
 
     static func sec(_ x: Double) -> String { String(format: "%.2f", x).replacingOccurrences(of: ".", with: ",") }
 
-    /// What the overlay shows at video time t. Each run shows from its start until the next run
-    /// starts; nothing shows before the first one.
+    /// What the ring shows at video time t: waiting until the first run starts, then the run in
+    /// progress (the ring fills with the elapsed share of the lap and closes at the finish), then
+    /// the result held until the next run starts. nil when no run was heard: the video stays clean.
     static func state(at t: Double, runs: [SprintRun]) -> State? {
-        var shown: State?
-        for r in runs.sorted(by: { $0.arrived < $1.arrived }) {
+        let sorted = runs.sorted { $0.arrived < $1.arrived }
+        guard let first = sorted.first else { return nil }
+        var shown = State.waiting(first.name)
+        for r in sorted {
             let finish = r.arrived - latency, start = finish - r.lap
-            if t < start { continue }
+            if t < start { break }
             if t < finish {
                 let el = floor((t - start) * 100) / 100
                 var acc = 0.0, done: [Double] = []
                 for l in r.legs.dropLast() { acc += l; if el >= acc { done.append(l) } }
-                shown = State(name: r.name, clock: el, legs: done, final: false)
+                shown = State(name: r.name, clock: el, progress: max(0, min(1, (t - start) / r.lap)),
+                              marks: State.marks(r.legs, r.lap), legs: done, final: false, idle: false)
             } else {
-                shown = State(name: r.name, clock: r.lap, legs: r.legs.count > 1 ? r.legs : [], final: true)
+                shown = State.finished(r.name, lap: r.lap, legs: r.legs)
+                shown.flash = max(0, 1 - (t - finish) / 0.5)
             }
         }
         return shown
@@ -124,64 +149,82 @@ enum SprintOverlay {
         return UIFont(descriptor: mono, size: size)
     }
 
-    /// The ring timer, as OVR Sprint draws it: a dark disc, a ring that goes round once a second
-    /// while the clock runs and closes in green at the finish, the time in the middle, the athlete
-    /// above it, and the legs as pills under the disc. d is the disc's diameter.
+    /// The ring timer: a dark disc, a thin track with a tick at each intermediate, the progress arc
+    /// from the top (blue while running, green once closed at the finish), the time in the middle
+    /// with the athlete above it, and the legs as pills under the disc. The pill row is always
+    /// reserved, so the disc never moves when they appear. d is the disc's diameter.
     static func image(_ s: State, diameter d: CGFloat, scale: CGFloat) -> UIImage {
-        let line = d * 0.075
+        let line = d * 0.07
         let timeFont = rounded(d * 0.25, .bold)
-        let nameFont = rounded(d * 0.085, .heavy)
-        let unitFont = rounded(d * 0.09, .semibold)
-        let pillFont = rounded(d * 0.1, .bold)
-        let labelFont = rounded(d * 0.075, .semibold)
+        let nameFont = rounded(d * 0.08, .heavy)
+        let unitFont = rounded(d * 0.085, .semibold)
+        let pillFont = rounded(d * 0.095, .bold)
+        let labelFont = rounded(d * 0.07, .semibold)
+        let accent = s.final ? green : blue
 
         let pills: [NSAttributedString] = s.legs.enumerated().map { i, l in
-            let t = NSMutableAttributedString(string: "\(i + 1).  ", attributes: [.font: labelFont, .foregroundColor: UIColor(white: 1, alpha: 0.6)])
+            let t = NSMutableAttributedString(string: "\(i + 1). úsek  ", attributes: [.font: labelFont, .foregroundColor: UIColor(white: 1, alpha: 0.6)])
             t.append(NSAttributedString(string: sec(l), attributes: [.font: pillFont, .foregroundColor: UIColor.white]))
             return t
         }
-        let pillPadX = d * 0.07, pillH = d * 0.17, pillGap = d * 0.04
+        let pillPadX = d * 0.07, pillH = d * 0.16, pillGap = d * 0.035, rowGap = d * 0.06
         let pillWidths = pills.map { $0.size().width + pillPadX * 2 }
         let pillsWidth = pillWidths.reduce(0, +) + pillGap * CGFloat(max(0, pills.count - 1))
         let width = max(d, pillsWidth)
-        let height = d + (pills.isEmpty ? 0 : d * 0.06 + pillH)
+        let height = d + rowGap + pillH
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = false
-        return UIGraphicsImageRenderer(size: CGSize(width: ceil(width), height: ceil(height)), format: format).image { ctx in
-            let c = CGPoint(x: width / 2, y: d / 2), r = d / 2 - line / 2
-            UIColor(white: 0, alpha: 0.5).setFill()
-            UIBezierPath(ovalIn: CGRect(x: c.x - d / 2, y: 0, width: d, height: d)).fill()
+        return UIGraphicsImageRenderer(size: CGSize(width: ceil(width), height: ceil(height)), format: format).image { _ in
+            let c = CGPoint(x: width / 2, y: d / 2), r = d / 2 - line / 2 - d * 0.02
+            let disc = UIBezierPath(ovalIn: CGRect(x: c.x - d / 2, y: 0, width: d, height: d))
+            UIColor(white: 0, alpha: 0.55).setFill()
+            disc.fill()
+            if s.flash > 0 { green.withAlphaComponent(0.35 * s.flash).setFill(); disc.fill() }
+
             let track = UIBezierPath(arcCenter: c, radius: r, startAngle: 0, endAngle: .pi * 2, clockwise: true)
             track.lineWidth = line
-            UIColor(white: 1, alpha: 0.22).setStroke()
+            UIColor(white: 1, alpha: 0.16).setStroke()
             track.stroke()
-            let frac = s.final ? 1 : max(0.002, s.clock.truncatingRemainder(dividingBy: 1))
-            let arc = UIBezierPath(arcCenter: c, radius: r, startAngle: -.pi / 2, endAngle: -.pi / 2 + .pi * 2 * CGFloat(frac), clockwise: true)
-            arc.lineWidth = line
-            arc.lineCapStyle = .round
-            (s.final ? green : blue).setStroke()
-            arc.stroke()
+            if s.progress > 0 {
+                let end = -CGFloat.pi / 2 + .pi * 2 * CGFloat(min(1, s.progress))
+                let arc = UIBezierPath(arcCenter: c, radius: r, startAngle: -.pi / 2, endAngle: end, clockwise: true)
+                arc.lineWidth = line
+                arc.lineCapStyle = s.progress >= 1 ? .butt : .round
+                accent.setStroke()
+                arc.stroke()
+            }
+            for m in s.marks {   // a tick across the track at each intermediate
+                let a = -CGFloat.pi / 2 + .pi * 2 * CGFloat(m)
+                let tick = UIBezierPath()
+                tick.move(to: CGPoint(x: c.x + cos(a) * (r - line * 0.75), y: c.y + sin(a) * (r - line * 0.75)))
+                tick.addLine(to: CGPoint(x: c.x + cos(a) * (r + line * 0.75), y: c.y + sin(a) * (r + line * 0.75)))
+                tick.lineWidth = d * 0.012
+                tick.lineCapStyle = .round
+                UIColor.white.setStroke()
+                tick.stroke()
+            }
 
-            let name = NSAttributedString(string: s.name.uppercased(), attributes: [.font: nameFont, .foregroundColor: s.final ? green : blue, .kern: d * 0.01])
-            let time = NSAttributedString(string: sec(s.clock), attributes: [.font: timeFont, .foregroundColor: UIColor.white])
-            let unit = NSAttributedString(string: "s", attributes: [.font: unitFont, .foregroundColor: UIColor(white: 1, alpha: 0.7)])
+            let dim = UIColor(white: 1, alpha: s.idle ? 0.45 : 1)
+            let label = s.name.isEmpty ? (s.idle ? "FREELAP" : "") : s.name.uppercased()
+            let name = NSAttributedString(string: label, attributes: [.font: nameFont, .foregroundColor: s.idle ? UIColor(white: 1, alpha: 0.55) : accent, .kern: d * 0.012])
+            let time = NSAttributedString(string: sec(s.clock), attributes: [.font: timeFont, .foregroundColor: dim])
+            let unit = NSAttributedString(string: "s", attributes: [.font: unitFont, .foregroundColor: UIColor(white: 1, alpha: s.idle ? 0.35 : 0.7)])
             let ts = time.size(), ns = name.size(), us = unit.size()
             time.draw(at: CGPoint(x: c.x - ts.width / 2, y: c.y - ts.height / 2))
-            name.draw(at: CGPoint(x: c.x - ns.width / 2, y: c.y - ts.height / 2 - ns.height * 0.95))
-            unit.draw(at: CGPoint(x: c.x - us.width / 2, y: c.y + ts.height / 2 - us.height * 0.15))
+            name.draw(at: CGPoint(x: c.x - ns.width / 2, y: c.y - ts.height / 2 - ns.height * 0.9))
+            unit.draw(at: CGPoint(x: c.x - us.width / 2, y: c.y + ts.height / 2 - us.height * 0.2))
 
             var x = (width - pillsWidth) / 2
-            let y = d + d * 0.06
+            let y = d + rowGap
             for (p, w) in zip(pills, pillWidths) {
-                UIColor(white: 0, alpha: 0.55).setFill()
+                UIColor(white: 0, alpha: 0.6).setFill()
                 UIBezierPath(roundedRect: CGRect(x: x, y: y, width: w, height: pillH), cornerRadius: pillH / 2).fill()
                 let ps = p.size()
                 p.draw(at: CGPoint(x: x + (w - ps.width) / 2, y: y + (pillH - ps.height) / 2))
                 x += w + pillGap
             }
-            _ = ctx
         }
     }
 }
@@ -300,6 +343,11 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private let freelapLabel = UILabel()
     private let toast = UILabel()
     private let overlayView = UIImageView()
+    private let liveDiameter: CGFloat = 132
+    private var reveal: CADisplayLink?
+    private var revealStart: CFTimeInterval = 0
+    private var liveKey = ""
+    private var liveRun: (name: String, lap: Double, legs: [Double]) = ("", 0, [])
 
     init(fps: Int, freelapOn: Bool) {
         self.fps = fps
@@ -338,6 +386,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         super.viewWillDisappear(animated)
         UIApplication.shared.isIdleTimerDisabled = false
         NotificationCenter.default.removeObserver(self)
+        reveal?.invalidate(); reveal = nil
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
         queue.async { self.session.stopRunning() }
     }
@@ -384,6 +433,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         toast.alpha = 0
 
         overlayView.contentMode = .center
+        if freelapOn { showLive(.waiting()) }   // the ring is on screen the whole time with Freelap on
         for v in [timeLabel, badge, modeLabel, freelapLabel, toast, overlayView] { v.translatesAutoresizingMaskIntoConstraints = false }
 
         [overlayView, topBar, bottomBar, closeButton, timeLabel, badge, freelapLabel, modeLabel, shutter, toast].forEach(view.addSubview)
@@ -508,7 +558,8 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         guard !busy, actualFps > 0 else { return }
         runs = []
         startedAt = nil
-        overlayView.image = nil
+        reveal?.invalidate(); reveal = nil
+        if freelapOn { showLive(.waiting()) }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("sprint-\(Int(Date().timeIntervalSince1970)).mov")
         let orientation = recordingOrientation()
         UIApplication.shared.isIdleTimerDisabled = true
@@ -604,8 +655,32 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
                 runs.append(SprintRun(key: key, name: name, lap: lap, legs: legs, arrived: CACurrentMediaTime() - s))
             }
         }
-        let state = SprintOverlay.State(name: name, clock: lap, legs: legs.count > 1 ? legs : [], final: true)
-        overlayView.image = SprintOverlay.image(state, diameter: 128, scale: UIScreen.main.scale)
+        // Freelap sends a run only after the finish, so live the ring can't run during the sprint:
+        // when the time comes in, it fills in 0.6 s and closes green. The saved video has it in
+        // step with the run.
+        liveRun = (name, lap, legs)
+        if key == liveKey, reveal == nil {   // the same run again, now with its intermediate
+            showLive(.finished(name, lap: lap, legs: legs))
+            return
+        }
+        liveKey = key
+        reveal?.invalidate()
+        revealStart = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(revealStep))
+        link.add(to: .main, forMode: .common)
+        reveal = link
+    }
+
+    @objc private func revealStep() {
+        let p = min(1, (CACurrentMediaTime() - revealStart) / 0.6)
+        let eased = 1 - pow(1 - p, 3)
+        var st = SprintOverlay.State.finished(liveRun.name, lap: liveRun.lap, legs: liveRun.legs, progress: eased)
+        if p >= 1 { st.flash = 0; reveal?.invalidate(); reveal = nil }
+        showLive(st)
+    }
+
+    private func showLive(_ s: SprintOverlay.State) {
+        overlayView.image = SprintOverlay.image(s, diameter: liveDiameter, scale: UIScreen.main.scale)
     }
 
     @objc private func close() {
