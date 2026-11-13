@@ -43,6 +43,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "run", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "finalize", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
 
@@ -51,15 +52,30 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         let fps = call.getInt("fps") ?? 120
         let freelapOn = call.getBool("freelap") ?? false
         let chips = (call.getObject("chips") ?? [:]).compactMapValues { $0 as? String }
+        let mode = call.getString("mode") ?? "sprint"
+        RsiHold.shared.notify = { [weak self] name, data in self?.notifyListeners(name, data: data) }
         DispatchQueue.main.async {
             guard let host = self.bridge?.viewController else { call.reject("No view"); return }
-            let vc = RecorderViewController(fps: fps, freelapOn: freelapOn, chips: chips)
+            let vc = RecorderViewController(fps: fps, freelapOn: freelapOn, chips: chips, mode: mode)
             vc.onEvent = { [weak self] name, data in self?.notifyListeners(name, data: data) }
             vc.modalPresentationStyle = .overFullScreen   // keeps the web page in the window, so it keeps running
             host.present(vc, animated: true)
             self.recorder = vc
             call.resolve()
         }
+    }
+
+    /// RSI: the analysis is back. marks: [{ from, to, title, big, small }] in seconds of the clip;
+    /// empty saves the clip as filmed. The held clip is written to Photos once, with them.
+    @objc func finalize(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else { call.reject("No id"); return }
+        let marks: [SprintBurner.Mark] = (call.getArray("marks") ?? []).compactMap { v in
+            guard let m = v as? [String: Any], let from = (m["from"] as? NSNumber)?.doubleValue, let to = (m["to"] as? NSNumber)?.doubleValue else { return nil }
+            return SprintBurner.Mark(from: from, to: to, title: m["title"] as? String ?? "", big: m["big"] as? String ?? "", small: m["small"] as? String ?? "")
+        }
+        RsiHold.shared.notify = { [weak self] name, data in self?.notifyListeners(name, data: data) }
+        RsiHold.shared.finalize(id: id, marks: marks)
+        call.resolve()
     }
 
     /// A Freelap run: a new one, or the same run again with its intermediate.
@@ -244,6 +260,54 @@ enum SprintBurner {
         return item
     }
 
+    /// A label shown from `from` to `to` seconds into the clip: a small title, a big number, a line under it.
+    struct Mark { let from: Double; let to: Double; let title: String; let big: String; let small: String }
+
+    static func markImage(_ m: Mark, width w: CGFloat) -> UIImage {
+        let h = w * 0.42, f = UIGraphicsImageRendererFormat.default(); f.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: w, height: h), format: f).image { _ in
+            let card = UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: h), cornerRadius: h * 0.18)
+            UIColor(white: 0, alpha: 0.62).setFill(); card.fill()
+            let center = NSMutableParagraphStyle(); center.alignment = .center
+            let rounded = { (size: CGFloat, weight: UIFont.Weight) -> UIFont in
+                let base = UIFont.systemFont(ofSize: size, weight: weight)
+                return base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
+            }
+            let t = NSAttributedString(string: m.title.uppercased(), attributes: [.font: rounded(h * 0.13, .bold), .foregroundColor: SprintOverlay.green, .kern: 1.2, .paragraphStyle: center])
+            let b = NSAttributedString(string: m.big, attributes: [.font: rounded(h * 0.38, .heavy), .foregroundColor: UIColor.white, .paragraphStyle: center])
+            let sm = NSAttributedString(string: m.small, attributes: [.font: rounded(h * 0.12, .semibold), .foregroundColor: UIColor(white: 1, alpha: 0.85), .paragraphStyle: center])
+            t.draw(in: CGRect(x: 0, y: h * 0.07, width: w, height: h * 0.2))
+            b.draw(in: CGRect(x: 0, y: h * 0.22, width: w, height: h * 0.5))
+            sm.draw(in: CGRect(x: 0, y: h * 0.72, width: w, height: h * 0.2))
+        }
+    }
+
+    /// The RSI numbers onto the clip, top centre, each while it applies.
+    static func burnMarks(_ src: URL, marks: [Mark], fps: Double, done: @escaping (URL?) -> Void) {
+        let asset = AVURLAsset(url: src)
+        let cache = NSCache<NSNumber, CIImage>()
+        let comp = AVMutableVideoComposition(asset: asset) { req in
+            let img = req.sourceImage, t = req.compositionTime.seconds
+            guard let k = marks.lastIndex(where: { t >= $0.from && t < $0.to }) else { req.finish(with: img, context: nil); return }
+            let ext = img.extent, w = (min(ext.width, ext.height) * 0.62).rounded()
+            var o = cache.object(forKey: NSNumber(value: k))
+            if o == nil, let cg = markImage(marks[k], width: w).cgImage { o = CIImage(cgImage: cg); cache.setObject(o!, forKey: NSNumber(value: k)) }
+            guard let ov = o else { req.finish(with: img, context: nil); return }
+            let margin = min(ext.width, ext.height) * 0.08
+            let placed = ov.transformed(by: CGAffineTransform(translationX: ext.midX - ov.extent.width / 2, y: ext.maxY - margin - ov.extent.height))
+            req.finish(with: placed.composited(over: img), context: nil)
+        }
+        comp.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, fps.rounded())))
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHEVCHighestQuality) else { done(nil); return }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("rsi-\(Int(Date().timeIntervalSince1970))-casy.mov")
+        try? FileManager.default.removeItem(at: out)
+        export.outputURL = out
+        export.outputFileType = .mov
+        export.videoComposition = comp
+        export.metadata = [fullSpeed]
+        export.exportAsynchronously { done(export.status == .completed ? out : nil) }
+    }
+
     static func burn(_ src: URL, runs: [SprintRun], fps: Double, done: @escaping (URL?) -> Void) {
         let asset = AVURLAsset(url: src)
         let cache = NSCache<NSString, CIImage>()
@@ -275,6 +339,43 @@ enum SprintBurner {
         export.videoComposition = comp
         export.metadata = [fullSpeed]
         export.exportAsynchronously { done(export.status == .completed ? out : nil) }
+    }
+}
+
+// MARK: - RSI clips waiting for their numbers
+
+/// Lives outside the recorder: the analysis can come back after the camera is closed.
+final class RsiHold {
+    static let shared = RsiHold()
+    var notify: ((String, [String: Any]) -> Void)?
+    private var pending: [String: (url: URL, fps: Double, timer: Timer?)] = [:]
+
+    func hold(_ url: URL, fps: Double) -> String {
+        let id = UUID().uuidString
+        let timer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in self?.finalize(id: id, marks: [], late: true) }
+        pending[id] = (url, fps, timer)
+        return id
+    }
+
+    func finalize(id: String, marks: [SprintBurner.Mark], late: Bool = false) {
+        DispatchQueue.main.async {
+            guard let p = self.pending.removeValue(forKey: id) else { return }
+            p.timer?.invalidate()
+            let save = { (url: URL, burned: Bool) in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                    guard status == .authorized || status == .limited else {
+                        DispatchQueue.main.async { self.notify?("saved", ["message": "Skok nemá povolené ukladať do Fotiek. Zapni to v Nastavenia → Skok → Fotky.", "mode": "rsi"]) }
+                        return
+                    }
+                    PHPhotoLibrary.shared().performChanges({ PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: url, options: nil) }) { ok, _ in
+                        let msg = !ok ? "Do Fotiek sa video uložiť nepodarilo." : burned ? "RSI video uložené do Fotiek s časmi" : late ? "Rozbor neprišiel, video uložené bez časov" : "Video uložené do Fotiek"
+                        DispatchQueue.main.async { self.notify?("saved", ["message": msg, "mode": "rsi", "burned": burned]) }
+                    }
+                }
+            }
+            guard !marks.isEmpty else { save(p.url, false); return }
+            SprintBurner.burnMarks(p.url, marks: marks, fps: p.fps) { out in save(out ?? p.url, out != nil) }
+        }
     }
 }
 
@@ -382,6 +483,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     var onEvent: ((String, [String: Any]) -> Void)?
 
     private let fps: Int
+    private let mode: String              // "sprint" (Freelap ring) or "rsi" (saved after the analysis, with its numbers)
     private let freelapOn: Bool
     private let chips: [String: String]   // chip ID -> athlete name
     private let ear = FreelapEar()
@@ -412,9 +514,10 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private var liveKey = ""
     private var liveRun: (name: String, lap: Double, legs: [Double]) = ("", 0, [])
 
-    init(fps: Int, freelapOn: Bool, chips: [String: String] = [:]) {
+    init(fps: Int, freelapOn: Bool, chips: [String: String] = [:], mode: String = "sprint") {
         self.fps = fps
-        self.freelapOn = freelapOn
+        self.mode = mode
+        self.freelapOn = mode == "rsi" ? false : freelapOn
         self.chips = chips
         super.init(nibName: nil, bundle: nil)
     }
@@ -484,11 +587,11 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
 
         modeLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         modeLabel.textColor = UIColor(red: 1, green: 0.84, blue: 0.04, alpha: 1)
-        modeLabel.attributedText = NSAttributedString(string: "ŠPRINT", attributes: [.kern: 1.5])
+        modeLabel.attributedText = NSAttributedString(string: mode == "rsi" ? "RSI" : "ŠPRINT", attributes: [.kern: 1.5])
 
         freelapLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         freelapLabel.textColor = freelapOn ? SprintOverlay.green : UIColor(white: 1, alpha: 0.6)
-        freelapLabel.text = freelapOn ? "● Freelap" : "Freelap vypnutý"
+        freelapLabel.text = mode == "rsi" ? "" : freelapOn ? "● Freelap" : "Freelap vypnutý"
 
         toast.font = .systemFont(ofSize: 15, weight: .semibold)
         toast.textColor = .white
@@ -672,6 +775,19 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     // next sprint can already be filmed.
     private func finish(_ url: URL) {
         let runs = self.runs, wall = startedWall
+        // RSI (Stanley, 2026-11-14: "namiesto pôvodného"): nothing goes to Photos yet. The page
+        // analyses the clip and sends its numbers back (finalize), and the clip is saved once, with
+        // them burned in. No answer in 3 minutes: saved as filmed, so it is never lost.
+        if mode == "rsi" {
+            closeButton.isHidden = false
+            UIApplication.shared.isIdleTimerDisabled = false
+            let id = RsiHold.shared.hold(url, fps: actualFps)
+            show("Rozoberám… video sa uloží s časmi")
+            var data: [String: Any] = ["id": id, "raw": url.path, "fps": actualFps, "mode": "rsi"]
+            if let wall { data["recordedAt"] = Int(wall.timeIntervalSince1970 * 1000) }
+            onEvent?("recorded", data)
+            return
+        }
         saving += 1
         closeButton.isHidden = false
         UIApplication.shared.isIdleTimerDisabled = false

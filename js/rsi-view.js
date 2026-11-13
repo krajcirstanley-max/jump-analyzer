@@ -95,11 +95,41 @@ function historyHtml(list) {
   return groups;
 }
 
-export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete }) {
+// The app's own camera (ios/App/App/SprintCamera.swift), in its RSI mode. null in Safari.
+function camera(cap = globalThis.Capacitor) {
+  if (!cap?.isNativePlatform?.() || !cap.nativePromise || !cap.addListener) return null;
+  return {
+    open: o => cap.nativePromise('SprintCamera', 'open', o),
+    finalize: o => cap.nativePromise('SprintCamera', 'finalize', o),
+    on: (ev, f) => cap.addListener('SprintCamera', ev, d => d && f(d)),
+  };
+}
+
+// What goes onto the filmed clip, each while it applies: the contact, the flight, then the result.
+// Times in seconds from the start of the clip.
+const s2 = x => num(x, 2), cm = x => `${num(x, 0)} cm`;
+export function rsiMarks(r) {
+  const ts = r.ts, t0 = ts?.[0] ?? 0, dt = 1 / (r.fps || 120), at = f => (ts?.[f] ?? f * dt) - t0;
+  const out = [];
+  for (const j of r.jumps ?? []) {
+    const c = j.contactMs / 1000, fl = j.flightMs / 1000, h = j.heightCm;
+    const down = at(j.td), up = at(j.to) + dt, land = up + fl;
+    out.push({ from: down, to: up, title: 'Na zemi', big: `${s2(c)} s`, small: '' });
+    out.push({ from: up, to: land, title: 'Let', big: `${s2(fl)} s`, small: `výška ${cm(h)} · RSI ${s2(j.rsi)}` });
+    out.push({ from: land, to: land + 2.5, title: 'RSI', big: s2(j.rsi), small: `zem ${s2(c)} s · let ${s2(fl)} s · ${cm(h)}` });
+  }
+  return out.sort((a, b) => a.from - b.from);
+}
+
+export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, cam = camera() }) {
   root.innerHTML = `
     <div class="card"><h2>RSI</h2>
       <p class="note">Natáčaj <b>spredu</b>, pokojne aj z ruky (pohyb telefónu odrátam podľa pozadia), v zábere celé chodidlá a kus okolia. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
-      <label class="btn big-btn" id="rsi-pick">Analyzovať RSI<input type="file" accept="video/*" hidden id="rsi-file"></label>
+      <div class="sp-btns">
+        <label class="btn big-btn" id="rsi-pick">Analyzovať RSI<input type="file" accept="video/*" hidden id="rsi-file"></label>
+        ${cam ? '<button class="btn big-btn" id="rsi-film">Natočiť</button>' : ''}
+      </div>
+      ${cam ? '<p class="note">Natočené v appke (240 fps) sa rozoberie samo a do Fotiek sa uloží jedno video, už s časom na zemi, letom a RSI.</p>' : ''}
       <p class="note hidden" id="rsi-progress" aria-live="polite"></p>
     </div>
     <div class="card hidden" id="rsi-result"></div>
@@ -138,13 +168,12 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete })
     show(rec, to); renderHistory();
   });
 
-  $('rsi-file').addEventListener('change', async e => {
-    const file = e.target.files?.[0]; e.target.value = '';
-    if (!file || busy) return;
+  async function analyze(file, filmed = null) {
+    if (busy && !filmed) return;
     const who = getAthlete(), prog = $('rsi-progress');
-    if (!cloudReady()) { prog.classList.remove('hidden'); prog.textContent = 'Najprv ulož prístupový kľúč v nastaveniach.'; return; }
+    if (!cloudReady()) { prog.classList.remove('hidden'); prog.textContent = 'Najprv ulož prístupový kľúč v nastaveniach.'; if (filmed) cam.finalize({ id: filmed.id, marks: [] }).catch(() => {}); return; }
     busy = true; $('rsi-pick').classList.add('disabled');
-    prog.classList.remove('hidden'); prog.textContent = 'Nahrávam video…';
+    prog.classList.remove('hidden'); prog.textContent = filmed ? 'Rozoberám natočené video…' : 'Nahrávam video…';
     try {
       const { result } = await analyzeInCloud(file, {
         sex: who.sex, name: who.name, height: who.height, mode: 'rsi', boxCm: null, athletes: await roster(),
@@ -157,12 +186,39 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete })
       const list = load(id); list.push(rec); save(id, list);
       prog.classList.add('hidden');
       show(rec, id); renderHistory();
+      // the filmed clip goes to Photos now, once, with the numbers on it
+      if (filmed) cam.finalize({ id: filmed.id, marks: rsiMarks(result) }).catch(() => {});
     } catch (err) {
       prog.textContent = err?.message || 'Analýza zlyhala. Skús to znova.';
+      if (filmed) cam.finalize({ id: filmed.id, marks: [] }).catch(() => {});   // saved as filmed, never lost
     } finally {
       busy = false; $('rsi-pick').classList.remove('disabled');
     }
+  }
+  $('rsi-file').addEventListener('change', e => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (file) analyze(file);
   });
+  if (cam) {
+    $('rsi-film').addEventListener('click', () => cam.open({ fps: 240, mode: 'rsi', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`)));
+    // Filmed clips, one at a time; the camera can stay open meanwhile.
+    const queue = [];
+    cam.on('recorded', async d => {
+      if (d.mode !== 'rsi' || !d.raw) return;
+      queue.push(d);
+      if (queue.length > 1) return;
+      while (queue.length) {
+        const job = queue[0];
+        try {
+          const src = globalThis.Capacitor?.convertFileSrc?.(job.raw) ?? job.raw;
+          const blob = await (await fetch(src)).blob();
+          await analyze(new File([blob], 'rsi.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() }), job);
+        } catch { cam.finalize({ id: job.id, marks: [] }).catch(() => {}); }
+        queue.shift();
+      }
+    });
+    cam.on('saved', d => { if (d.mode === 'rsi') { const prog = $('rsi-progress'); prog.classList.remove('hidden'); prog.textContent = d.message ?? ''; } });
+  }
   // localhost only: lets a developer render a stored result without a server run
   if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__rsiShow = (rec, who = getAthlete().id) => { show(rec, who); renderHistory(); };
   return {
