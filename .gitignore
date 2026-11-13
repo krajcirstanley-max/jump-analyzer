@@ -4,3 +4,4 @@ tests/real/
 tests/fixtures/_real_*
 models/*.onnx
 server/.app-tokens.txt
+www/

@@ -1,0 +1,6 @@
+{
+  "appId": "com.krajcirstanley.skok",
+  "appName": "Skok",
+  "webDir": "www",
+  "ios": { "contentInset": "automatic" }
+}
