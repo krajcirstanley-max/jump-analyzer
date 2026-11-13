@@ -764,7 +764,7 @@ async function confirmDelete(btn) {
     runId++;
     clearResult();
     setWho(null);
-    if (tab === 'result') showTab('progress');
+    if (tab === 'result') showTab('home');   // Progres is hidden for now
   }
   await hist.deleteAttempt(id);
   renderLists();

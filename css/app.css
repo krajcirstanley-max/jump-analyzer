@@ -38,7 +38,7 @@ main { padding: 10px 16px calc(88px + env(safe-area-inset-bottom)); max-width: 6
 .empty p { margin: 4px 0 12px; color: var(--muted); }
 
 .tabs {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
   background: var(--card); border-top: 1px solid var(--line);
   padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
@@ -109,7 +109,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
 .meter > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 .prog-actions { margin-top: 12px; }
-.feel-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 14px 0 6px; }
+.feel-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 14px 0 6px; }
 .feel-b { min-height: 60px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); font-size: 22px; font-weight: 700; cursor: pointer; touch-action: manipulation; font-variant-numeric: tabular-nums; }
 .feel-b:active { background: var(--accent-bg); color: var(--accent); }
 .feel-ends { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
@@ -126,7 +126,7 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .b-mid { --tier: var(--warn); }
 .b-lo { --tier: var(--bad); }
 .b-none { --tier: var(--line); }
-.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; scroll-margin-top: calc(env(safe-area-inset-top) + 8px); }
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; scroll-margin-top: calc(env(safe-area-inset-top) + 8px); }
 .tile {
   display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 76px; padding: 8px 2px 8px; border-radius: 10px;
   border: 1px solid var(--line); background: var(--bg); cursor: pointer; touch-action: manipulation; text-align: center; min-width: 0;
@@ -224,7 +224,7 @@ div.att-open { cursor: default; }
 .player .hud .zm { color: var(--muted); }
 .player .hud .zm[data-slow="1"] { color: var(--warn); }
 .player .scrub { width: 100%; margin: 6px 0 10px; accent-color: var(--accent); height: 32px; }
-.player .controls { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.player .controls { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .player .controls .btn { min-height: 56px; padding: 0; font-variant-numeric: tabular-nums; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 .player .controls .play { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
 .speeds { display: flex; gap: 6px; margin-top: 10px; }
