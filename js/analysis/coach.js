@@ -5,6 +5,8 @@
 // „zdvihni koleno", „natiahni krok", „cykluj nohu", „odraz silnejšie", „vyššie".
 // Faults → fixes from the SOP's short-approach section and doc 08 (technical model).
 
+import { scoreMetric } from './metrics.js';
+
 // Phases and the measurements that score them (weights: how much each phase counts).
 export const PHASES = [
   { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee', 'stepChange'] },
@@ -14,22 +16,20 @@ export const PHASES = [
   { id: 'landing', label: 'Dopad', weight: 0.15, keys: ['landingReach', 'kneeLand', 'hipLand', 'estDistance'] },
 ];
 
-// 100 inside the elite range, falling linearly to 0 at two range-widths outside it
-// (at least 10 units, so narrow ranges don't punish tiny misses).
-export function metricScore(m) {
-  const [lo, hi] = m.norm;
-  const span = Math.max(hi - lo, 10);
-  const miss = m.value < lo ? lo - m.value : m.value > hi ? m.value - hi : 0;
-  return Math.max(0, 100 * (1 - miss / (2 * span)));
-}
+// The same per-metric score as jump.js gives (metrics.js scoreMetric), for metrics that come
+// without one.
+export const metricScore = scoreMetric;
 
+// A phase is its average pulled toward its worst metric (70 / 30), so one clear fault isn't
+// averaged away by five measurements that were fine; the overall score weights the phases.
 export function techniqueScore(metrics) {
   const by = Object.fromEntries(metrics.filter(m => m.status !== 'hidden').map(m => [m.key, m]));
   let total = 0, wsum = 0;
   const phases = PHASES.map(p => {
     const ms = p.keys.map(k => by[k]).filter(Boolean);
     if (!ms.length) return { ...p, score: null };
-    const score = ms.reduce((a, m) => a + (m.score ?? metricScore(m)), 0) / ms.length; // m.score: unit-aware, from jump.js
+    const sc = ms.map(m => m.score ?? metricScore(m));   // m.score: from jump.js
+    const score = 0.7 * (sc.reduce((a, b) => a + b, 0) / sc.length) + 0.3 * Math.min(...sc);
     total += score * p.weight; wsum += p.weight;
     return { ...p, score };
   });

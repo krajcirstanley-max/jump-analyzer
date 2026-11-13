@@ -268,8 +268,24 @@ test('norms have Slovak labels and the phases match the contract', () => {
 
 test('a miss in metres is not forgiven because the unit is small', () => {
   assert.ok(scoreMetric({ value: 7.0, norm: [7.8, 8.6], unit: 'm' }) < 60);
-  assert.ok(metricScore({ value: 7.0, norm: [7.8, 8.6] }) > 90, 'the old floor of 10 units forgave it');
+  assert.equal(metricScore, scoreMetric, 'coach and analysis score a metric the same way');
   assert.equal(scoreMetric({ value: 8.0, norm: [7.8, 8.6], unit: 'm' }), 100);
+});
+
+test('score: 0 at one norm-width outside, with a floor the video can resolve', () => {
+  // over-lowering 10.3 cm against 2-6 cm scored 78 before 2026-11-13
+  assert.equal(scoreMetric({ value: 10.3, norm: [2, 6], unit: 'cm' }), 0);
+  assert.equal(Math.round(scoreMetric({ value: 15.7, norm: [19, 27], unit: '°' })), 59);
+  // a 2 ms miss on a 5 ms-wide norm is under one frame: the 15 ms floor keeps it small
+  assert.ok(scoreMetric({ value: 137, norm: [130, 135], unit: 'ms' }) > 85);
+});
+
+test('score: one clear fault pulls a phase down instead of being averaged away', () => {
+  const ok = k => ({ key: k, value: 1, norm: [0, 2], status: 'ok', score: 100 });
+  const ms = ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin'].map(ok);
+  ms[0] = { ...ms[0], status: 'high', score: 0 };
+  const plant = techniqueScore(ms).phases.find(p => p.id === 'plant');
+  assert.equal(Math.round(plant.score), 56);   // mean 80, worst 0: 0.7·80 + 0.3·0
 });
 
 const real = (name, sex) => {

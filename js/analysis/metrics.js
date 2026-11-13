@@ -116,14 +116,17 @@ export const NORMS = {
   hipLand: { label: 'Bedro pri dopade', unit: '°', m: [83, 108], f: [79, 101] },
 };
 
-// Same falloff as coach.js metricScore, but the minimum span follows the unit: 10 "units" is
-// fine for degrees and ms, and would make any miss in metres or m/s score about 100.
-const MIN_SPAN = { m: 0.4, 'm/s': 1 };
+// 100 inside the norm, falling linearly to 0 at one norm-width outside it. The width has a floor per
+// unit at about what the video can resolve, so a narrow norm doesn't punish a miss the camera can't
+// see (one frame at 120 fps is 8 ms; joint angles carry a few degrees of noise). Until 2026-11-13
+// the fall ran over two widths with a 10-unit floor, and a 10 cm over-lowering against a 2-6 cm
+// norm still scored 78 (Stanley: "skóre celkovo je príliš prívetivé").
+const SPAN_FLOOR = { '°': 6, ms: 15, cm: 3, '%': 4, m: 0.3, 'm/s': 0.5, '°/s': 100 };
 export function scoreMetric(m) {
   const [lo, hi] = m.norm;
-  const span = Math.max(hi - lo, MIN_SPAN[m.unit] ?? 10);
+  const span = Math.max(hi - lo, SPAN_FLOOR[m.unit] ?? 6);
   const miss = m.value < lo ? lo - m.value : m.value > hi ? m.value - hi : 0;
-  return Math.max(0, 100 * (1 - miss / (2 * span)));
+  return Math.max(0, 100 * (1 - miss / span));
 }
 
 // How far the view is from side-on (0 = perfectly side-on, 90 = along the runway),

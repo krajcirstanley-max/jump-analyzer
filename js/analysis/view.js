@@ -15,7 +15,7 @@ const scoreOf = jump => (typeof jump.score === 'number' ? jump.score : jump.scor
 function rangeText(m) {
   const [lo, hi] = m.norm, dp = decimals(m);
   const joined = lo < 0 || hi < 0 ? `${num(lo, dp)} až ${num(hi, dp)}` : `${num(lo, dp)}–${num(hi, dp)}`;
-  return withUnit(m, joined);
+  return withUnit(m, joined) + (m.runup ? ` · pre ${kroky(m.runup)}` : '');
 }
 
 function hiddenReason(m) {
