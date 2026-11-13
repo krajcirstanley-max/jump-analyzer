@@ -17,7 +17,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.7.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -128,7 +128,7 @@ document.addEventListener('click', e => {
 // ---------- Výsledok states ----------
 const els = {
   feel: $('res-feel'), after: $('res-after'), score: $('res-score'), tiles: $('res-tiles'), chips: $('res-chips'),
-  playerCard: $('player-card'), detail: $('res-detail'), speed: $('res-speed'), coach: $('res-coach'), all: $('res-all'),
+  playerCard: $('player-card'), detail: $('res-detail'), speed: $('res-speed'), coach: $('res-coach'), all: $('res-all'), take: $('res-take'),
 };
 
 let current = null;          // inspectClip result of the clip on screen

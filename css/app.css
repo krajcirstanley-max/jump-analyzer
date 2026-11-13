@@ -126,16 +126,16 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .b-mid { --tier: var(--warn); }
 .b-lo { --tier: var(--bad); }
 .b-none { --tier: var(--line); }
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; scroll-margin-top: calc(env(safe-area-inset-top) + 8px); }
+.tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; scroll-margin-top: calc(env(safe-area-inset-top) + 8px); }
 .tile {
   display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 76px; padding: 8px 2px 8px; border-radius: 10px;
   border: 1px solid var(--line); background: var(--bg); cursor: pointer; touch-action: manipulation; text-align: center; min-width: 0;
 }
 .tile-l { font-size: clamp(9px, 2.8vw, 10.5px); line-height: 1.2; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; }
-.tile b { font-size: 22px; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tile b { font-size: 22px; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--tier); }
 .tile-bar { display: block; height: 4px; margin: 2px 6px 0; border-radius: 2px; background: var(--line); overflow: hidden; }
 .tile-bar i { display: block; height: 100%; background: var(--tier); border-radius: 2px; }
-.tile.on { border-color: var(--accent); background: var(--accent-bg); }
+.tile.on { border: 2px solid var(--pro, #3c3489); background: #eeedfe; }
 .tile.on .tile-l { color: var(--accent); }
 
 .keyframes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; min-height: 48px; }
@@ -403,3 +403,36 @@ div.att-open { cursor: default; }
 
 .sp-btns .btn.disabled { opacity: .5; pointer-events: none; }
 .sp-card .banner { margin: 8px 0 0; font-size: 14px; padding: 10px 12px; }
+
+/* Výsledok redesign (2026-11-14) */
+.score { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.score-ring { width: 104px; height: 104px; flex: 0 0 auto; }
+.score-ring .track { fill: none; stroke: var(--line); stroke-width: 10; }
+.score-ring .fill { fill: none; stroke: var(--tier); stroke-width: 10; stroke-linecap: round; }
+.score-ring .n { font-size: 30px; font-weight: 800; text-anchor: middle; fill: var(--text); }
+.score-ring .of { font-size: 11px; text-anchor: middle; fill: var(--muted); }
+.score-side { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.score-side > b { font-size: 16px; }
+.score-l { font-size: 12px; color: var(--muted); }
+.score-side .score-feel { margin: 0; font-size: 12px; padding: 2px 9px; border-radius: 999px; background: #e6f1fb; color: #185fa5; }
+.score-side .score-feel:empty { display: none; }
+.score-est { font-size: 13px; color: var(--muted); }
+.score-est b { color: var(--text); }
+.tile-bar { display: none; }
+.take-card { margin-top: 10px; border-radius: 12px; padding: 10px 12px; background: var(--warn-bg); color: var(--warn); }
+.take-card span { font-size: 12px; }
+.take-card p { margin: 2px 0 0; font-size: 15px; }
+.met-band { position: relative; height: 10px; margin: 8px 0 5px; border-radius: 5px; background: var(--line); }
+.met-band i { position: absolute; top: 0; bottom: 0; background: #9fe1cb; border-radius: 5px; }
+.met-band b { position: absolute; top: -3px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; border: 3px solid var(--card); background: var(--tier); }
+.rhythm { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--bg); }
+.rhythm-l { font-size: 12px; color: var(--muted); }
+.rhythm-bars { display: flex; align-items: flex-end; gap: 4px; height: 76px; margin-top: 6px; }
+.rhythm-bars div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.rhythm-bars i { display: block; width: 100%; background: #9fe1cb; border-radius: 3px 3px 0 0; }
+.rhythm-bars i.last { background: #1d9e75; }
+.rhythm-bars small { font-size: 10px; color: var(--muted); }
+.rhythm .note { margin: 6px 0 0; }
+.fix.first { border-color: #3c3489; }
+.fix.first .fix-tag, .fix.first .linkish { color: #3c3489; }
+.coach .take { display: none; }

@@ -33,16 +33,25 @@ function metricRow(m, on) {
   const go = m.frame != null ? ` data-frame="${m.frame}"` : '';
   return `<div class="met st-${m.status}${on ? ' on' : ''}" data-key="${esc(m.key)}"${go}>
     <div class="met-top"><span>${esc(m.label)}</span><b>${pre}${value(m, m.value)}${off ? ` <i>→ ${value(m, m.target)}</i>` : ''}</b></div>
-    ${m.score != null ? `<div class="met-bar b-${band(m.score)}"><div style="width:${Math.round(m.score)}%"></div></div>` : ''}
-    <div class="met-n">Rozsah ${rangeText(m)}</div>
+    ${bandHtml(m)}
+    <div class="met-n">Norma finalistov ${rangeText(m)}</div>
   </div>`;
+}
+
+// The finalists' range as a band and the athlete as a dot on it (design approved by Stanley,
+// 2026-11-14): what is outside the norm shows at a glance, not only as a score bar.
+function bandHtml(m) {
+  if (!Array.isArray(m.norm) || !Number.isFinite(m.value)) return '';
+  const [lo, hi] = m.norm, span = Math.abs(hi - lo) || 1, a = Math.min(lo, hi) - span * 0.6, b = Math.max(lo, hi) + span * 0.6;
+  const at = v => Math.max(2, Math.min(98, ((v - a) / (b - a)) * 100));
+  const l = at(Math.min(lo, hi)), w = at(Math.max(lo, hi)) - l;
+  return `<div class="met-band b-${band(m.score)}"><i style="left:${l.toFixed(1)}%;width:${w.toFixed(1)}%"></i><b style="left:${at(m.value).toFixed(1)}%"></b></div>`;
 }
 
 function tile(p) {
   const s = p.score == null ? null : Math.round(p.score);
   return `<button class="tile b-${band(s)}" data-phase="${p.id}" aria-pressed="false">
     <span class="tile-l">${p.id === 'pen' ? 'Predposl.' : esc(p.label)}</span><b>${s ?? '–'}</b>
-    <span class="tile-bar"><i style="width:${s ?? 0}%"></i></span>
   </button>`;
 }
 
@@ -97,6 +106,18 @@ function speedHtml(s, sc, ru) {
     <div class="big">${first}${cell('Odraz', s.takeoff)}${lossCell}</div>${split2}${runupHtml(sc, ru)}${jumpLine}
     ${hiddenOne ? `<p class="met-why">${esc(hiddenReason(hiddenOne))}</p>` : ''}
     <details><summary>Ako isté to je?</summary><p>Istota: <b>${esc(s.sure)}</b>. ${esc(s.note)}</p></details>`;
+}
+
+// Every run-up step's time, from the counted contacts: shortening steps into the board, and a
+// longer last one, show without reading a table.
+function rhythmBars(c, fps) {
+  const f = c?.contacts?.map(x => x.frame).filter(Number.isFinite);
+  if (!(f?.length >= 4) || !(fps > 0)) return '';
+  const t = f.slice(1).map((x, i) => (x - f[i]) / fps), lo = Math.min(...t) * 0.85, hi = Math.max(...t);
+  const bars = t.map((v, i) => `<div><i style="height:${(12 + ((v - lo) / (hi - lo || 1)) * 52).toFixed(0)}px"${i === t.length - 1 ? ' class="last"' : ''}></i><small>${i + 2}</small></div>`).join('');
+  const n2 = v => num(v, 2);
+  return `<div class="rhythm"><span class="rhythm-l">Rytmus krokov (čas kroku)</span><div class="rhythm-bars">${bars}</div>
+    <p class="note">Kroky ${n2(t[0])} → ${n2(Math.min(...t.slice(-3, -1)))} s, posledný do dosky ${n2(t.at(-1))} s.</p></div>`;
 }
 
 // The last three foot contacts, named the way the coach says it (3rd-last, penultimate, take-off),
@@ -181,8 +202,26 @@ export function showCoach(els, coach) {
   const top0 = below.getBoundingClientRect().top;
   const above = els.coach.getBoundingClientRect().bottom <= 0;
   els.coach.innerHTML = coachHtml(coach);
+  if (els.take) els.take.innerHTML = takeHtml(coach);
   if (above) scrollBy(0, below.getBoundingClientRect().top - top0);
 }
+
+// Score as a ring, the word for it, the feel and the distance estimate beside it.
+const WORD = s => (s == null ? '' : s >= 85 ? 'výborná' : s >= 70 ? 'dobrá' : s >= 55 ? 'priemerná' : 'slabá');
+function scoreHtml(jump, s, feel) {
+  const r = 44, c = 2 * Math.PI * r, f = s == null ? 0 : Math.max(0, Math.min(1, s / 100));
+  const est = (jump.metrics ?? []).find(m => m.key === 'estDistance' && shown(m));
+  return `<div class="score">
+    <svg class="score-ring b-${band(s)}" viewBox="0 0 104 104" aria-label="Skóre techniky ${s == null ? '' : Math.round(s)} zo 100">
+      <circle cx="52" cy="52" r="${r}" class="track"/><circle cx="52" cy="52" r="${r}" class="fill" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 52 52)"/>
+      <text x="52" y="58" class="n">${s == null ? '–' : Math.round(s)}</text><text x="52" y="76" class="of">/ 100</text></svg>
+    <div class="score-side"><span class="score-l">Technika</span><b>${WORD(s)}</b>
+      <span class="score-feel" data-feel-shown>${feel != null ? `Pocit ${feel}/5` : ''}</span>
+      ${est ? `<span class="score-est">odhad dĺžky <b>≈ ${num(est.value, 2)} m</b></span>` : ''}</div>
+  </div>`;
+}
+// The one thing to take away, under the phases.
+const takeHtml = c => (c?.take ? `<div class="take-card"><span>Hlavná vec</span><p>${esc(c.take)}</p></div>` : '');
 
 // els: slots from index.html. player: null when the clip is no longer on the phone.
 export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null } = {}) {
@@ -192,9 +231,10 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   let chipFrame = null;
 
   const s = scoreOf(jump);
-  els.score.innerHTML = `<div class="score"><span class="score-n">${s == null ? '–' : Math.round(s)}</span><span class="score-of">/ 100</span>${feel != null ? `<span class="score-feel" data-feel-shown>Pocit ${feel}/5</span>` : '<span class="score-feel" data-feel-shown></span>'}</div>`;
+  els.score.innerHTML = scoreHtml(jump, s, feel);
+  if (els.take) els.take.innerHTML = takeHtml(jump.coach);
   els.tiles.innerHTML = phases.map(tile).join('');
-  els.speed.innerHTML = speedHtml(jump.speed, jump.stepCount, runup) + profileHtml(jump.profile) + rhythmHtml(jump.profile) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
+  els.speed.innerHTML = speedHtml(jump.speed, jump.stepCount, runup) + rhythmBars(jump.stepCount, jump.fps) + profileHtml(jump.profile) + rhythmHtml(jump.profile) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
   wireCharts(els.speed);
   els.coach.innerHTML = awaitingCoach ? COACH_WAIT : coachHtml(jump.coach);
   els.all.innerHTML = allNumbers(jump);
