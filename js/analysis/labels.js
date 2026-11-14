@@ -116,8 +116,10 @@ export function idealOverlay(ideals, scale, state) {
   const list = Array.isArray(ideals) ? ideals : [ideals];
   return (ctx, toCanvas, index) => {
     const ideal = state.on && list.find(x => x && x.frame === index);
-    // nothing to move on this frame: a green copy on top of the athlete only hides the skeleton
-    if (!ideal || ideal.changed === false) return;
+    if (!ideal) return;
+    // On a frame where the body is already in the norm the ghost is still drawn (Stanley wants to
+    // see it every time), lighter, so the athlete's own skeleton shows through it.
+    const same = ideal.changed === false;
     const kp = ideal.kp, you = ideal.you;
     const ok = (q, j) => q && Number.isFinite(q[j * 3]) && q[j * 3 + 2] >= 0.5;
     const at = (q, j) => toCanvas(q[j * 3] * scale, q[j * 3 + 1] * scale);
@@ -125,7 +127,7 @@ export function idealOverlay(ideals, scale, state) {
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     // the ghost body: a soft wide band, then a thin core line
-    for (const [w, a] of [[lw * 5, 0.42], [lw * 1.2, 1]]) {
+    for (const [w, a] of same ? [[lw * 5, 0.22], [lw * 0.9, 0.55]] : [[lw * 5, 0.42], [lw * 1.2, 1]]) {
       ctx.globalAlpha = a; ctx.strokeStyle = IDEAL; ctx.lineWidth = w;
       for (const [na, nb] of BONES) {
         const ia = JI[na], ib = JI[nb];
