@@ -89,6 +89,15 @@
   </section>
 
   <!-- Detail of a sprint or an RSI analysis -->
+  <!-- Opýtaj sa: a chat about the jump on screen (server/chat.py) -->
+  <section class="view hidden" id="view-chat">
+    <div class="ch-head"><b>Opýtaj sa</b><small id="ch-sub"></small></div>
+    <div class="ch-ctx" id="ch-ctx"></div>
+    <div class="ch-list" id="ch-list" aria-live="polite"></div>
+    <div class="sugg" id="ch-sugg"></div>
+    <form class="ch-in" id="ch-form"><input id="ch-input" placeholder="Napíš otázku…" autocomplete="off" enterkeyhint="send"><button aria-label="Poslať">↑</button></form>
+  </section>
+
   <section class="view hidden" id="view-detail"><div class="stack hidden" id="fl-run"></div><div class="stack" id="sprint"></div><div class="stack" id="rsi"></div></section>
 
   <!-- Výsledok -->
@@ -121,6 +130,7 @@
       <div class="card" id="res-detail"></div>
       <div class="card" id="res-speed"></div>
       <div class="card" id="res-whatif"></div>
+      <button class="btn primary hidden" id="res-ask">Opýtaj sa na tento skok</button>
       <div class="stack" id="res-coach"></div>
       <details class="card all"><summary>Všetky čísla</summary><div id="res-all"></div></details>
       <button class="btn danger" id="res-del" data-del="">Zmazať pokus</button>

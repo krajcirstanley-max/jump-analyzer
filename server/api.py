@@ -93,7 +93,7 @@ HOLD_MAX_MIN = 45
 HOLD_STALE_S = 45   # no heartbeat for this long: the hold is gone, start a new one
 
 
-def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time, hold=None):
+def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time, hold=None, chat=None):
     from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
     from fastapi.concurrency import run_in_threadpool
     from fastapi.middleware.cors import CORSMiddleware
@@ -139,6 +139,26 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
     @api.get("/warm")
     def warm_status(_=Depends(user)):
         return warm_state()
+
+    # "Opýtaj sa": one question about one jump (chat.py). chat(owner, payload) -> {"answer": str}.
+    @api.post("/chat")
+    async def ask(request: Request, who=Depends(user)):
+        if chat is None:
+            raise HTTPException(503, "Chat nie je na serveri zapnutý.")
+        raw = await request.body()
+        if len(raw) > 60_000:
+            raise HTTPException(413, "Otázka je príliš dlhá.")
+        try:
+            payload = json.loads(raw or b"{}")
+        except ValueError:
+            raise HTTPException(400, "Zlá požiadavka.")
+        try:
+            return await run_in_threadpool(chat, who, payload)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            print("chat failed:", type(e).__name__, str(e)[:200])
+            raise HTTPException(502, str(e) if isinstance(e, RuntimeError) else "Odpoveď sa nepodarilo získať, skús znova.")
 
     @api.post("/cool")
     def cool(_=Depends(user)):

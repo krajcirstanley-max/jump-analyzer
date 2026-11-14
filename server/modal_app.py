@@ -82,7 +82,27 @@ api_image = (
     .env({"PYTHONPATH": "/app/server"})
     .add_local_file(ROOT / "server/api.py", "/app/server/api.py")
     .add_local_file(ROOT / "server/worker.py", "/app/server/worker.py")
+    .add_local_file(ROOT / "server/chat.py", "/app/server/chat.py")
 )
+
+# "Opýtaj sa": Claude Code on a small CPU container, so a question never wakes the GPU.
+# knowledge.md is the athletes' own notes (tools/build-knowledge.mjs), gitignored: it reaches
+# Modal only inside this image.
+chat_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("curl", "xz-utils", "ca-certificates")
+    .run_commands(
+        f"curl -fsSL {NODE_URL} | tar xJ --strip-components=1 -C /usr/local",
+        f"npm install -g --no-audit --no-fund @anthropic-ai/claude-code@{CLAUDE_CODE}",
+        "claude --help | grep -q -- --safe-mode",
+    )
+    .env({"PYTHONPATH": "/app/server"})
+    .add_local_file(ROOT / "server/chat.py", "/app/server/chat.py")
+    .add_local_file(ROOT / "server/worker.py", "/app/server/worker.py")
+    .add_local_file(ROOT / "server/api.py", "/app/server/api.py")   # worker.py imports it (no FastAPI needed at import)
+)
+if (ROOT / "server/knowledge.md").exists():
+    chat_image = chat_image.add_local_file(ROOT / "server/knowledge.md", "/app/server/knowledge.md")
 
 app = modal.App("jump-analyzer")
 jobs = modal.Dict.from_name("jump-jobs", create_if_missing=True)
@@ -172,6 +192,15 @@ class Analyzer:
         self.daemon.stop()
 
 
+@app.function(image=chat_image, region="eu", cpu=1.0, memory=2048, secrets=[claude_secret], timeout=150, scaledown_window=600)
+def ask(owner, payload):
+    from chat import answer
+    from worker import claude_token_for
+
+    k = Path("/app/server/knowledge.md")
+    return answer(payload, claude_token_for(owner, os.environ.get("JUMP_CLAUDE_TOKENS")), k.read_text() if k.exists() else "")
+
+
 @app.function(
     image=api_image,
     region="eu",
@@ -187,6 +216,11 @@ class Analyzer:
 @modal.asgi_app()
 def web():
     from api import create_api, load_tokens
+    from chat import validate
+
+    def chat_call(owner, payload):
+        validate(payload)   # a bad request is a 400 here, without waking the chat container
+        return ask.remote(owner, payload)
 
     return create_api(
         jobs=jobs,
@@ -195,6 +229,7 @@ def web():
         start_job=lambda job_id, owner, params: Analyzer().run.spawn(job_id, owner, params),
         warm=lambda: Analyzer().warm.spawn(),
         hold=lambda: Analyzer().hold.spawn(),
+        chat=chat_call,
         tokens=load_tokens(os.environ.get("JUMP_TOKENS")),
         push_key=os.environ.get("VAPID_PUBLIC", ""),
     )

@@ -152,6 +152,28 @@ def test_training_session_holds_once_extends_and_cools():
     assert e.client.post("/cool").status_code == 401
 
 
+def test_chat_needs_a_token_passes_the_owner_and_maps_errors():
+    seen = []
+    def chat(owner, payload):
+        seen.append((owner, payload))
+        if payload.get("boom") == "bad":
+            raise ValueError("Chýba otázka.")
+        if payload.get("boom") == "down":
+            raise RuntimeError("Odpoveď sa nepodarilo získať, skús znova.")
+        return {"answer": "ok"}
+    e = Env()
+    c = TestClient(A.create_api(jobs=e.jobs, clips_dir=e.path, commit_clips=lambda: None, start_job=lambda *a: None, warm=lambda: None,
+                                tokens={"stanley": "tok-s"}, chat=chat), raise_server_exceptions=False)
+    h = {"Authorization": "Bearer tok-s"}
+    assert c.post("/chat", json={"messages": []}).status_code == 401
+    assert c.post("/chat", headers=h, json={"messages": [{"role": "user", "text": "a"}]}).json() == {"answer": "ok"}
+    assert seen[0][0] == "stanley"
+    assert c.post("/chat", headers=h, json={"boom": "bad"}).status_code == 400
+    r = c.post("/chat", headers=h, json={"boom": "down"})
+    assert r.status_code == 502 and "skús znova" in r.json()["detail"]
+    assert c.post("/chat", headers=h, content=b"x" * 70000).status_code == 413
+
+
 def test_push_subscribe_dedupes_and_validates():
     e = Env()
     h = {"Authorization": "Bearer tok-s"}

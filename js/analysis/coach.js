@@ -36,6 +36,8 @@ export function techniqueScore(metrics) {
   return { score: wsum ? total / wsum : null, phases };
 }
 
+// Titles and takes say what to do and what it brings, never what is wrong (Stanley, 2026-11-14:
+// "pozitívne cues pomáhajú … zlepšenie, nie že si pomalý").
 // Faults in priority order (coaching order from Training Priorities: precise takeoff,
 // then full approach, then vertical, then speed). Coaching text is Slovak, written to
 // be spoken: no gendered past tense, so it reads right for both athletes.
@@ -43,7 +45,7 @@ export function techniqueScore(metrics) {
 // Coaching SOP §2, verbatim, for the next jump. Left out on purpose: „tlač dozadu" (SOP:
 // acceleration only), „ponad" (bounds only), and the two cues over the SOP's own 5-word
 // limit, „očami na značku, nie na dosku" and „ruky dole pri dotyku, hore cez odraz".
-export const APPROVED_CUES = ['vysoké boky', 'stlač zem pod seba', 'ťažká taška', 'predposledný naplocho', 'boky hore cez dosku', 'predposledný je float, nie krok'];
+export const APPROVED_CUES = ['vysoké boky', 'stlač zem pod seba', 'tvrdá pružina', 'predposledný naplocho', 'boky hore cez dosku', 'predposledný je float, nie krok'];
 export const MISKA_ONLY_CUE = 'predposledný je float, nie krok';
 export const PHASE_IDS = ['pen', 'plant', 'toeoff', 'flight', 'landing'];
 
@@ -64,18 +66,18 @@ const TIER = { board: 1, approach: 0.85, vertical: 0.7, rest: 0.5 };
 // (one frame is 8 ms at 120 fps) is no fault. Sides: which status counts.
 const FAULTS = [
   {
-    id: 'longContact', tier: 'board', phase: 'plant', cue: 'ťažká taška',
+    id: 'longContact', tier: 'board', phase: 'plant', cue: 'tvrdá pružina',
     keys: [['contactTO', 'high', 10]],
-    title: 'Noha stojí na doske dlho',
-    take: 'na doske strácaš rýchlosť, noha tam stojí dlhšie, ako treba',
+    title: 'Kratší kontakt na doske',
+    take: 'z kratšieho kontaktu na doske si odnesieš viac rýchlosti',
     body: m => `Kontakt ${val(m)}, finalisti majú ${norm(m)}. Členok povolí až po dopade, takže zem ťa zabrzdí skôr, než ťa odhodí.`,
     why: 'Pri 0,12 s je odraz rozhodnutý ešte pred dotykom. Napätie v členku musí prísť pred doskou a dá sa počuť: ostrý dopad je dobre, plieskavý zle.',
   },
   {
     id: 'overReach', tier: 'board', phase: 'plant', cue: 'stlač zem pod seba',
     keys: [['legTD', 'low', 1], ['inclTD', 'low', 1]],
-    title: 'Chodidlo dopadá príliš vpredu',
-    take: 'chodidlo ti dopadá priďaleko pred telom a doska ťa brzdí',
+    title: 'Chodidlo bližšie pod telo',
+    take: 'keď chodidlo dopadne bližšie pod telo, doska ťa nebude brzdiť',
     body: m => m.key === 'legTD'
       ? `Uhol nohy pri dotyku ${val(m)}, finalisti majú ${norm(m)}. Noha ide do zeme pred telom.`
       : `Telo je pri dotyku ${val(m)} za chodidlom, finalisti majú ${norm(m)}. Noha ide do zeme pred telom.`,
@@ -84,8 +86,8 @@ const FAULTS = [
   {
     id: 'collapse', tier: 'board', phase: 'plant', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
     keys: [['flexion', 'high', 0], ['kneeMin', 'low', 4]],
-    title: 'Koleno na doske povolí',
-    take: 'na doske sa ti prepadá koleno a odraz stráca pružinu',
+    title: 'Pevnejšie koleno na doske',
+    take: 'pevnejšie koleno na doske dá odrazu viac pružiny',
     body: m => m.key === 'flexion'
       ? `Koleno na doske povolí o ${val(m)}, finalisti majú ${norm(m)}. Sadáš namiesto toho, aby noha pružila.`
       : `Koleno klesne až na ${val(m)}, finalisti držia ${norm(m)}. Sadáš namiesto toho, aby noha pružila.`,
@@ -94,72 +96,72 @@ const FAULTS = [
   {
     id: 'stiffKneeTD', tier: 'board', phase: 'plant', cue: 'stlač zem pod seba',
     keys: [['kneeTD', 'low', 6]],
-    title: 'Noha prichádza pokrčená',
-    take: 'noha ti prichádza na dosku už pokrčená',
+    title: 'Vystretejšia noha na dosku',
+    take: 'vystretejšia noha pri dotyku prenesie viac rýchlosti do odrazu',
     body: m => `Koleno pri dotyku ${val(m)}, finalisti majú ${norm(m)}. Pokrčená noha sa pod záťažou ešte poddá.`,
     why: 'Vystretá a napätá noha prenesie rýchlosť do odrazu. Pokrčená ju stratí v kolene.',
   },
   {
     id: 'sitting', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
     keys: [['contactPen', 'high', 15]],
-    title: 'Sedíš na predposlednom kroku',
-    take: 'na predposlednom kroku sedíš a rytmus do dosky sa spomalí',
+    title: 'Prebehni predposledný krok',
+    take: 'keď predposledný krok prebehneš, rytmus do dosky ostane rýchly',
     body: m => `Kontakt na predposlednom ${val(m)}, finalisti majú ${norm(m)}.`,
     why: 'Predposledný pripraví odraz, ale s dlhým kontaktom je z neho brzda. Treba ho prebehnúť, telo klesá len o pár centimetrov.',
   },
   {
     id: 'hipDropHigh', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
     keys: [['hipDrop', 'high', 1.5]],
-    title: 'Boky klesnú priveľa',
-    take: 'pred doskou ti boky klesnú priveľa',
+    title: 'Plytší predposledný krok',
+    take: 'plytší predposledný krok ťa vynesie vyššie do odrazu',
     body: m => `Boky klesnú o ${val(m)}, cieľ je ${norm(m)}.`,
     why: 'Ťažisko má klesnúť asi o 9 cm. Viac už len brzdí a rozbeh sa míňa.',
   },
   {
     id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
     keys: [['hipDrop', 'low', 1.5]],
-    title: 'Boky neklesnú',
-    take: 'do odrazu ideš skoro bez zníženia bokov',
+    title: 'Trochu znížiť boky pred doskou',
+    take: 'malé zníženie bokov pred doskou ti dá z čoho ísť hore',
     body: m => `Boky klesnú len o ${val(m)}, cieľ je ${norm(m)}.`,
     why: 'Bez malého zníženia niet z čoho ísť hore a rýchlosť ostane vodorovná.',
   },
   {
     id: 'flightToBoard', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
     keys: [['flightToBoard', 'high', 10], ['flightToBoard', 'low', 10]],
-    title: 'Rytmus do dosky nesedí',
-    take: 'rytmus posledných dvoch krokov ti nesedí',
+    title: 'Rytmus dlhý – krátky',
+    take: 'rytmus dlhý – krátky v posledných dvoch krokoch udrží rýchlosť až do dosky',
     body: m => `Let do dosky trvá ${val(m)}, finalisti majú ${norm(m)}.`,
     why: 'Dlhší predposledný a kratší posledný krok držia rýchlosť až do dosky. Keď sa rytmus rozsype, odraz to už nedorovná.',
   },
   {
     id: 'steep', tier: 'vertical', phase: 'toeoff', cue: 'boky hore cez dosku',
     keys: [['takeoffAngle', 'high', 0]],
-    title: 'Odraz ide príliš nahor',
-    take: 'odrážaš sa priveľmi nahor a rýchlosť sa mení na výšku, ktorú nevyužiješ',
+    title: 'Viac dopredu cez dosku',
+    take: 'odraz viac dopredu premení rýchlosť na dĺžku namiesto výšky',
     body: m => `Uhol odrazu ${val(m)}, cieľ je ${norm(m)}.`,
     why: 'Strmší odraz znamená dlhší kontakt a brzdenie. Väčší zisk je cez dosku než nad ňou.',
   },
   {
     id: 'flat', tier: 'vertical', phase: 'toeoff', cue: 'boky hore cez dosku',
     keys: [['takeoffAngle', 'low', 1]],
-    title: 'Odraz je plochý',
-    take: 'odraz je plochý a chýba ti čas vo vzduchu',
+    title: 'Strmší odraz',
+    take: 'strmší odraz ti dá viac času vo vzduchu',
     body: m => `Uhol odrazu ${val(m)}, cieľ je ${norm(m)}.`,
     why: 'Plochý odraz nedá čas vo vzduchu a rýchly rozbeh to sám nedotiahne.',
   },
   {
     id: 'diving', tier: 'vertical', phase: 'toeoff', cue: 'vysoké boky',
     keys: [['trunkTO', 'high', 5]],
-    title: 'Trup padá dopredu',
-    take: 'z dosky ideš s trupom vpredu a v lete ťa to začne točiť',
+    title: 'Vzpriamený trup cez dosku',
+    take: 'vzpriamený trup cez dosku ti udrží let pokojný',
     body: m => `Trup pri odraze ${val(m)} vpred, finalisti majú ${norm(m)}.`,
     why: 'Predklon pridá rotáciu, ktorú v lete neopravíš, a doskok je potom kratší.',
   },
   {
     id: 'extension', tier: 'vertical', phase: 'toeoff', cue: 'stlač zem pod seba',
     keys: [['kneeTO', 'low', 4], ['hipTO', 'low', 5]],
-    title: 'Odraz nie je dotiahnutý',
-    take: 'z dosky odchádzaš skôr, než sa noha stihne vystrieť',
+    title: 'Dotiahnutý odraz',
+    take: 'dotiahnutý odraz s vystretou nohou pridá rýchlosť z dosky',
     body: m => m.key === 'kneeTO'
       ? `Koleno pri odraze ${val(m)}, finalisti majú ${norm(m)}.`
       : `Bok pri odraze ${val(m)}, finalisti majú ${norm(m)}.`,
@@ -168,8 +170,8 @@ const FAULTS = [
   {
     id: 'freeSide', tier: 'vertical', phase: 'toeoff', cue: 'boky hore cez dosku',
     keys: [['kneeDrive', 'low', 3], ['thighTO', 'low', 3]],
-    title: 'Voľná strana neblokuje',
-    take: 'voľná strana ti pri odraze nepomáha',
+    title: 'Švih a blok voľnej strany',
+    take: 'švih a blok voľnej strany pridá odrazu výšku bez dlhšieho kontaktu',
     body: m => m.key === 'kneeDrive'
       ? `Švih voľnej nohy pri odraze ${val(m)}, finalisti majú ${norm(m)}.`
       : `Stehno voľnej nohy pri odraze ${val(m)}, finalisti majú ${norm(m)}.`,
@@ -178,24 +180,24 @@ const FAULTS = [
   {
     id: 'speedLow', tier: 'rest', phase: 'pen', cue: 'vysoké boky',
     keys: [['speedLast', 'low', 0.1], ['speedTD', 'low', 0.1]],
-    title: 'Do dosky prichádzaš pomaly',
-    take: 'do dosky prichádzaš pomalšie, než tento skok potrebuje',
+    title: 'Rýchlejšie do dosky',
+    take: 'rýchlejší príchod do dosky ti pridá dĺžku',
     body: m => `Rýchlosť na konci rozbehu ${val(m)}, cieľ je ${norm(m)}. Je to odhad z videa.`,
     why: 'Rozbeh určuje strop skoku. Cue to na doske nezmení, to robí sprint.',
   },
   {
     id: 'trunkAir', tier: 'rest', phase: 'flight', cue: null,
     keys: [['trunkStability', 'high', 0]],
-    title: 'Trup sa v lete hýbe',
-    take: 'v lete sa ti trup točí viac, ako sa dá udržať do doskoku',
+    title: 'Pokojný trup v lete',
+    take: 'pokojnejší trup v lete ťa pripraví na dlhší doskok',
     body: m => `Trup sa v lete pohne o ${val(m)}, cieľ je ${norm(m)}.`,
     why: 'Let dĺžku nepridá, len drží telo v polohe na doskok.',
   },
   {
     id: 'landing', tier: 'rest', phase: 'landing', cue: null,
     keys: [['landingReach', 'low', 0.05], ['kneeLand', 'high', 5], ['hipLand', 'high', 5]],
-    title: 'Doskok skracuje skok',
-    take: 'doskok ti berie centimetre, ktoré už máš z odrazu',
+    title: 'Dlhší doskok',
+    take: 'nohy ďalej dopredu pri doskoku ti pridajú centimetre, ktoré už máš z odrazu',
     body: m => m.key === 'landingReach'
       ? `Päty sú pri doskoku ${val(m)} pred bokmi, finalisti majú ${norm(m)}.`
       : m.key === 'kneeLand'

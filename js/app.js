@@ -14,11 +14,12 @@ import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
 import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
 import { CLOUD_URL } from './config.js';
-import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud } from './cloud.js';
+import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud, askAboutJump } from './cloud.js';
+import { whatIf } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.10.2';
+const APP_VERSION = '0.11.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -113,7 +114,7 @@ document.addEventListener('change', e => {
 // result, a sprint or RSI analysis, the settings. A detail screen has a back button.
 let tab = 'train', backTo = 'train';
 const tabScroll = {};
-const TABS = ['train', 'history', 'progress'], DETAILS = ['result', 'detail', 'settings'];
+const TABS = ['train', 'history', 'progress'], DETAILS = ['result', 'detail', 'settings', 'chat'];
 function showTab(name) {
   if (name === tab) return;
   tabScroll[tab] = scrollY;
@@ -750,6 +751,7 @@ function present(feel, noReplayNote) {
       renderLists();
     },
   });
+  $('res-ask').classList.toggle('hidden', !cloudReady() || !jump || !!jump.error);
 }
 
 // Reopens a saved attempt: its clip, keypoints and numbers, no re-analysis.
@@ -922,7 +924,7 @@ document.addEventListener('click', e => {
   if (it.dataset.item === 'skok') return void openAttempt(it.dataset.id);
   openDetail(it.dataset.item, it.dataset.id, it.dataset.who);
 });
-$('back').addEventListener('click', () => showTab(backTo));
+$('back').addEventListener('click', () => showTab(tab === 'chat' ? 'result' : backTo));
 $('gear').addEventListener('click', () => showTab('settings'));
 
 // The athlete in the header: who Progres shows, and the guess for a clip until the server tells.
@@ -1016,6 +1018,86 @@ function summaryOf(r) {
     playerStats: player?.src.stats, decodeError: r.decodeError, tags: r.tags, ua: navigator.userAgent,
   };
 }
+
+// ---------- Opýtaj sa: a chat about the jump on screen ----------
+// The server sees this jump (numbers against the norms, the O koľko ďalej card, the earlier jumps)
+// plus a digest of the athletes' own notes (server/chat.py). The conversation is kept on the attempt.
+let chat = { id: null, messages: [], busy: false };
+const n2 = (v, d = 2) => (Number.isFinite(v) ? Number(v).toFixed(d).replace('.', ',') : null);
+async function chatContext() {
+  const a = resultAthlete ?? athlete, who = ATHLETES[a];
+  const wi = whatIf(jump, who.sex, { height: who.height });
+  const shown = (jump.metrics ?? []).filter(m => m.status !== 'hidden' && Number.isFinite(m.value))
+    .map(m => ({ key: m.key, label: m.label, value: +Number(m.value).toFixed(2), unit: m.unit, norm: m.norm, status: m.status }));
+  const past = (await hist.listAttempts(a)).filter(r => r.id !== resultId).slice(0, 6).map(r => ({
+    date: (r.recordedAt || r.analysedAt || '').slice(0, 10), score: Number.isFinite(r.score) ? Math.round(r.score) : null,
+    runup: r.runup ?? null, measured: r.measured ?? null, cue: r.cue ?? null,
+  }));
+  return {
+    athlete: who.name, sex: who.sex, heightCm: who.height, pb: profiles[a]?.pb ?? null, goal: who.goal ?? null,
+    recordedAt: currentClip?.recordedAt ?? null, runupSteps: jump.runup ?? null, measuredLength: jump.measured ?? null, split1to11: jump.split ?? jump.speed?.split1to11 ?? null,
+    score: Number.isFinite(jump.score?.score) ? Math.round(jump.score.score) : null, mainPoint: els.pickTake ?? jump.coach?.take ?? null,
+    metrics: shown,
+    whatIf: (wi?.items ?? []).map(x => ({ fault: x.title, metric: x.label, now: x.now, norm: x.target, unit: x.unit, cmTotal: x.total?.map(v => Math.round(v * 100)) ?? null, cue: x.cue,
+      effects: x.effects.map(e => ({ what: e.label, change: e.value, cm: e.cm?.map(v => Math.round(v * 100)) ?? null })) })),
+    earlierJumps: past,
+  };
+}
+function chatSuggestions() {
+  const wi = whatIf(jump, ATHLETES[resultAthlete ?? athlete].sex, { height: ATHLETES[resultAthlete ?? athlete].height });
+  const Q = { speedLow: 'Ako prísť do dosky rýchlejšie?', flat: 'Ako na strmší odraz?', steep: 'Ako na plochší odraz?', hipDropHigh: 'Čo s bokmi v predposlednom?',
+    sitting: 'Ako prebehnúť predposledný?', longContact: 'Ako byť kratšie na doske?', overReach: 'Ako nenaťahovať posledný krok?', landing: 'Ako na lepší doskok?' };
+  const s = (wi?.items ?? []).slice(0, 2).map(x => Q[x.id] ?? `Čo s tým: ${x.title.toLowerCase()}?`);
+  return [...s, 'Zlepšujem sa?'];
+}
+const md = t => esc(t).replace(/„([^“]{1,60})“/g, '<span class="cue">„$1“</span>').split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+function drawChat() {
+  const list = $('ch-list');
+  list.innerHTML = chat.messages.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'bot'}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('')
+    + (chat.busy ? '<div class="msg bot typing"><span></span><span></span><span></span></div>' : '')
+    + (chat.error ? `<p class="banner bad">${esc(chat.error)}</p>` : '');
+  $('ch-sugg').innerHTML = chat.messages.length ? '' : chatSuggestions().map(q => `<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('');
+  $('ch-input').disabled = chat.busy;
+  list.lastElementChild?.scrollIntoView({ block: 'end' });
+}
+async function openChat() {
+  if (!jump || jump.error || !resultId) return;
+  const rec = await hist.getAttempt(resultId);
+  const who = ATHLETES[resultAthlete ?? athlete];
+  chat = { id: resultId, messages: rec?.chat ?? [], busy: false, error: null };
+  const d = new Date(rec?.recordedAt || rec?.analysedAt || Date.now());
+  $('ch-sub').textContent = `${who.name} · skok ${d.getDate()}. ${d.getMonth() + 1}.${rec?.file ? ` · ${rec.file.replace(/\.[^.]+$/, '')}` : ''}`;
+  const by = Object.fromEntries((jump.metrics ?? []).map(m => [m.key, m]));
+  const bits = [['contactTO', 0, 'kontakt', 'ms'], ['takeoffAngle', 1, 'uhol', '°'], ['speedLast', 2, 'rýchlosť', 'm/s'], ['hipDrop', 1, 'boky', 'cm']]
+    .filter(([k]) => by[k] && by[k].status !== 'hidden' && Number.isFinite(by[k].value)).map(([k, d2, l, u]) => `${l} ${n2(by[k].value, d2)}${u === '°' ? '°' : ` ${u}`}`);
+  $('ch-ctx').innerHTML = `Vidí tento skok${bits.length ? `: <b>${esc(bits.join(' · '))}</b>` : ''}, kartu O koľko ďalej, tvoje predošlé skoky a tvoje poznámky.`;
+  showTab('chat');
+  drawChat();
+}
+async function sendChat(text) {
+  text = String(text ?? '').trim();
+  if (!text || chat.busy) return;
+  const id = chat.id;
+  chat.messages.push({ role: 'user', text });
+  chat.busy = true; chat.error = null;
+  drawChat();
+  try {
+    const answer = await askAboutJump(await chatContext(), chat.messages.slice(-12));
+    if (chat.id !== id) return;
+    chat.messages.push({ role: 'assistant', text: answer });
+  } catch (err) {
+    if (chat.id !== id) return;
+    chat.error = err?.message || 'Odpoveď sa nepodarilo získať.';
+    chat.messages.pop();
+    $('ch-input').value = text;
+  }
+  chat.busy = false;
+  drawChat();
+  await hist.patchAttempt(id, { chat: chat.messages.slice(-30) }).catch(() => {});
+}
+$('res-ask').addEventListener('click', () => openChat());
+$('ch-form').addEventListener('submit', e => { e.preventDefault(); const v = $('ch-input').value; $('ch-input').value = ''; sendChat(v); });
+$('ch-sugg').addEventListener('click', e => { const b = e.target.closest('[data-q]'); if (b) sendChat(b.dataset.q); });
 
 // Test hooks: feed a clip or a saved pose result without the picker or the models.
 window.__analyzeFile = analyzeFile;

@@ -536,3 +536,27 @@ div.att-open { cursor: default; }
 .wi .sum b { color: var(--accent); }
 .wi .src { font-size: 12px; color: var(--muted); margin-top: 6px; }
 @media (prefers-color-scheme: dark) { .fx-row.up { background: #12392b; color: #8fdcb8; } .fx-row.down { background: #3d1c18; color: #f2a597; } }
+
+/* 0.11.0: Opýtaj sa (chat about one jump) */
+#res-ask { width: 100%; }
+#view-chat { display: flex; flex-direction: column; min-height: calc(100vh - 140px); }
+#view-chat.hidden { display: none; }
+.ch-head b { font-size: 20px; display: block; }
+.ch-head small { color: var(--muted); font-size: 13px; }
+.ch-ctx { margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.ch-ctx b { color: var(--text); }
+.ch-list { flex: 1; padding: 12px 0 8px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 86%; padding: 10px 13px; border-radius: 16px; font-size: 15px; line-height: 1.4; }
+.msg.me { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 5px; white-space: pre-wrap; }
+.msg.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+.msg.bot p { margin: 0 0 8px; } .msg.bot p:last-child { margin: 0; }
+.msg.bot .cue { display: inline-block; margin: 2px 0; padding: 3px 8px; border-radius: 8px; background: #e3f4ec; color: #146c4c; font-weight: 700; }
+.msg.typing span { display: inline-block; width: 7px; height: 7px; margin: 0 2px; border-radius: 50%; background: var(--muted); animation: blink 1s infinite; }
+.msg.typing span:nth-child(2) { animation-delay: .2s; } .msg.typing span:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.sugg { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 8px; }
+.sugg button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 13px; }
+.ch-in { position: sticky; bottom: calc(env(safe-area-inset-bottom) + 70px); display: flex; gap: 8px; padding: 8px 0; background: var(--bg); }
+.ch-in input { flex: 1; min-height: 44px; border-radius: 22px; border: 1px solid var(--line); padding: 0 14px; font: inherit; font-size: 16px; background: var(--card); color: var(--text); }
+.ch-in button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 18px; }
+@media (prefers-color-scheme: dark) { .msg.bot .cue { background: #12392b; color: #8fdcb8; } }

@@ -218,6 +218,16 @@ export function warmCloud() {
   fetch(`${base()}/warm?minutes=${WARM_MIN}`, { method: 'POST', headers: auth() }).catch(() => {});
 }
 
+// "Opýtaj sa": one question about one jump; the server answers in the athlete's own notes' terms.
+// messages: [{ role: 'user' | 'assistant', text }], the last one the question.
+export async function askAboutJump(jump, messages, { signal } = {}) {
+  if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
+  const r = await fetch(`${base()}/chat`, { method: 'POST', headers: { ...auth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ jump, messages }), signal });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new CloudError(j.detail || `Server odpovedal ${r.status}.`);
+  return j.answer;
+}
+
 export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, onProgress, onResult, signal } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
   if (file.size > MAX_UPLOAD) throw statusError(413);

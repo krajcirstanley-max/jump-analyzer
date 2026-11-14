@@ -75,7 +75,7 @@ test('Miška gets the float cue on a penultimate fault, Stanley does not', () =>
 test('a takeoff fault outranks an equally bad penultimate fault', () => {
   const c = coaching([ms('contactPen', 175, [100, 125]), ms('contactTO', 170, [110, 130])], 'male');
   assert.equal(c.fixes[0].metricKey, 'contactTO');
-  assert.equal(c.nextCue, 'ťažká taška');
+  assert.equal(c.nextCue, 'tvrdá pružina');
 });
 
 test('a much worse lower-priority fault can overtake a marginal board fault', () => {
@@ -122,10 +122,10 @@ const goodReply = () => ({
   take: 'Stanley, na doske si dnes stál dlho a rozbeh sa tam zastavil.',
   strength: 'Noha dopadá pod správnym uhlom.',
   fixes: [
-    { title: 'Dlhý kontakt', body: 'Kontakt 165 ms, finalisti 110–130 ms.', phase: 'plant', metricKey: 'contactTO', cue: 'ťažká taška', why: 'Pred dotykom je rozhodnuté. Najprv povedz, aký to bol pocit.' },
+    { title: 'Dlhý kontakt', body: 'Kontakt 165 ms, finalisti 110–130 ms.', phase: 'plant', metricKey: 'contactTO', cue: 'tvrdá pružina', why: 'Pred dotykom je rozhodnuté. Najprv povedz, aký to bol pocit.' },
     { title: 'Sedíš', body: 'Predposledný 160 ms.', phase: 'pen', metricKey: 'contactPen', cue: null, why: 'Brzdí to.' },
   ],
-  nextCue: 'ťažká taška',
+  nextCue: 'tvrdá pružina',
 });
 const ctx = { metrics: BAD, sex: 'male', name: 'Stanley' };
 const edit = fn => { const c = goodReply(); fn(c); return c; };
@@ -183,7 +183,7 @@ test('writeCoaching returns the validated model answer', async () => {
   const client = mock(reply(goodReply()));
   const c = await writeCoaching({ ...args, client });
   assert.equal(c.source, 'claude');
-  assert.equal(c.nextCue, 'ťažká taška');
+  assert.equal(c.nextCue, 'tvrdá pružina');
   assert.equal(client.calls.length, 1);
 
   const { req, opts } = client.calls[0];
