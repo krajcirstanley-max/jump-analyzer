@@ -8,7 +8,7 @@ import { expectedDistance } from './analysis/runup.js';
 import { coaching } from './analysis/coach.js';
 import { jointLabels, idealOverlay } from './analysis/labels.js';
 import { idealFor } from './analysis/ideal.js';
-import { renderResult, showCoach, runupHtml } from './analysis/view.js';
+import { renderResult, showCoach, runupHtml, firstCellHtml } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
 import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.2';
+const APP_VERSION = '0.9.3';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -213,7 +213,7 @@ async function swapAthlete() {
   if (!showJump()) return;
   await saved;
   const newId = resultId;
-  if (old.feel != null || old.runup != null || old.measured != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null, measured: old.measured ?? null });
+  if (old.feel != null || old.runup != null || old.measured != null || old.split != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null, measured: old.measured ?? null, split: old.split ?? null });
   if (newId === oldId) return;
   // The player still reads the old clip: let go of it, drop the old attempt, open the new one.
   runId++;
@@ -642,9 +642,15 @@ function prefillRunup() {
 // What a full effort from that run-up should reach, from the athlete's PB (runup.js).
 function withExpected(r) {
   const pb = profiles[resultAthlete ?? athlete]?.pb ?? null;
-  return { ...r, pb, judged: jump?.runupJudged ?? null, measured: jump?.measured ?? null, expected: r.value != null && r.value < 18 ? expectedDistance(r.value, pb) : null };
+  const sp = jump?.speed, toe = sp?.jumpFromToe, est = (jump?.metrics ?? []).find?.(m => m.key === 'estDistance' && m.status !== 'hidden')?.value;
+  return { ...r, pb, judged: jump?.runupJudged ?? null, measured: jump?.measured ?? null, split: jump?.split ?? null,
+    videoSplit: sp?.split1to11 ?? null, videoDist: toe > 0 ? toe : est > 0 ? est : null, expected: r.value != null && r.value < 18 ? expectedDistance(r.value, pb) : null };
 }
-const redrawRunup = () => { const el = $('runup'); if (el) el.outerHTML = runupHtml(jump?.stepCount, runup); };
+const redrawRunup = () => {
+  runup = withExpected(runup ?? {});
+  const el = $('runup'); if (el) el.outerHTML = runupHtml(jump?.stepCount, runup);
+  const f = $('sp-first'); if (f && jump?.speed) f.outerHTML = firstCellHtml(jump.speed, runup);
+};
 
 // The confirmed run-up differs from the one the numbers were judged at: judge them again (the
 // speed-dependent norms move with it). The coaching text stays as it was written.
@@ -653,25 +659,40 @@ async function rejudge(id, v) {
   const a = resultAthlete, who = ATHLETES[a];
   const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v });
   if (next.error || id !== resultId) return;
-  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, runup: v });
+  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, split: jump.split, runup: v });
   if (player) { setOverlays(); player.refresh(); }
   await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump });
   if (id === resultId) present(jump.feel ?? null);
   renderLists();
 }
 
-// The distance from the tape, if the athlete wants to write it in. Blank clears it.
-document.addEventListener('change', async e => {
-  const f = e.target.closest('[data-measured]');
-  if (!f || !resultId || !jump) return;
-  const x = parseFloat(String(f.value).trim().replace(',', '.'));
-  const v = x >= 1 && x <= 12 ? Math.round(x * 100) / 100 : null;
-  f.value = v == null ? '' : v.toFixed(2).replace('.', ',');
-  jump.measured = v;
+// The jump length and the 1-11 m time: prefilled from the video, confirmed with the button or
+// typed over (tape, Freelap). Typing saves on its own; blank clears it.
+const CONFIRM = {
+  measured: { field: 'measured', lo: 1, hi: 12 },
+  split: { field: 'split', lo: 0.8, hi: 2.5 },
+};
+async function saveConfirm(k, raw) {
+  if (!resultId || !jump) return;
+  const { field, lo, hi } = CONFIRM[k];
+  const x = parseFloat(String(raw ?? '').trim().replace(',', '.'));
+  const v = x >= lo && x <= hi ? Math.round(x * 100) / 100 : null;
+  jump[field] = v;
+  redrawRunup();
   const id = resultId;
   await saved;
-  await hist.patchAttempt(id, { measured: v });
+  await hist.patchAttempt(id, { [field]: v });
   renderLists();
+}
+document.addEventListener('change', e => {
+  const f = e.target.closest('[data-measured], [data-split]');
+  if (f) saveConfirm('measured' in f.dataset ? 'measured' : 'split', f.value);
+});
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-measured-ok], [data-split-ok]');
+  if (!b) return;
+  const k = 'measuredOk' in b.dataset ? 'measured' : 'split';
+  saveConfirm(k, document.querySelector(k === 'measured' ? '[data-measured]' : '[data-split]')?.value);
 });
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-runup]');
@@ -722,6 +743,7 @@ async function openAttempt(id) {
   jump.feel = rec.feel;
   jump.runup = rec.runup ?? null;
   jump.measured = rec.measured ?? null;
+  jump.split = rec.split ?? null;
   awaitingCoach = !!rec.coachPending;
   resultId = id;
   showPlace(id, rec.athlete);

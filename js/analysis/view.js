@@ -72,6 +72,7 @@ export function runupHtml(c, r) {
     : 'Appka kroky z videa nespočítala.';
   const fromLine = r?.confirmed ? '' : r?.from === 'last' ? ' Predvyplnené podľa posledného potvrdeného rozbehu.' : '';
   return `<div class="runup" id="runup">
+    ${splitRowHtml(r)}
     <div class="runup-row">
       <span class="runup-l">Rozbeh</span>
       <button class="runup-step" data-runup="-2" aria-label="O 2 kroky menej"${v != null && v <= 2 ? ' disabled' : ''}>−</button>
@@ -82,9 +83,44 @@ export function runupHtml(c, r) {
     <p class="note">${seenLine}${fromLine} Počíta sa od značky po dosku vrátane.</p>
     ${r?.expected ? `<p class="note runup-exp">Naplno z ${kroky(r.expected.steps)} je strop okolo <b>${metres(r.expected.mid)}</b> (${num(r.expected.lo, 2)}–${num(r.expected.hi, 2)} m), ${Math.round(r.expected.pct * 100)} % tvojho PB ${metres(r.expected.pb)}.${r.judged === r.value ? ' Uhol odrazu, koleno a rýchlosti sú posudzované pre tento rozbeh.' : ' Po potvrdení sa uhol odrazu, koleno a rýchlosti posúdia pre tento rozbeh.'}</p>`
       : v >= 6 && v < 18 && !(r?.pb > 0) ? '<p class="note runup-exp">Zapíš PB v Progrese a appka povie, koľko by mal skok z tohto rozbehu merať.</p>' : ''}
-    <label class="measured"><span>Nameraná dĺžka</span><input data-measured type="text" inputmode="decimal" autocomplete="off" placeholder="nepovinné" value="${r?.measured != null ? num(r.measured, 2) : ''}"><span>m</span></label>
+    ${lengthRowHtml(r)}
   </div>`;
 }
+
+// Speed and length are prefilled from the video and the athlete confirms them or types the real
+// number over them (Stanley, 2026-11-14: "musím vedieť potvrdiť aj rýchlosť alebo napísať a aj
+// dĺžku"), the same way as the run-up. r.split / r.measured are the saved numbers (null = not yet
+// confirmed); r.videoSplit / r.videoDist what the video read.
+const same = (a, b) => a != null && b != null && Math.abs(a - b) < 0.005;
+const okBtn = (done, attr) => (done ? '<span class="runup-ok">✓ potvrdené</span>' : `<button class="btn small primary" ${attr}>Potvrdiť</button>`);
+function splitRowHtml(r) {
+  const saved = r?.split ?? null, video = r?.videoSplit ?? null, v = saved ?? video;
+  const note = saved != null ? (same(saved, video) ? 'Potvrdené z videa.' : 'Zapísané ručne.')
+    : video != null ? 'Z videa. Potvrď ho, alebo prepíš časom z Freelapu.' : 'Video tento čas neurčilo. Zapíš ho z Freelapu.';
+  return `<div class="conf-row"><span class="runup-l">Čas 1–11 m</span>
+      <input data-split type="text" inputmode="decimal" autocomplete="off" placeholder="napr. 1,10" value="${v != null ? num(v, 2) : ''}"><span class="runup-u">s</span>
+      ${okBtn(saved != null, 'data-split-ok')}</div>
+    <p class="note">${note}</p>`;
+}
+function lengthRowHtml(r) {
+  const saved = r?.measured ?? null, video = r?.videoDist ?? null, v = saved ?? video;
+  const note = saved != null ? (same(saved, video) ? 'Potvrdené z videa.' : 'Zapísané z pásma.')
+    : video != null ? 'Z videa, od odrazovej špičky. Potvrď, alebo prepíš dĺžkou z pásma.' : 'Video dĺžku neurčilo. Zapíš ju z pásma.';
+  return `<div class="conf-row"><span class="runup-l">Dĺžka skoku</span>
+      <input data-measured type="text" inputmode="decimal" autocomplete="off" placeholder="napr. 6,50" value="${v != null ? num(v, 2) : ''}"><span class="runup-u">m</span>
+      ${okBtn(saved != null, 'data-measured-ok')}</div>
+    <p class="note">${note}</p>`;
+}
+
+// The 1-11 m cell: the confirmed or typed time once there is one, else the video's.
+export function firstCellHtml(s, ru) {
+  const sec = v => `${num(v, 2)} s`;
+  const t = ru?.split ?? s?.split1to11 ?? null;
+  if (t == null) return `<div id="sp-first">${cellHtml('Do odrazu', s?.last)}</div>`;
+  const typed = ru?.split != null && !same(ru.split, s?.split1to11);
+  return `<div id="sp-first"><span>1–11 m</span><b>${sec(t)}</b>${typed ? '<small>zapísané</small>' : shown(s?.last) ? `<small>posledný krok ${value(s.last, Math.abs(s.last.value))}</small>` : ''}</div>`;
+}
+const cellHtml = (label, m) => `<span>${label}</span><b>${shown(m) ? value(m, Math.abs(m.value)) : '–'}</b>`;
 
 function speedHtml(s, sc, ru) {
   if (!s) return `<h2>Rýchlosť <small>odhad</small></h2><p class="met-why">Z tohto záberu sa rýchlosť nedá odhadnúť.</p>${runupHtml(sc, ru)}`;
@@ -98,9 +134,7 @@ function speedHtml(s, sc, ru) {
   // Stanley reads speed as a time over a distance (Freelap 1-11 m), so that leads when the
   // cones are in the video; the last step in m/s moves under it.
   const sec = v => `${num(v, 2)} s`;
-  const first = s.split1to11 != null
-    ? `<div><span>1–11 m</span><b>${sec(s.split1to11)}</b>${shown(s.last) ? `<small>posledný krok ${value(s.last, Math.abs(s.last.value))}</small>` : ''}</div>`
-    : cell('Do odrazu', s.last);
+  const first = firstCellHtml(s, ru);
   const split2 = s.split11to21 != null ? `<p class="note">11–21 m: <b>${sec(s.split11to21)}</b></p>` : '';
   return `<h2>Rýchlosť <small>${s.cones ? 'z kužeľov' : s.board ? 'z dosky' : 'odhad'}</small></h2>
     <div class="big">${first}${cell('Odraz', s.takeoff)}${lossCell}</div>${split2}${runupHtml(sc, ru)}${jumpLine}

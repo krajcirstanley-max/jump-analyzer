@@ -64,7 +64,7 @@ export function attemptRecord(jump, { athlete, file, recordedAt }) {
     id: attemptId(athlete, file),
     athlete, file: file.name, size: file.size, recordedAt: recordedAt || now, analysedAt: now,
     score, phases: (jump.phases ?? []).map(p => ({ id: p.id, score: p.score })),
-    metrics, cue: jump.coach?.nextCue ?? null, feel: jump.feel ?? null, runup: jump.runup ?? null, measured: jump.measured ?? null,
+    metrics, cue: jump.coach?.nextCue ?? null, feel: jump.feel ?? null, runup: jump.runup ?? null, measured: jump.measured ?? null, split: jump.split ?? null,
     jump, media: { clip: null, pose: null },
   };
 }

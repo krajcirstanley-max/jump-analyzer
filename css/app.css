@@ -502,3 +502,9 @@ div.att-open { cursor: default; }
 
 /* 0.9.2: way from Tréning to the Freelap list */
 .fl-all { display: block; margin-top: 6px; padding: 6px 0; background: none; border: 0; color: var(--accent); font: inherit; font-size: 15px; font-weight: 600; }
+
+/* 0.9.3: confirm or type the 1-11 m time and the jump length, like the run-up */
+.conf-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.conf-row .runup-l { margin-right: auto; }
+.conf-row input { width: 96px; min-height: 44px; font-size: 20px; font-weight: 700; text-align: center; }
+.conf-row + .note { margin-top: 4px; }
