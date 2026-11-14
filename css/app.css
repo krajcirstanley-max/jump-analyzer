@@ -581,3 +581,5 @@ div.att-open { cursor: default; }
 .tl-sum span { display: block; font-size: 12px; color: var(--muted); }
 .tl-sum b { font-size: 17px; }
 .tl-sum small { display: block; font-size: 12px; color: var(--muted); }
+.ideal-legend .sty { opacity: .55; } .ideal-legend .sty strong { color: inherit; }
+.ideal-legend .sty-note { display: block; width: 100%; color: var(--muted); font-size: 12px; margin-top: 4px; }

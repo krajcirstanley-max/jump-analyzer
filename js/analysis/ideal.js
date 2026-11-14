@@ -241,7 +241,24 @@ export function idealLanding(kp, { s, dir, sex = 'male', bandOf = null }) {
 // Every phase frame with a norm-based ideal, from the same track as the numbers. Each entry:
 // { frame, phase, kp, you, items, changed }. Phases without a published pose norm (the flight)
 // have none.
-export function idealsFor(jump, result, sex = 'male') {
+// The ideal pose, researched 2026-11-14 (77 finalists of WA 2017/2018 and Berlin 2009, correlated
+// with distance inside each final; Bridgett & Linthorne 2006; Shimizu 2012; Jin 2024; Lees 1992):
+// almost no posture angle separates longer from shorter finalist jumps, the bands are min-max of a
+// few athletes, and the band middle can average two styles nobody jumps with. So the ghost aims at
+// the pooled finalist MEAN, shifted only where several sources agree (straighter knee at touchdown,
+// trunk not backward at toe-off, higher free thigh). sd: the spread inside which an angle is the
+// athlete's own style; only angles beyond it are called a fault in the legend.
+export const IDEAL_POSE = {
+  kneeTD: { m: 169, f: 167, sd: 5 }, legTD: { m: 61, f: 60, sd: 3 }, trunkTD: { m: -7, f: -8, sd: 4 }, inclTD: { m: -28, f: -27, sd: 3 },
+  kneeMin: { m: 139, f: 138, sd: 8 },
+  kneeTO: { m: 173, f: 172, sd: 6.4 }, hipTO: { m: 195, f: 195, sd: 8.5 }, trunkTO: { m: 2, f: -1, sd: 5 }, kneeDrive: { m: 80, f: 84, sd: 10 }, inclTO: { m: 18, f: 17.5, sd: 2.5 },
+  kneeLand: { m: 131, f: 133.5, sd: 8 }, hipLand: { m: 95.5, f: 90, sd: 8 },
+};
+const DERIVED = new Set(['hipTO', 'inclTO', 'inclTD']);
+// aim 'mid': the finalists' typical pose (IDEAL_POSE means, else the middle of the norm band), so the ghost shows what an
+// elite position looks like even where the athlete is already inside the band (Stanley, 2026-11-14:
+// "nemám pocit, že toto je ideál odrazu"). aim 'edge': the nearest edge of the band, the old rule.
+export function idealsFor(jump, result, sex = 'male', { aim = 'mid' } = {}) {
   const T = jump?.takeoff;
   if (!T || !result?.clean) return [];
   // Built on the track the skeleton overlay draws (smooth), so every joint the ideal leaves alone
@@ -265,10 +282,22 @@ export function idealsFor(jump, result, sex = 'male') {
     const kp = track[frame];
     if (frame == null || !kp) return;
     const off = key => { const m = by[key]; if (!m || m.frame !== frame || !Number.isFinite(m.value)) return 0; const d = read(kp, key, ls); return Number.isFinite(d) ? m.value - d : 0; };
-    const bandOf = key => NORMS[key][g].map(v => v - off(key));
+    const bandOf = key => {
+      const [lo, hi] = NORMS[key][g], o = off(key);
+      // the derived angles (hip, CoM lean) only have to land inside the band; pinning them to a mean
+      // too fights the angles that set them (IMG_4677 toe-off lean went to 21° against a mean of 18°)
+      if (aim !== 'mid' || DERIVED.has(key)) return [lo - o, hi - o];
+      const c = (IDEAL_POSE[key]?.[g] ?? (lo + hi) / 2) - o;
+      return [c - 0.5, c + 0.5];
+    };
     const id = build(kp, bandOf);
     if (!id) return;
-    const items = id.items.map(it => { const o = off(it.key); return { ...it, you: it.you + o, ideal: it.ideal + o, band: it.band ? NORMS[it.key]?.[g] ?? it.band : null }; });
+    const items = id.items.map(it => {
+      const o = off(it.key), you = it.you + o, P0 = IDEAL_POSE[it.key];
+      // beyond one finalist spread: worth changing; inside it: the athlete's own style
+      const matters = P0 ? Math.abs(you - P0[g]) > P0.sd : it.set;
+      return { ...it, you, ideal: it.ideal + o, band: it.band ? NORMS[it.key]?.[g] ?? it.band : null, matters };
+    });
     out.push({ ...id, items, phase, name, frame, you: kp, changed: items.some(it => it.set) });
   };
   // penultimate: the deepest knee bend there, against the bend one step earlier (penKnee)

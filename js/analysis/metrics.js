@@ -58,7 +58,9 @@ export const NORMS = {
   legTD: { label: 'Uhol nohy pri dotyku', unit: '°', m: [55, 65], f: [56, 64] },
   // Centre of mass to the HEEL from vertical: Graham-Smith & Lees 2005 32.2 ± 2.2, Barros 2007
   // 27.0 ± 3.9 (20-31). WA's -35 to -37 means use an unstated foot point and read ~8° more.
-  inclTD: { label: 'Náklon tela pri dotyku', unit: '°', m: [-36, -26], f: [-36, -26] },
+  // Heel-based data centre on −28 (Berlin 2009 CM-heel 25.6 / 26.4, Lees 1992 28.6 ± 3.2, Barros 27.0):
+  // the old −36..−26 sat ~3° too far back (verification 2026-11-14).
+  inclTD: { label: 'Náklon tela pri dotyku', unit: '°', m: [-33, -23], f: [-32, -22] },
   // WA18: men -5.6 (-16.3 to +0.7), women -7.4 (-18.5 to -1.6); 0 = upright, negative = back.
   trunkTD: { label: 'Trup pri dotyku', unit: '°', m: [-10, 1], f: [-10, -1] },
   // WA17/WA18 men 120.5-158.7, women 123.6-150.6; NEM 136.8 / 137.2.

@@ -20,7 +20,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.13.4';
+const APP_VERSION = '0.14.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -585,7 +585,7 @@ function syncIdeal(i) {
     // the take-off angle's ideal path is drawn on this frame too
     if (flightIdeal && i === flightIdeal.frame) moved.push({ label: `najlepší uhol odrazu (+${Math.round(flightIdeal.gain * 100)} cm)`, ideal: flightIdeal.ideal, you: flightIdeal.you, oneDp: true });
     legend.innerHTML = !show ? '' : moved.length
-      ? `<b>${esc(ideal.name ?? 'Ideál')} · ${moved.some(it => !it.oneDp) ? 'postava v norme finalistov' : 'ideál pre teba'}</b>${moved.map(it => `<span>${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}`
+      ? `<b>${esc(ideal.name ?? 'Ideál')} · priemer finalistov</b>${moved.map(it => `<span class="${it.oneDp || it.matters ? 'mat' : 'sty'}">${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}${moved.some(it => !it.oneDp && !it.matters) ? '<small class="sty-note">Sivé je v rozptyle finalistov, to je tvoj štýl, nie chyba.</small>' : ''}`
       : `<b>${esc(ideal.name ?? '')}: postava je v norme finalistov</b>`;
   }
 }
