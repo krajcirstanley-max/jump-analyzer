@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.10.2';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -742,7 +742,7 @@ document.addEventListener('click', async e => {
 function present(feel, noReplayNote) {
   runup = prefillRunup();
   renderResult(els, jump, player, {
-    feel, noReplayNote, awaitingCoach, runup, sex: ATHLETES[resultAthlete ?? athlete].sex,
+    feel, noReplayNote, awaitingCoach, runup, sex: ATHLETES[resultAthlete ?? athlete].sex, name: ATHLETES[resultAthlete ?? athlete].name, height: ATHLETES[resultAthlete ?? athlete].height,
     onFeel: async n => {
       const id = resultId;
       await saved;

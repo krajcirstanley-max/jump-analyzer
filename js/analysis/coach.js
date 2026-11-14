@@ -287,4 +287,4 @@ export function coaching(metrics = [], sex = 'male', { name, all = false } = {})
 }
 
 // Title per fault id, for the what-if card.
-export const FAULT_INFO = Object.fromEntries(FAULTS.map(f => [f.id, { title: f.title, phase: f.phase }]));
+export const FAULT_INFO = Object.fromEntries(FAULTS.map(f => [f.id, { title: f.title, phase: f.phase, take: f.take }]));

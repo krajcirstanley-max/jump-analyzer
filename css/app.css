@@ -521,3 +521,18 @@ div.att-open { cursor: default; }
 .wi-cue { margin: 6px 0 0; font-weight: 600; }
 .wi .note { margin-top: 4px; }
 .wi-all { margin-top: 10px; }
+
+/* 0.10.1: O koľko ďalej, effects with cm */
+.fx { margin-top: 10px; }
+.fx-l { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.fx-row { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 9px; margin-top: 5px; font-size: 14px; }
+.fx-row span small { display: block; font-weight: 500; opacity: .85; font-size: 13px; margin-top: 1px; }
+.fx-row b.cm { font-size: 16px; white-space: nowrap; }
+.fx-row .ar { font-size: 15px; text-align: center; }
+.fx-row.up { background: #e3f4ec; color: #146c4c; }
+.fx-row.down { background: #fbe7e4; color: #a3392b; }
+.fx-row.same { background: var(--bg); color: var(--muted); }
+.wi .sum { display: flex; justify-content: space-between; margin-top: 8px; padding: 8px; border-top: 1px dashed var(--line); font-size: 14px; }
+.wi .sum b { color: var(--accent); }
+.wi .src { font-size: 12px; color: var(--muted); margin-top: 6px; }
+@media (prefers-color-scheme: dark) { .fx-row.up { background: #12392b; color: #8fdcb8; } .fx-row.down { background: #3d1c18; color: #f2a597; } }

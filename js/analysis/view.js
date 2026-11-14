@@ -245,7 +245,7 @@ export function showCoach(els, coach) {
   const top0 = below.getBoundingClientRect().top;
   const above = els.coach.getBoundingClientRect().bottom <= 0;
   els.coach.innerHTML = coachHtml(coach);
-  if (els.take) els.take.innerHTML = takeHtml(coach);
+  if (els.take) els.take.innerHTML = takeHtml(els.pickTake ? { take: els.pickTake } : coach);
   if (above) scrollBy(0, below.getBoundingClientRect().top - top0);
 }
 
@@ -267,29 +267,43 @@ function scoreHtml(jump, s, feel) {
 // what else moves and its cue; the first one is the one thing to work on now.
 const DP = { '°': 1, cm: 1, ms: 0, 'm/s': 2, m: 2, '%': 0, s: 2 };
 const withU = (v, u) => `${num(v, DP[u] ?? 1)}${u === '°' ? '°' : u ? ` ${u}` : ''}`;
-const cmBand = g => { const [a, b] = g.map(v => Math.round(v * 100)); return a === b ? `+${a} cm` : `+${Math.max(0, a)} až ${b} cm`; };
+// cm with a range only when it is narrow (Stanley: "5-25 je priveľa").
+const cm1 = v => Math.round(v * 100);
+const cmText = (g, signed = true) => {
+  const [a, b] = g.map(cm1), s = v => (signed && v > 0 ? `+${v}` : v < 0 ? `−${Math.abs(v)}` : `${v}`);
+  return b - a <= 2 ? `${s(Math.round((a + b) / 2))} cm` : `${s(a)} až ${Math.abs(b)} cm`;
+};
 export function whatIfHtml(w) {
   if (!w) return '';
-  if (!w.items.length) return '<h2>O koľko ďalej</h2><p class="note">V tomto skoku nie je nič mimo normy, čo by sa dalo vyčísliť.</p>';
+  if (!w.items.length) return '<h2>O koľko ďalej</h2><p class="note">V tomto skoku nie je nič mimo normy.</p>';
+  const ARROW = { up: '▲', down: '▼', same: '=' };
+  // the arrow is the direction of the number, the colour whether it helps
+  const arrow = e => (/^bez/.test(e.value) ? '=' : /^[−-]/.test(e.value) ? '▼' : /^\+|vyššie|strmší/.test(e.value) ? '▲' : ARROW[e.kind]);
+  const eff = e => `<div class="fx-row ${e.kind}"><span class="ar">${arrow(e)}</span><span>${esc(e.label)}<small>${esc(e.value)}</small></span><b class="cm">${e.cm ? (e.kind === 'same' && !e.cm[0] && !e.cm[1] ? '0 cm' : cmText(e.cm)) : 'v čísle vyššie'}</b></div>`;
   const row = (x, i) => `<div class="wi${i === 0 ? ' pick' : ''}">
       ${i === 0 ? '<span class="wi-tag">Teraz zlepšuj toto</span>' : ''}
-      <div class="wi-head"><b>${esc(x.title)}</b><span class="wi-gain">${x.gain ? cmBand(x.gain) : 'bez čísla'}</span></div>
+      <div class="wi-head"><b>${esc(x.title)}</b><span class="wi-gain">${x.total ? cmText(x.total) : ''}</span></div>
       <p class="wi-num">${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}</p>
       ${x.cue ? `<p class="wi-cue">Cue: „${esc(x.cue)}“</p>` : ''}
-      ${x.moves || x.basis ? `<p class="note">${x.moves ? esc(x.moves) : ''}${x.basis ? ` ${x.basis === 'fyzika' ? 'Prepočet z tvojho odrazu.' : 'Odhad zo štúdií.'}` : ''}</p>` : ''}
-      ${!x.gain ? '<p class="note">Centimetre sa pre túto chybu nedajú spoľahlivo vyčísliť.</p>' : ''}
+      ${x.effects.length ? `<div class="fx"><span class="fx-l">Z toho</span>${x.effects.map(eff).join('')}
+        ${x.total ? `<div class="sum"><span>Spolu za túto zmenu</span><b>${cmText(x.total)}</b></div>` : ''}</div>` : ''}
+      <p class="src">${x.basis === 'fyzika' ? 'Prepočet z tvojho odrazu.' : x.basis === 'štúdie' ? 'Z meraní v štúdiách pri rovnakej rýchlosti, štatisticky neisté.' : 'Centimetre sa pre túto chybu nedajú vyčísliť.'}${x.note ? ` ${esc(x.note)}` : ''}</p>
     </div>`;
   return `<h2>O koľko ďalej</h2>
-    <p class="note">Keby bola chyba z tohto skoku v norme. Vyber jednu vec, ďalšie video môže ukázať inú.</p>
+    <p class="note">Keby bola chyba z tohto skoku v norme. Zoradené podľa toho, koľko ťa stojí. Vyber jednu vec, ďalšie video môže ukázať inú.</p>
     ${w.items.map(row).join('')}
-    ${w.together ? `<p class="note wi-all">Všetko naraz sa nesčíta, jedna zmena posunie aj ostatné: spolu asi ${cmBand(w.together)}.</p>` : ''}`;
+    <p class="note wi-all">Zelené pridá, červené uberie, sivé je už v čísle nad ním.${w.together ? ` Rôzne zmeny sa nesčítajú, lebo jedna posunie druhú: všetky naraz asi ${cmText(w.together)}.` : ''}</p>`;
 }
 
 // The one thing to take away, under the phases.
 const takeHtml = c => (c?.take ? `<div class="take-card"><span>Hlavná vec</span><p>${esc(c.take)}</p></div>` : '');
 
 // els: slots from index.html. player: null when the clip is no longer on the phone.
-export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null, sex = 'male' } = {}) {
+export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null, sex = 'male', name = '', height = null } = {}) {
+  // The what-if pick is the one thing; "Hlavná vec" says the same (Stanley approved, 2026-11-14).
+  const wi = whatIf(jump, sex, { height });
+  const pickTake = wi?.items?.[0]?.take;
+  els.pickTake = pickTake && name ? `${name}, ${pickTake}.` : null;
   const phases = jump.phases ?? [];
   const firstFix = jump.coach?.fixes?.[0]?.phase;
   let sel = phases.find(p => p.id === firstFix)?.id ?? phases.find(p => p.id === 'plant')?.id ?? phases[0]?.id;
@@ -297,12 +311,12 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
 
   const s = scoreOf(jump);
   els.score.innerHTML = scoreHtml(jump, s, feel);
-  if (els.take) els.take.innerHTML = takeHtml(jump.coach);
+  if (els.take) els.take.innerHTML = takeHtml(els.pickTake ? { take: els.pickTake } : jump.coach);
   els.tiles.innerHTML = phases.map(tile).join('');
   els.speed.innerHTML = speedHtml(jump.speed, jump.stepCount, runup) + rhythmBars(jump.stepCount, jump.fps) + profileHtml(jump.profile) + rhythmHtml(jump.profile) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
   wireCharts(els.speed);
   els.coach.innerHTML = awaitingCoach ? COACH_WAIT : coachHtml(jump.coach);
-  if (els.whatif) els.whatif.innerHTML = whatIfHtml(whatIf(jump, sex, { preferKey: jump.coach?.fixes?.[0]?.metricKey ?? null }));
+  if (els.whatif) els.whatif.innerHTML = whatIfHtml(wi);
   els.all.innerHTML = allNumbers(jump);
 
   els.playerCard.classList.toggle('hidden', !player);
