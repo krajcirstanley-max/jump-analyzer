@@ -82,7 +82,8 @@ export function jointLabels(jump, result, scale, { skip = null } = {}) {
     const items = [
       { text: `koleno ${a.knee.toFixed(0)}°`, at: at(s + 'knee'), side: jump.dir, accent },
       { text: `bedro ${a.hip.toFixed(0)}°`, at: at(s + 'hip'), side: -jump.dir, accent },
-      { text: `náklon ${signed(a.lean)}`, at: shoulders, side: jump.dir, accent: MID },
+      // the trunk against the vertical, said in words (Stanley: "meranie trupu, je to predné?")
+      { text: `trup ${Math.abs(Math.round(a.lean))}° ${a.lean >= 0 ? 'dopredu' : 'dozadu'}`, at: shoulders, side: jump.dir, accent: MID },
     ].filter(it => it.at[0] >= 0 && it.at[0] <= W && it.at[1] >= 0 && it.at[1] <= H); // zoomed past it
 
     ctx.save();
@@ -196,10 +197,6 @@ export function flightOverlay(jump, result, scale, state, { com, idealCom = null
       ctx.restore();
       pill(label, (ax + bx) / 2, (ay + by) / 2 + (above ? -lw * 6 : lw * 6), color);
     };
-    // the horizontal the angle is read against
-    const [hx, hy] = P2(com);
-    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([lw * 1.5, lw * 1.5]); ctx.lineWidth = lw * 0.6;
-    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + dir * lw * 26 * (ctx.canvas.width > 0 ? 1 : 1), hy); ctx.stroke(); ctx.restore();
     const deg = Math.atan2(vy, vx) * 180 / Math.PI;
     one(com, vx, vy, '#ff8a3d', `ty ${deg.toFixed(1).replace('.', ',')}°`, false);
     if (state?.on && ideal) one(idealCom ?? com, ideal.vx, ideal.vy, IDEAL, `ideál ${String(Math.round(ideal.angle * 10) / 10).replace('.', ',')}°`, true);

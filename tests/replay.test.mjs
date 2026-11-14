@@ -118,7 +118,7 @@ test('labels: only inside the replay, withheld off side-on and on covered frames
   const draw = jointLabels(jump, { smooth, fast }, 1);
   const at = i => { const c = fakeCtx(); draw(c, (x, y) => [x, y], i); return c.texts; };
   assert.equal(at(10).length, 3);
-  assert.ok(at(10).some(t => t.startsWith('koleno')) && at(10).some(t => t.startsWith('bedro')) && at(10).some(t => t.startsWith('náklon')));
+  assert.ok(at(10).some(t => t.startsWith('koleno')) && at(10).some(t => t.startsWith('bedro')) && at(10).some(t => t.startsWith('trup ')));
   assert.equal(at(4).length, 0, 'before the replay');
   assert.equal(at(26).length, 0, 'after the replay');
   assert.equal(at(12).length, 0, 'camera too far off side-on');
