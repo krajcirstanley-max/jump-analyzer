@@ -16,11 +16,11 @@ import { initSprint } from './sprint-view.js';
 import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud, askAboutJump } from './cloud.js';
-import { whatIf, idealTakeoff } from './analysis/whatif.js';
+import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.13.2';
+const APP_VERSION = '0.13.3';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -583,10 +583,10 @@ function syncIdeal(i) {
     const deg = v => `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}°`;
     const moved = (ideal?.items ?? []).filter(it => it.set);
     // the take-off angle's ideal path is drawn on this frame too
-    if (flightIdeal && i === flightIdeal.frame) moved.push({ label: 'uhol odrazu', ideal: flightIdeal.ideal, you: flightIdeal.you, oneDp: true });
+    if (flightIdeal && i === flightIdeal.frame) moved.push({ label: `najlepší uhol odrazu (+${Math.round(flightIdeal.gain * 100)} cm)`, ideal: flightIdeal.ideal, you: flightIdeal.you, oneDp: true });
     legend.innerHTML = !show ? '' : moved.length
-      ? `<b>${esc(ideal.name ?? 'Ideál')} · ideál podľa noriem finalistov</b>${moved.map(it => `<span>${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}`
-      : `<b>${esc(ideal.name ?? '')}: všetky uhly sú v norme</b>`;
+      ? `<b>${esc(ideal.name ?? 'Ideál')} · ${moved.some(it => !it.oneDp) ? 'postava v norme finalistov' : 'ideál pre teba'}</b>${moved.map(it => `<span>${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}`
+      : `<b>${esc(ideal.name ?? '')}: postava je v norme finalistov</b>`;
   }
 }
 function setOverlays() {
@@ -602,10 +602,13 @@ function setOverlays() {
   if (!jump.error) {
     // take-off arrow and flight path; the ideal one when the take-off angle is out of its norm
     const sex = ATHLETES[resultAthlete ?? athlete].sex, to = jump.takeoff?.to, kp = pose.smooth?.[to];
-    const ang = (jump.metrics ?? []).find(m => m.key === 'takeoffAngle' && (m.status === 'low' || m.status === 'high'));
+    // the green path: his own best take-off angle, the one that gives the most distance (whatif.js)
+    const fl = jump.flight, T = fl?.ground?.flightTime, G = 9.81;
+    const drop = Number.isFinite(T) && Number.isFinite(fl?.vyTO) ? ((G * T - fl.vyTO) ** 2 - fl.vyTO ** 2) / (2 * G) : NaN;
+    const best = bestAngle(fl?.vxTO, fl?.vyTO, drop, ATHLETES[resultAthlete ?? athlete].height / 100);
     const idTO = ideals.find(x => x.frame === to);
-    const ideal = ang && Number.isFinite(jump.flight?.vxTO) ? idealTakeoff(jump.flight.vxTO, jump.flight.vyTO, ang.status === 'low' ? ang.norm[0] : ang.norm[1]) : null;
-    flightIdeal = ideal ? { frame: to, you: ang.value, ideal: ideal.angle } : null;
+    const ideal = best && Math.abs(best.angle - best.from) >= 1 ? best : null;
+    flightIdeal = ideal ? { frame: to, you: best.from, ideal: ideal.angle, gain: ideal.gain } : null;
     player.overlays.push(flightOverlay(jump, pose, k, idealState, { com: kp && centreOfMass(kp, sex), idealCom: idTO?.kp ? centreOfMass(idTO.kp, sex) : null, ideal }));
   }
   syncIdeal(player.index);

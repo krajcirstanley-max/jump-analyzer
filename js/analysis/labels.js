@@ -199,6 +199,6 @@ export function flightOverlay(jump, result, scale, state, { com, idealCom = null
     };
     const deg = Math.atan2(vy, vx) * 180 / Math.PI;
     one(com, vx, vy, '#ff8a3d', `ty ${deg.toFixed(1).replace('.', ',')}°`, false);
-    if (state?.on && ideal) one(idealCom ?? com, ideal.vx, ideal.vy, IDEAL, `ideál ${String(Math.round(ideal.angle * 10) / 10).replace('.', ',')}°`, true);
+    if (state?.on && ideal) one(idealCom ?? com, ideal.vx, ideal.vy, IDEAL, `najlepší ${String(Math.round(ideal.angle * 10) / 10).replace('.', ',')}°`, true);
   };
 }

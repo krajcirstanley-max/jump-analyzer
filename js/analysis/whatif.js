@@ -53,6 +53,19 @@ export function idealTakeoff(vx, vy, target) {
   const th0 = (Math.atan2(vy, vx) * 180) / Math.PI, v1 = (Math.hypot(vx, vy) * linV(target)) / linV(th0);
   return { vx: v1 * Math.cos(rad(target)), vy: v1 * Math.sin(rad(target)), angle: target };
 }
+// The take-off angle that gives the most distance for THIS athlete (Stanley, 2026-11-14: "úplný
+// ideál, čo dá najviac cm"): his take-off speed moved along Linthorne's speed-angle curve, the
+// flight from his own take-off and landing heights, minus the shorter take-off and landing distances
+// of a steeper take-off. Searched over 10-30° in 0.1° steps. drop: take-off minus landing CoM height.
+export function bestAngle(vx, vy, drop, heightM = 1.80) {
+  if (![vx, vy, drop].every(Number.isFinite)) return null;
+  const th0 = (Math.atan2(vy, vx) * 180) / Math.PI;
+  const dist = th => { const t = idealTakeoff(vx, vy, th); return t.vx * flightTime(t.vy, drop) - heightM * COEF.linDist * (th - th0); };
+  const d0 = dist(th0);
+  let best = { angle: th0, gain: 0 };
+  for (let th = 10; th <= 30 + 1e-9; th += 0.1) { const g = dist(th) - d0; if (g > best.gain) best = { angle: Math.round(th * 10) / 10, gain: g }; }
+  return { ...idealTakeoff(vx, vy, best.angle), gain: best.gain, from: th0 };
+}
 const flightTime = (vy, drop) => (vy + Math.sqrt(Math.max(0, vy * vy + 2 * G * drop))) / G;
 const band = (f, [a, b]) => { const x = f(a), y = f(b); return [Math.min(x, y), Math.max(x, y)]; };
 const add = (...bs) => bs.reduce((s, b) => [s[0] + b[0], s[1] + b[1]], [0, 0]);
@@ -77,7 +90,7 @@ export function whatIf(jump, sex = 'male', { height = null } = {}) {
 
   const items = ranked.map(({ id, m, cue }) => {
     const info = FAULT_INFO[id] ?? {};
-    const target = m.status === 'high' ? m.norm[1] : m.norm[0];
+    let target = m.status === 'high' ? m.norm[1] : m.norm[0];
     const miss = Math.abs(m.value - target);
     const it = { id, title: info.title ?? m.label, take: info.take ?? null, img: info.img ?? null, metricKey: m.key, label: m.label, now: m.value, target, unit: m.unit, cue, effects: [], total: null, basis: null };
     const E = (label, value, cm, kind) => it.effects.push({ label, value, cm, kind: kind ?? (cm && mid(cm) < 0 ? 'down' : cm ? 'up' : 'same') });
@@ -106,16 +119,21 @@ export function whatIf(jump, sex = 'male', { height = null } = {}) {
       it.numText = `Rýchlosť do dosky: ${fx(fl.speedLast, 2)} → ${fx(vTarget, 2)} m/s (1–11 m bežíš ${fx(fl.approach, 2)} m/s)`;
       if (dv > 0) E('Rýchlosť pri odraze', `${sgn(mid(COEF.transfer) * dv, 2)} m/s`, COEF.transfer.map(t => t * dv * T));
       it.basis = 'fyzika';
-    } else if (id === 'flat' && physics) {
-      // His take-off speed moved along the measured speed-angle curve to the target angle.
+    } else if ((id === 'flat' || id === 'steep') && physics) {
+      // His take-off speed moved along the measured speed-angle curve to his own best angle (the
+      // most distance), when it lies on the fault's side; else to the norm edge.
+      const h0 = Number.isFinite(height) ? height / 100 : sex === 'female' ? 1.68 : 1.80;
+      const best = bestAngle(vx, vy, drop, h0);
+      if (best && (id === 'flat' ? best.angle > m.value + 0.5 : best.angle < m.value - 0.5)) { target = best.angle; it.target = target; it.label = 'Uhol odrazu (najlepší pre teba)'; }
       const th0 = (Math.atan2(vy, vx) * 180) / Math.PI, v0 = Math.hypot(vx, vy);
       const v1 = (v0 * linV(target)) / linV(th0), vx1 = v1 * Math.cos(rad(target)), vy1 = v1 * Math.sin(rad(target));
+      void v0;
       const T1 = flightTime(vy1, drop), [b0, b1] = COEF.linBand, one = d => [d, d];
       const h = Number.isFinite(height) ? height / 100 : sex === 'female' ? 1.68 : 1.80;
       const parts = [vx * (T1 - T), (vx1 - vx) * T1, -h * COEF.linDist * (target - th0)];
-      E('Zvislá rýchlosť', `${sgn(vy1 - vy, 2)} m/s · let ${sgn(T1 - T, 2)} s`, one(parts[0]));
+      E(vy1 >= vy ? 'Zvislá rýchlosť' : 'Zvislá rýchlosť (menej)', `${sgn(vy1 - vy, 2)} m/s · let ${sgn(T1 - T, 2)} s`, one(parts[0]));
       E('Vodorovná rýchlosť pri odraze', `${sgn(vx1 - vx, 2)} m/s`, one(parts[1]));
-      E('Kratšia vzdialenosť pri odraze a doskoku', `strmší odraz o ${fx(target - th0, 1)}°`, one(parts[2]));
+      E(target > th0 ? 'Kratšia vzdialenosť pri odraze a doskoku' : 'Dlhšia vzdialenosť pri odraze a doskoku', `${target > th0 ? 'strmší' : 'plochší'} odraz o ${fx(Math.abs(target - th0), 1)}°`, one(parts[2]));
       // the band belongs to the net result (the fit's spread moves all three parts together)
       const net = parts.reduce((x, y) => x + y, 0);
       it.fixedTotal = [net * b0, net * b1].sort((p, q) => p - q);

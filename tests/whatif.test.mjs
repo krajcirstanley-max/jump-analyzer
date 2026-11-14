@@ -15,13 +15,14 @@ const jump = () => ({
 
 test('flat take-off (Linthorne 2005 curve): vertical gain, horizontal cost and shorter take-off/landing distances; the total is their sum', () => {
   const x = whatIf(jump(), 'male', { height: 186 }).items.find(i => i.id === 'flat');
-  assert.equal(x.target, NORMS.takeoffAngle.m[0]);
+  // his own best angle on the speed-angle curve (20.0° for IMG_4677), not the norm edge
+  assert.ok(x.target >= NORMS.takeoffAngle.m[0] && x.target <= 22, `${x.target}`);
   const [up, down, dist] = x.effects;
   assert.equal(up.kind, 'up'); assert.equal(down.kind, 'down'); assert.equal(dist.kind, 'down');
   const net = up.cm[0] + down.cm[0] + dist.cm[0];
   assert.ok(x.total[0] <= net && net <= x.total[1]);
-  // the verification's recomputation for IMG_4677: +24 cm (21-27)
-  assert.ok(net > 0.21 && net < 0.27, `${net}`);
+  // at 19° the verification gave +24 cm; at his best angle it is a little more
+  assert.ok(net > 0.21 && net < 0.30, `${net}`);
   assert.ok(x.total[1] - x.total[0] < 0.07, 'the range stays narrow');
 });
 
@@ -54,4 +55,12 @@ test('nothing out of the norm: an empty list, no pick', () => {
   const w = whatIf({ metrics: [metric('takeoffAngle', 21, 'ok')], flight: {} }, 'male');
   assert.equal(w.items.length, 0);
   assert.equal(w.pick, null);
+});
+
+test('best angle: the most distance on the speed-angle curve beats the norm edge', async () => {
+  const { bestAngle } = await import('../js/analysis/whatif.js');
+  const G = 9.81, T = 0.7, vy = 2.22, drop = ((G * T - vy) ** 2 - vy * vy) / (2 * G);
+  const b = bestAngle(7.9, vy, drop, 1.86);
+  assert.ok(b.angle > 19 && b.angle < 21.5, `${b.angle}`);
+  assert.ok(b.gain > 0.2 && b.gain < 0.3, `${b.gain}`);
 });
