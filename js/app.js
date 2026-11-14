@@ -12,12 +12,13 @@ import { renderResult, showCoach, runupHtml } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
 import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
+import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud } from './cloud.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.7.4';
+const APP_VERSION = '0.8.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -65,16 +66,20 @@ async function roster() {
 
 // RSI tab: its own screen and storage.
 const rsiView = initRsi({
-  root: document.getElementById('rsi'), athletes: ATHLETES,
+  root: document.getElementById('rsi'), athletes: ATHLETES, bare: true,
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster, rememberAthlete,
+  onProgress: t => trainProgress(t),
+  onDone: ({ rec, who }) => { refreshFeeds(); openDetail('rsi', rec.id, who); },
 });
 
 // Freelap tab: Start listens for the chips, Stop takes nothing in.
 const freelapView = initFreelap({ root: document.getElementById('freelap'), athletes: ATHLETES });
 // Sprint tab: film in the app; Freelap runs heard while filming go onto the video.
 const sprintView = initSprint({
-  root: document.getElementById('sprint'), athletes: ATHLETES, freelap: freelapView,
+  root: document.getElementById('sprint'), athletes: ATHLETES, freelap: freelapView, bare: true,
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
+  onProgress: t => trainProgress(t),
+  onDone: rec => { refreshFeeds(); openDetail('sprint', rec.id); },
 });
 
 // Blank clears the field; anything outside a plausible jump is ignored.
@@ -97,21 +102,30 @@ document.addEventListener('change', e => {
 });
 
 // ---------- tabs ----------
-let tab = 'home';
+// Three tabs (Tréning, História, Progres) and three detail screens reached from them: a jump
+// result, a sprint or RSI analysis, the settings. A detail screen has a back button.
+let tab = 'train', backTo = 'train';
 const tabScroll = {};
+const TABS = ['train', 'history', 'progress'], DETAILS = ['result', 'detail', 'settings'];
 function showTab(name) {
   if (name === tab) return;
   tabScroll[tab] = scrollY;
+  if (TABS.includes(tab)) backTo = tab;
   tab = name;
-  for (const t of ['home', 'result', 'progress', 'rsi', 'sprint']) $(`view-${t}`).classList.toggle('hidden', t !== name);
-  if (name === 'rsi') rsiView.shown();
-  if (name === 'sprint') { sprintView.shown(); freelapView.shown(); }   // Freelap lives under Sprint
+  for (const t of [...TABS, ...DETAILS]) $(`view-${t}`).classList.toggle('hidden', t !== name);
+  $('back').classList.toggle('hidden', !DETAILS.includes(name));
+  $('who').classList.toggle('hidden', name === 'result' || name === 'settings');
+  $('gear').classList.toggle('hidden', DETAILS.includes(name));
+  if (name === 'train' || name === 'history') refreshFeeds();
+  if (name === 'progress') renderLists();
+  if (name === 'history' && histFilter === 'freelap') freelapView.shown();
   document.querySelectorAll('.tab').forEach(b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
   $('res-who').classList.toggle('hidden', name !== 'result' || !resultAthlete);
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === name || (DETAILS.includes(name) && b.dataset.tab === backTo)));
   if (name !== 'result') player?.pause();
   scrollTo(0, tabScroll[name] ?? 0);
 }
@@ -204,7 +218,7 @@ async function swapAthlete() {
 let isBusy = false;
 function setBusy(on) {
   isBusy = on;
-  document.querySelector('.tab[data-tab=result]').classList.toggle('busy', on);
+  document.querySelector('.tab[data-tab=train]').classList.toggle('busy', on);
 }
 
 // One state at a time: idle, progress, message, or the result itself.
@@ -259,7 +273,7 @@ $('res-cancel').addEventListener('click', () => {
   runId++;
   clearResult();
   setWho(null);
-  showTab('home');
+  showTab('train');
 });
 $('res-notify').addEventListener('click', async () => {
   $('res-notify').hidden = true;
@@ -730,10 +744,117 @@ async function renderLists() {
   const ids = Object.keys(ATHLETES);
   const all = await Promise.all(ids.map(a => hist.listAttempts(a)));
   ids.forEach((a, i) => { lastRunup[a] = all[i].findLast(r => r.runup != null)?.runup ?? null; });
+  const i = ids.indexOf(athlete);
+  $('trends').innerHTML = trendsHtml({ who: athlete, name: ATHLETES[athlete].name, runs: freelapView.runs(), attempts: all[i], rsi: rsiView.records() });
   const root = $('progress');
-  root.innerHTML = ids.map((a, i) => hist.progressHtml(all[i], profiles[a], ATHLETES[a].name, a)).join('');
+  root.innerHTML = hist.progressHtml(all[i], profiles[athlete], ATHLETES[athlete].name, athlete);
   root.querySelectorAll('[data-ath]').forEach(hist.wireTrend);
 }
+
+// ---------- Tréning and História ----------
+const KINDS = {
+  skok: { hint: 'Kto skáče, appka zistí z videa sama. Natočené v appke ide 240 fps; z Fotiek vyber originál (Share → Export Unmodified Original → Files).' },
+  sprint: { hint: 'Natočené v appke ide 120 fps a s Freelapom aj s časmi vo videu. Rozbor príde sám.' },
+  rsi: { hint: 'Drop jump, odrazy, prekážky aj výskok z miesta. Natáčaj spredu, celé chodidlá v zábere. Natočené v appke sa uloží s časmi.' },
+};
+let kind = 'skok', histFilter = 'all';
+try { const k = localStorage.getItem('jump.kind'); if (k in KINDS) kind = k; } catch { /* storage blocked */ }
+function drawKind() {
+  document.querySelectorAll('.segc [data-kind]').forEach(b => b.classList.toggle('on', b.dataset.kind === kind));
+  $('train-hint').textContent = KINDS[kind].hint;
+  $('train-film').classList.toggle('hidden', !jumpCam);
+}
+function trainProgress(t) {
+  $('train-progress').textContent = t || '';
+  $('train-progress').classList.toggle('hidden', !t);
+}
+// The app's own camera, for jumps (sprint and RSI open it from their modules). null in Safari.
+const jumpCam = (() => {
+  const cap = globalThis.Capacitor;
+  if (!cap?.isNativePlatform?.() || !cap.nativePromise || !cap.addListener) return null;
+  return { open: o => cap.nativePromise('SprintCamera', 'open', o), on: (ev, f) => cap.addListener('SprintCamera', ev, d => d && f(d)) };
+})();
+// A jump filmed in the app: saved to Photos as filmed, and analysed like an upload.
+jumpCam?.on('saved', async d => {
+  if (d.mode !== 'jump' || !d.raw) return;
+  try {
+    const src = globalThis.Capacitor?.convertFileSrc?.(d.raw) ?? d.raw;
+    const blob = await (await fetch(src)).blob();
+    analyzeFile(new File([blob], `skok-${d.recordedAt ?? Date.now()}.mov`, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }));
+  } catch (e) { trainProgress(`Natočený skok sa nepodarilo otvoriť: ${e?.message ?? e}`); }
+});
+document.querySelector('.segc').addEventListener('click', e => {
+  const b = e.target.closest('[data-kind]');
+  if (!b) return;
+  kind = b.dataset.kind;
+  try { localStorage.setItem('jump.kind', kind); } catch { /* storage blocked */ }
+  drawKind(); drawFreelapMini();
+});
+$('train-film').addEventListener('click', () => {
+  if (kind === 'sprint') return sprintView.film();
+  if (kind === 'rsi') return rsiView.film();
+  jumpCam?.open({ fps: 240, mode: 'jump', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
+});
+
+// Freelap at a glance on Tréning; its runs, by training, under História → Freelap.
+function drawFreelapMini() {
+  const el = $('fl-mini'), s = freelapView.listener.state, on = s === 'on' || s === 'starting';
+  const today = freelapView.runs().filter(r => new Date(r.at).toDateString() === new Date().toDateString()).length;
+  el.classList.toggle('hidden', !freelapView.listener || (kind !== 'sprint' && !on));
+  el.innerHTML = `<div><b>Freelap</b> <span class="${s === 'on' ? 'fl-on' : 'fl-off'}">${s === 'on' ? '● počúva' : s === 'starting' ? 'zapína sa…' : 'vypnutý'}</span>
+    <small>${today ? `${today} ${today === 1 ? 'beh' : today < 5 ? 'behy' : 'behov'} dnes` : 'dnes zatiaľ žiadny beh'} · časy v Histórii</small></div>
+    <button class="btn" data-fl-mini="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>`;
+}
+$('fl-mini').addEventListener('click', e => {
+  const b = e.target.closest('[data-fl-mini]');
+  if (!b) return;
+  if (b.dataset.flMini === 'start') freelapView.listener.start(); else freelapView.listener.stop();
+  setTimeout(drawFreelapMini, 300); setTimeout(drawFreelapMini, 1500);
+});
+freelapView.onRun(() => { drawFreelapMini(); refreshFeeds(); });
+
+async function feedItems() {
+  const jumps = (await Promise.all(Object.keys(ATHLETES).map(a => hist.listAttempts(a)))).flat().map(r => jumpSummary(r, ATHLETES));
+  return [...jumps, ...sprintView.records().map(r => sprintView.summary(r)), ...rsiView.records().map(r => rsiView.summary(r))]
+    .filter(it => Number.isFinite(it.at));
+}
+async function refreshFeeds() {
+  const items = await feedItems();
+  $('today').innerHTML = todayHtml(items);
+  if (histFilter !== 'freelap') $('hist-list').innerHTML = listHtml(items, histFilter);
+}
+$('hist-filter').addEventListener('click', e => {
+  const b = e.target.closest('[data-f]');
+  if (!b) return;
+  histFilter = b.dataset.f;
+  document.querySelectorAll('#hist-filter [data-f]').forEach(x => x.classList.toggle('on', x === b));
+  const fl = histFilter === 'freelap';
+  $('freelap').classList.toggle('hidden', !fl);
+  $('hist-list').classList.toggle('hidden', fl);
+  if (fl) freelapView.shown(); else refreshFeeds();
+});
+
+// A row opens its detail screen.
+function openDetail(k, id, who) {
+  $('sprint').classList.toggle('hidden', k !== 'sprint');
+  $('rsi').classList.toggle('hidden', k !== 'rsi');
+  if (k === 'sprint') sprintView.open(id); else rsiView.open(id, who);
+  tabScroll.detail = 0;
+  showTab('detail');
+  scrollTo(0, 0);
+}
+document.addEventListener('click', e => {
+  const it = e.target.closest('[data-item]');
+  if (!it) return;
+  if (it.dataset.item === 'skok') return void openAttempt(it.dataset.id);
+  openDetail(it.dataset.item, it.dataset.id, it.dataset.who);
+});
+$('back').addEventListener('click', () => showTab(backTo));
+$('gear').addEventListener('click', () => showTab('settings'));
+
+// The athlete in the header: who Progres shows, and the guess for a clip until the server tells.
+function drawWho() { $('who').innerHTML = `${esc(ATHLETES[athlete].name)}<span class="who-swap" aria-hidden="true">⇄</span>`; }
+$('who').addEventListener('click', () => { rememberAthlete(otherAthlete(athlete)); drawWho(); if (tab === 'progress') renderLists(); });
 
 document.addEventListener('click', e => {
   const open = e.target.closest('[data-open]');
@@ -766,7 +887,7 @@ async function confirmDelete(btn) {
     runId++;
     clearResult();
     setWho(null);
-    if (tab === 'result') showTab('home');   // Progres is hidden for now
+    if (tab === 'result') showTab(backTo);
   }
   await hist.deleteAttempt(id);
   renderLists();
@@ -795,13 +916,17 @@ $('cloud-save').addEventListener('click', () => {
 renderCloud();
 
 // Before the picker: the upload takes about as long as a cold start of the server.
-document.querySelector('label[for=file]').addEventListener('click', () => { if (cloudReady()) warmCloud(); });
+$('train-pick').addEventListener('click', () => { if (cloudReady()) warmCloud(); });
 
 $('file').addEventListener('change', e => {
   const f = e.target.files?.[0];
-  if (f) analyzeFile(f);
   e.target.value = '';
+  if (!f) return;
+  if (kind === 'sprint') sprintView.upload(f);
+  else if (kind === 'rsi') rsiView.analyze(f);
+  else analyzeFile(f);
 });
+drawKind(); drawWho(); drawFreelapMini(); refreshFeeds();
 
 renderLists();
 resumeCoaches();

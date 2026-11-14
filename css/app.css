@@ -436,3 +436,42 @@ div.att-open { cursor: default; }
 .fix.first { border-color: #3c3489; }
 .fix.first .fix-tag, .fix.first .linkish { color: #3c3489; }
 .coach .take { display: none; }
+
+/* Navigation since 2026-11-14: three tabs, the athlete and the gear in the header */
+.top { gap: 10px; padding-top: calc(env(safe-area-inset-top) + 8px); }
+.who-chip { display: inline-flex; align-items: center; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 0; background: var(--card); box-shadow: 0 0 0 1px var(--line); font: inherit; font-size: 15px; font-weight: 700; color: var(--text); touch-action: manipulation; }
+.who-chip .who-swap { margin-left: 6px; }
+.top-back { min-height: 36px; padding: 0 12px 0 4px; border: 0; background: none; font: inherit; font-size: 16px; font-weight: 600; color: var(--accent); touch-action: manipulation; }
+.gear { margin-left: auto; width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--card); box-shadow: 0 0 0 1px var(--line); display: flex; align-items: center; justify-content: center; touch-action: manipulation; }
+.gear svg { width: 19px; height: 19px; fill: none; stroke: var(--muted); stroke-width: 1.8; }
+.tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.train-card h2 { font-size: 22px; margin-bottom: 12px; }
+.segc { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--bg); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+.segc button { border: 0; background: none; padding: 9px 0; border-radius: 9px; font: inherit; font-size: 15px; font-weight: 600; color: var(--muted); touch-action: manipulation; }
+.segc button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.train-card .sp-btns .btn { min-height: 56px; }
+.train-progress { font-weight: 600; color: var(--accent); }
+.fl-mini { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.fl-mini small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.fl-on { color: #1d9e75; font-weight: 600; } .fl-off { color: var(--muted); font-weight: 500; }
+.feed-day { margin: 12px 0 2px; font-size: 13px; color: var(--muted); }
+.feed-day:first-child { margin-top: 0; }
+.feed-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 0; border: 0; border-top: 1px solid var(--line); background: none; font: inherit; color: var(--text); text-align: left; touch-action: manipulation; }
+.feed-ic { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+.k-sprint { background: #e1f5ee; color: #085041; } .k-rsi { background: #faeeda; color: #854f0b; } .k-skok { background: #eeedfe; color: #3c3489; }
+.feed-t { flex: 1; min-width: 0; }
+.feed-t b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-t small { color: var(--muted); font-size: 12.5px; }
+.feed-v { text-align: right; font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; }
+.feed-v small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.filt { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.filt button { border: 0; padding: 6px 12px; border-radius: 999px; background: var(--bg); font: inherit; font-size: 13px; color: var(--muted); touch-action: manipulation; }
+.filt button.on { background: var(--btn); color: var(--btn-text); }
+.trend-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.trend-l { margin: 0; font-size: 12.5px; color: var(--muted); }
+.trend-v { margin: 2px 0; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.trend-v span { font-size: 14px; font-weight: 500; color: var(--muted); }
+.trend-spark { width: 120px; height: 34px; flex: 0 0 auto; }
+.trend-spark polyline { fill: none; stroke-width: 2; stroke: #1d9e75; } .trend-spark circle { fill: #1d9e75; }
+.t-p .trend-spark polyline { stroke: #3c3489; } .t-p .trend-spark circle { fill: #3c3489; }
+.t-o .trend-spark polyline { stroke: #ba7517; } .t-o .trend-spark circle { fill: #ba7517; }

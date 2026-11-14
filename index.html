@@ -31,33 +31,67 @@
 </head>
 <body>
 <header class="top">
+  <button class="top-back hidden" id="back" aria-label="Späť">‹ Späť</button>
+  <button class="who-chip" id="who" aria-label="Prepnúť atléta"></button>
   <button class="top-who hidden" id="res-who" aria-label="Zmeniť atléta pri tomto pokuse"></button>
+  <button class="gear" id="gear" aria-label="Nastavenia"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
 </header>
 
 <main>
-  <!-- Domov -->
-  <section class="view" id="view-home">
-    <label class="btn primary go" for="file">Nahrať video</label>
-    <p class="hint">Kto skáče, appka zistí z videa sama.</p>
-    <input type="file" id="file" accept="video/*,.mov,.mp4" hidden>
-    <p class="hint">Vyber originál: <b>Photos → Share → Export Unmodified Original → Files</b>, potom tu <b>Choose File</b>. Photo Library dá len 30 fps kópiu.</p>
+  <!-- Tréning: what you're doing, film or upload, Freelap, today's analyses -->
+  <section class="view" id="view-train">
+    <div class="card train-card">
+      <h2>Tréning</h2>
+      <div class="segc" role="tablist" aria-label="Druh rozboru">
+        <button data-kind="skok">Skok</button><button data-kind="sprint">Šprint</button><button data-kind="rsi">RSI</button>
+      </div>
+      <div class="sp-btns">
+        <button class="btn go primary" id="train-film">Natočiť</button>
+        <label class="btn go" id="train-pick">Nahrať<input type="file" id="file" accept="video/*,.mov,.mp4" hidden></label>
+      </div>
+      <p class="note" id="train-hint"></p>
+      <p class="note train-progress hidden" id="train-progress" aria-live="polite"></p>
+    </div>
+    <div class="card fl-mini" id="fl-mini"></div>
+    <div class="card" id="today"></div>
+  </section>
 
-    <details class="card settings">
-      <summary>Nastavenia</summary>
+  <!-- História: every analysis, filtered; Freelap times under their own filter -->
+  <section class="view hidden" id="view-history">
+    <div class="card">
+      <h2>História</h2>
+      <div class="filt" id="hist-filter">
+        <button data-f="all" class="on">Všetko</button><button data-f="skok">Skok</button><button data-f="sprint">Šprint</button><button data-f="rsi">RSI</button><button data-f="freelap">Freelap</button>
+      </div>
+      <div id="hist-list"></div>
+    </div>
+    <div class="stack hidden" id="freelap"></div>
+  </section>
+
+  <!-- Progres: trends for the athlete in the header, then PB and goal -->
+  <section class="view hidden" id="view-progress"><div class="stack" id="trends"></div><div class="stack" id="progress"></div></section>
+
+  <!-- Nastavenia (the gear in the header) -->
+  <section class="view hidden" id="view-settings">
+    <div class="card settings">
+      <h2>Nastavenia</h2>
       <label class="field"><span>Kľúč k serveru</span>
         <input id="cloud-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="vlož kľúč">
       </label>
       <button class="btn" id="cloud-save">Uložiť kľúč</button>
       <p class="note" id="cloud-state"></p>
       <p class="note" id="ver"></p>
-    </details>
+    </div>
   </section>
+
+  <!-- Detail of a sprint or an RSI analysis -->
+  <section class="view hidden" id="view-detail"><div class="stack" id="sprint"></div><div class="stack" id="rsi"></div></section>
 
   <!-- Výsledok -->
   <section class="view hidden" id="view-result">
     <div class="card empty" id="res-empty">
       <p>Zatiaľ tu nič nie je.</p>
-      <button class="btn" data-tab="home">Nahrať video</button>
+      <button class="btn" data-tab="train">Natočiť alebo nahrať</button>
     </div>
 
     <div class="card hidden" id="res-progress" aria-live="polite">
@@ -88,30 +122,17 @@
     </div>
   </section>
 
-  <!-- Progres -->
-  <section class="view hidden" id="view-progress"><div class="stack" id="progress"></div></section>
-
-  <!-- RSI -->
-  <section class="view hidden" id="view-rsi"><div class="stack" id="rsi"></div></section>
-
-  <!-- Sprint -->
-  <section class="view hidden" id="view-sprint"><div class="stack" id="sprint"></div><div class="stack" id="freelap"></div></section>
-
 </main>
 
 <nav class="tabs" aria-label="Hlavná navigácia">
-  <button class="tab on" data-tab="home" aria-current="page">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg><span>Domov</span>
+  <button class="tab on" data-tab="train" aria-current="page">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10l3-3h3v16H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>Tréning</span>
   </button>
-  <button class="tab" data-tab="result">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Výsledok</span>
+  <button class="tab" data-tab="history">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>História</span>
   </button>
-  <!-- Progres hidden for now (Stanley, 2026-11-13: "progress tab asi môže zmiznúť zatiaľ"); the view and its code stay. -->
-  <button class="tab" data-tab="rsi">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h4M17 20h4M7 20l3-12 4 8 3-4"/></svg><span>RSI</span>
-  </button>
-  <button class="tab" data-tab="sprint">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3"/></svg><span>Sprint</span>
+  <button class="tab" data-tab="progress">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18l5-6 4 3 7-9"/><path d="M15 6h5v5"/></svg><span>Progres</span>
   </button>
 </nav>
 

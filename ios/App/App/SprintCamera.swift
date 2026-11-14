@@ -517,7 +517,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     init(fps: Int, freelapOn: Bool, chips: [String: String] = [:], mode: String = "sprint") {
         self.fps = fps
         self.mode = mode
-        self.freelapOn = mode == "rsi" ? false : freelapOn
+        self.freelapOn = mode == "sprint" ? freelapOn : false
         self.chips = chips
         super.init(nibName: nil, bundle: nil)
     }
@@ -587,11 +587,11 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
 
         modeLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         modeLabel.textColor = UIColor(red: 1, green: 0.84, blue: 0.04, alpha: 1)
-        modeLabel.attributedText = NSAttributedString(string: mode == "rsi" ? "RSI" : "ŠPRINT", attributes: [.kern: 1.5])
+        modeLabel.attributedText = NSAttributedString(string: mode == "rsi" ? "RSI" : mode == "jump" ? "SKOK" : "ŠPRINT", attributes: [.kern: 1.5])
 
         freelapLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         freelapLabel.textColor = freelapOn ? SprintOverlay.green : UIColor(white: 1, alpha: 0.6)
-        freelapLabel.text = mode == "rsi" ? "" : freelapOn ? "● Freelap" : "Freelap vypnutý"
+        freelapLabel.text = mode != "sprint" ? "" : freelapOn ? "● Freelap" : "Freelap vypnutý"
 
         toast.font = .systemFont(ofSize: 15, weight: .semibold)
         toast.textColor = .white
@@ -820,7 +820,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private func done(_ message: String, runs: [SprintRun] = [], burned: Bool, path: URL? = nil, raw: URL? = nil, wall: Date? = nil) {
         saving = max(0, saving - 1)
         show(message)
-        var data: [String: Any] = ["message": message, "burned": burned, "runs": runs.count, "fps": actualFps]
+        var data: [String: Any] = ["message": message, "burned": burned, "runs": runs.count, "fps": actualFps, "mode": mode]
         if let path { data["path"] = path.path }
         if let raw { data["raw"] = raw.path }
         if let wall { data["recordedAt"] = Int(wall.timeIntervalSince1970 * 1000) }

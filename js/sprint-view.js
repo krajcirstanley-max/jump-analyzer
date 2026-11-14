@@ -137,8 +137,11 @@ export function resultHtml(rec, a, run, runs, athletes) {
 }
 
 // ---------- Tab ----------
-export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera() }) {
+// bare: the app's Tréning tab owns the buttons and the list; this root then shows only the open
+// analysis (the detail screen). onProgress(text) and onDone(rec) report back to it.
+export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera(), bare = false, onProgress = () => {}, onDone = () => {} }) {
   let unsub = null, last = '', busy = false, progress = '', current = null;
+  const say = t => { progress = t; onProgress(t); };
 
   const name = r => (r.who ? athletes[r.who]?.name : null) ?? r.chip ?? '';
   const send = (_, run) => cam.run({ key: run.key, name: name(run), lap: run.lap, legs: run.legs ?? [] }).catch(() => {});
@@ -157,7 +160,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         const blob = await (await fetch(src)).blob();
         const file = new File([blob], 'sprint.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() });
         await upload(file, job);
-      } catch (e) { progress = `Rozbor natočeného videa zlyhal: ${e?.message ?? e}`; draw(); }
+      } catch (e) { say(`Rozbor natočeného videa zlyhal: ${e?.message ?? e}`); draw(); }
       queue.shift();
     }
   }
@@ -165,6 +168,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   if (cam) {
     cam.on('saved', d => {
       last = d.message ?? ''; draw();
+      if (d.mode && d.mode !== 'sprint') return;   // RSI and jump clips have their own flow
       if (d.raw && cloudReady()) autoAnalyze(d); // with or without Freelap: without it, steps and contacts only
     });
     cam.on('closed', () => { unsub?.(); unsub = null; draw(); });
@@ -190,13 +194,13 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   async function upload(file, filmed = null) {
     if (busy && !filmed) return;
-    if (!cloudReady()) { progress = 'Najprv ulož prístupový kľúč v nastaveniach.'; draw(); return; }
-    busy = true; progress = filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…'; draw();
+    if (!cloudReady()) { say('Najprv ulož prístupový kľúč v nastaveniach.'); draw(); return; }
+    busy = true; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…'); draw();
     try {
       const me = getAthlete() ?? {};
       const { result } = await analyzeInCloud(file, {
         sex: me.sex, name: me.name, height: me.height, mode: 'sprint', athletes: await roster(),
-        onProgress: p => { progress = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`; draw(); },
+        onProgress: p => { say(`${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`); draw(); },
       });
       if (result?.error) throw new CloudError(result.error);
       const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
@@ -210,9 +214,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       } else run = pairRun(runs(), video, null);
       const rec = { id: `sp${Date.now()}`, at: video.recordedAt ?? Date.now(), video, runKey: run?.key ?? null, run: run ?? null, who: run?.who ?? result.who?.id ?? me.id ?? null, mode: null };
       const list = load(); list.unshift(rec); store(list);
-      current = rec.id; progress = '';
+      current = rec.id; say('');
+      onDone(rec);
     } catch (err) {
-      progress = err?.message || 'Analýza zlyhala. Skús to znova.';
+      say(err?.message || 'Analýza zlyhala. Skús to znova.');
     } finally {
       busy = false; draw();
     }
@@ -220,6 +225,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   function draw() {
     const list = load(), rec = list.find(r => r.id === current);
+    if (bare) { root.innerHTML = rec ? view(rec).html : ''; return; }
     const head = `
       <div class="card sp-go">
         <div class="sp-btns">
@@ -254,5 +260,22 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   if (['localhost', '127.0.0.1'].includes(globalThis.location?.hostname)) globalThis.__sprintShow = rec => { const list = load(); list.unshift(rec); store(list); current = rec.id; draw(); };
 
   draw();
-  return { shown: draw };
+  return {
+    shown: draw, film, upload, records: load,
+    open(id) { current = id; draw(); },
+    busy: () => busy,
+    // One line for the Tréning and História lists.
+    summary(rec) {
+      const run = rec.runKey ? runs().find(r => r.key === rec.runKey) ?? rec.run ?? null : rec.run ?? null;
+      const who = run?.who ?? rec.who ?? null, k = rec.mode ?? (run ? modeOfRun(run) : rec.video.modeGuess);
+      const steps = rec.video.steps ?? [];
+      const contact = steps.length ? steps.reduce((a, x) => a + (x.contact ?? 0), 0) / steps.length : null;
+      return {
+        kind: 'sprint', id: rec.id, at: rec.at, who,
+        title: `${athletes[who]?.name ?? ''}${who ? ' · ' : ''}${k === 'accel' ? 'akcel' : 'letmých'}${run ? ` ${run.legs.length * 10} m` : ''}`,
+        sub: run ? run.legs.map(n2).join(' + ') : `zem ${contact != null ? n3(contact) : '–'} s · bez Freelapu`,
+        value: run ? n2(run.lap) : `${steps.length}`, valueSub: run ? 's' : 'krokov',
+      };
+    },
+  };
 }

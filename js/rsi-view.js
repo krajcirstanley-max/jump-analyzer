@@ -157,9 +157,10 @@ export function rsiMarks(r) {
   return out.sort((a, b) => a.from - b.from);
 }
 
-export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, cam = camera() }) {
+// bare: the Tréning tab owns the buttons and the lists; this root shows only the open result.
+export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, cam = camera(), bare = false, onProgress = () => {}, onDone = () => {} }) {
   root.innerHTML = `
-    <div class="card"><h2>RSI</h2>
+    <div class="card${bare ? ' hidden' : ''}"><h2>RSI</h2>
       <p class="note">Natáčaj <b>spredu</b>, pokojne aj z ruky (pohyb telefónu odrátam podľa pozadia), v zábere celé chodidlá a kus okolia. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
       <div class="sp-btns">
         <label class="btn big-btn" id="rsi-pick">Analyzovať RSI<input type="file" accept="video/*" hidden id="rsi-file"></label>
@@ -169,12 +170,13 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       <p class="note hidden" id="rsi-progress" aria-live="polite"></p>
     </div>
     <div class="card hidden" id="rsi-result"></div>
-    <div class="card hidden" id="rsi-history"></div>`;
+    <div class="card hidden${bare ? ' bare' : ''}" id="rsi-history"></div>`;
   const $ = id => root.querySelector(`#${id}`);
   let current = null, busy = false;
 
   // Both athletes' histories, each under its name.
   const renderHistory = () => {
+    if (bare) return;
     const parts = Object.keys(athletes).map(a => [a, load(a)]).filter(([, list]) => list.length);
     $('rsi-history').classList.toggle('hidden', !parts.length);
     $('rsi-history').innerHTML = '<h2>História</h2>' + parts.map(([a, list]) => `<p class="rsi-who">${esc(athletes[a].name)}</p>${historyHtml(list)}`).join('');
@@ -206,7 +208,9 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
 
   async function analyze(file, filmed = null) {
     if (busy && !filmed) return;
-    const who = getAthlete(), prog = $('rsi-progress');
+    const who = getAthlete(), el = $('rsi-progress');
+    // the progress line, here and on the Tréning tab
+    const prog = { classList: el.classList, set textContent(t) { el.textContent = t; onProgress(t); } };
     if (!cloudReady()) { prog.classList.remove('hidden'); prog.textContent = 'Najprv ulož prístupový kľúč v nastaveniach.'; if (filmed) cam.finalize({ id: filmed.id, marks: [] }).catch(() => {}); return; }
     busy = true; $('rsi-pick').classList.add('disabled');
     prog.classList.remove('hidden'); prog.textContent = filmed ? 'Rozoberám natočené video…' : 'Nahrávam video…';
@@ -220,8 +224,9 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       const id = result.who?.id in athletes ? result.who.id : who.id;
       rememberAthlete(id);
       const list = load(id); list.push(rec); save(id, list);
-      prog.classList.add('hidden');
+      prog.classList.add('hidden'); onProgress('');
       show(rec, id); renderHistory();
+      onDone({ rec, who: id });
       // the filmed clip goes to Photos now, once, with the numbers on it
       if (filmed) cam.finalize({ id: filmed.id, marks: rsiMarks(result) }).catch(() => {});
     } catch (err) {
@@ -253,11 +258,26 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
         queue.shift();
       }
     });
-    cam.on('saved', d => { if (d.mode === 'rsi') { const prog = $('rsi-progress'); prog.classList.remove('hidden'); prog.textContent = d.message ?? ''; } });
+    cam.on('saved', d => { if (d.mode === 'rsi') { const prog = $('rsi-progress'); prog.classList.remove('hidden'); prog.textContent = d.message ?? ''; onProgress(d.message ?? ''); } });
   }
   // localhost only: lets a developer render a stored result without a server run
   if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__rsiShow = (rec, who = getAthlete().id) => { show(rec, who); renderHistory(); };
+  const film = () => cam?.open({ fps: 240, mode: 'rsi', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
   return {
     shown() { renderHistory(); },
+    film, analyze, busy: () => busy,
+    records: () => Object.keys(athletes).flatMap(a => load(a).map(rec => ({ rec, who: a }))),
+    open(id, who) { const rec = load(who).find(r => r.id === id); if (rec) show(rec, who); },
+    // One line for the Tréning and História lists.
+    summary({ rec, who }) {
+      const b = bestOf(rec), st = (rec.standing ?? []).reduce((x, y) => (!x || y.heightCm > x.heightCm ? y : x), null);
+      const name = NAMES[rec.exercise] ?? rec.exercise, leg = rec.leg && rec.leg !== 'both' && rec.leg !== 'lr' ? ` ${LEG[rec.leg] ?? ''}` : '';
+      return {
+        kind: 'rsi', id: rec.id, who, at: Date.parse(rec.at),
+        title: `${athletes[who]?.name ?? ''} · ${name}${leg}${rec.boxCm ? ` ${rec.boxCm} cm` : ''}`,
+        sub: b ? `zem ${num((rec.best5?.contactMs ?? b.contactMs) / 1000, 3)} · let ${num(b.flightMs / 1000, 3)}` : st ? `let ${num(st.flightMs / 1000, 3)} s` : '',
+        value: b ? num(rec.best5?.rsi ?? b.rsi, 2) : st ? num(st.heightCm, 1) : '–', valueSub: b ? 'RSI' : st ? 'cm' : '',
+      };
+    },
   };
 }
