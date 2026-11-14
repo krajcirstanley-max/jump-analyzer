@@ -46,8 +46,11 @@ function resultHtml(rec) {
     return `${head}${box}<p class="banner warn">Vo videu je zoskok a dopad, ale odraz po ňom nie je vidieť: video končí skôr, alebo po dopade nebol výskok. RSI sa bez odrazu nedá vyrátať. Natoč aj výskok po dopade.</p>`;
   }
   if (!b) {
-    return `${head}${box}<div class="big">${tile('Výška výskoku', st ? `${num(st.heightCm, 1)} cm` : '–')}${tile('Let', st ? `${st.flightMs} ms` : '–')}${tile('RSI', '–', 'z výskoku z miesta sa nepočíta')}</div>
-      <p class="note">Pri výskoku z miesta je výška z času letu. RSI-mod by potreboval začiatok pohybu, ten sa z videa číta neisto.</p>`;
+    // Vertical jumps from standing (CMJ, squat jump): every one in the clip, the best on top.
+    const all = rec.standing ?? [], top = all.reduce((x, y) => (!x || y.heightCm > x.heightCm ? y : x), null);
+    const list = all.length > 1 ? `<table class="steps rsi-table"><thead><tr><th></th><th>Let<br><small>ms</small></th><th>Výška<br><small>cm</small></th></tr></thead><tbody>${all.map((j, k) => `<tr class="${j === top ? 'on' : ''}"><th>${k + 1}.</th><td>${j.flightMs}</td><td><b>${num(j.heightCm, 1)}</b></td></tr>`).join('')}</tbody></table>` : '';
+    return `${head}${box}<div class="big">${tile('Výška výskoku', top ? `${num(top.heightCm, 1)} cm` : '–', all.length > 1 ? `najlepší z ${all.length}` : '')}${tile('Let', top ? `${top.flightMs} ms` : '–')}${tile('RSI', '–', 'z výskoku z miesta sa nepočíta')}</div>
+      ${list}<p class="note">Výška je z času letu (h = g·t²/8): odraz a dopad musia byť na rovných nohách, dopad na pokrčené nohy ju nadsadí.</p>`;
   }
   const many = rec.jumps.length > 1;
   const st0 = (rec.standing ?? []).find(x => x.td < rec.jumps[0].td && (x.to ?? x.td) < rec.jumps[0].td) ?? null;
@@ -109,7 +112,7 @@ function camera(cap = globalThis.Capacitor) {
 
 // What goes onto the filmed clip, each while it applies: the contact, the flight, then the result.
 // Times in seconds from the start of the clip.
-const s2 = x => num(x, 2), s3 = x => num(x, 3), cm = x => `${num(x, 0)} cm`;
+const s2 = x => num(x, 2), s3 = x => num(x, 3), cm = x => `${num(x, 0)} cm`, cm1 = x => `${num(x, 1)} cm`;
 const odrazy = n => `${n} ${n >= 2 && n <= 4 ? 'odrazy' : 'odrazov'}`;
 const prekazok = n => `${n} ${n === 1 ? 'prekážka' : n >= 2 && n <= 4 ? 'prekážky' : 'prekážok'}`;
 export function rsiMarks(r) {
@@ -124,6 +127,16 @@ export function rsiMarks(r) {
     out.push({ from: up, to: up + fl, title: hurdles ? '1. prekážka · Let' : '1. skok · Let', big: `${s3(fl)} s`, small: '' });
   }
   const off = start ? 1 : 0;
+  // Vertical jumps from standing (no rebounds): the flight, then the height for 3 s after landing.
+  if (!jumps.length) {
+    const st = r.standing ?? [];
+    st.forEach((j, k) => {
+      const up = at(j.to) + dt, fl = j.flightMs / 1000, n = st.length > 1 ? `${k + 1}. výskok · ` : 'Výskok · ';
+      out.push({ from: up, to: up + fl, title: `${n}Let`, big: `${s3(fl)} s`, small: '' });
+      out.push({ from: up + fl, to: up + fl + 3, title: `${n}Výška`, big: cm1(j.heightCm), small: `let ${s3(fl)} s` });
+    });
+    return out.sort((a, b) => a.from - b.from);
+  }
   // A series (hops, hurdle hops): each contact's time on the ground and each flight, numbered, and
   // the averages after the last landing (Stanley, 2026-11-14: "gct len a dĺžka letu").
   jumps.forEach((j, k) => {

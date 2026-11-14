@@ -233,7 +233,7 @@ export function refineEdges(r, toe, fps, land = toe) {
     const out = { ...e, ...(full ?? {}) };
     // The landing after a rebound: its touchdown frame, from the foot that jumped when one did
     // (Miška's free leg swung down at 366, her right foot landed at 368).
-    const jumped = r.jumps.find(j => j.td === r.events[k - 1]?.td);
+    const jumped = r.jumps.find(j => j.td === r.events[k - 1]?.td) ?? (r.standing ?? []).find(j => j.td === r.events[k - 1]?.td);
     if (jumped) {
       const first = edge(e, land.filter(c => jumped.feet.length > 1 || c.foot === jumped.feet));
       if (first) out.td = first.td;
@@ -253,10 +253,20 @@ export function refineEdges(r, toe, fps, land = toe) {
     return { ...j, raw: { td: j.td, to: j.to, contactMs: j.contactMs, flightMs: j.flightMs }, td: e.td, to: e.to,
       contactMs, flightMs, heightCm: h * 100, rsi: h / (contactMs / 1000), ri: flightMs / contactMs, slow: contactMs > 250, edges: 'toe' };
   });
+  // Vertical jumps from standing: the toe-off and the landing the same way, so the flight (and
+  // with it the height) has no hover frames in it either.
+  const standing = (r.standing ?? []).map(st => {
+    const k = r.events.findIndex(e => e.td === st.td), e = events[k], next = events[k + 1];
+    if (!e || !next) return st;
+    const flightMs = ((next.td - e.to - 1) / fps) * 1000;
+    if (!(flightMs > 100)) return st;
+    const t = flightMs / 1000;
+    return { ...st, raw: { to: st.to, flightMs: st.flightMs }, to: e.to, flightMs, heightCm: ((G0 * t * t) / 8) * 100, edges: 'toe' };
+  });
   const best = jumps.reduce((b, j) => (!b || j.rsi > b.rsi ? j : b), null);
   const top5 = jumps.length >= 5 ? [...jumps].sort((a, b) => b.rsi - a.rsi).slice(0, 5) : null;
   const best5 = top5 && { rsi: top5.reduce((a, j) => a + j.rsi, 0) / 5, ri: top5.reduce((a, j) => a + j.ri, 0) / 5, contactMs: top5.reduce((a, j) => a + j.contactMs, 0) / 5 };
-  return { ...r, jumps, best, best5, events: events.map(e => ({ ...e, ms: Math.round(((e.to - e.td + 1) / fps) * 1000) })) };
+  return { ...r, jumps, standing, best, best5, events: events.map(e => ({ ...e, ms: Math.round(((e.to - e.td + 1) / fps) * 1000) })) };
 }
 
 // Touchdowns from the toe against the floor: the first frame where a toe that was coming down
