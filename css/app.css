@@ -596,3 +596,17 @@ div.att-open { cursor: default; }
 .pd-step small { margin-left: auto; color: var(--muted); font-size: 12px; }
 .pd-fl { display: flex; justify-content: space-between; align-items: baseline; }
 .pd-fl span { color: var(--muted); font-size: 13px; display: block; } .pd-fl b { font-size: 22px; }
+
+/* RSI: the clip with the marks over it, as on the video in Photos (2026-11-14) */
+.rsi-video { position: relative; margin: 6px 0 0; }
+.rsi-ov { position: absolute; top: 10px; left: 10px; background: rgba(10,12,16,.82); color: #fff; border-radius: 12px; padding: 8px 11px; min-width: 120px; pointer-events: none; }
+.rsi-ov small { display: block; font-size: 11.5px; opacity: .75; }
+.rsi-ov b { display: block; font-size: 24px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.rsi-ov i { display: block; font-style: normal; font-size: 12.5px; opacity: .9; font-variant-numeric: tabular-nums; }
+/* one piece per rebound under the video (over it the strip sat on the player's controls) */
+.rsi-strip { display: flex; gap: 5px; margin: 8px 2px 0; pointer-events: none; }
+.rsi-strip span { flex: 1; height: 6px; border-radius: 3px; background: var(--line); }
+.rsi-strip span.on { background: var(--muted); }
+.rsi-strip span.best { background: rgba(61,220,151,.45); }
+.rsi-strip span.best.on { background: #22b877; }
+.rsi-table tr[data-seek] { cursor: pointer; }

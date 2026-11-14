@@ -20,7 +20,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.15.2';
+const APP_VERSION = '0.16.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -71,7 +71,8 @@ const rsiView = initRsi({
   root: document.getElementById('rsi'), athletes: ATHLETES, bare: true,
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster, rememberAthlete,
   onProgress: t => trainProgress(t),
-  onDone: ({ rec, who }) => { refreshFeeds(); openDetail('rsi', rec.id, who); },
+  onDone: ({ rec, who }, o) => { refreshFeeds(); if (!o?.quiet) openDetail('rsi', rec.id, who); },
+  saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
 });
 
 // Freelap tab: Start listens for the chips, Stop takes nothing in.

@@ -22,15 +22,15 @@ function record(r, file) {
   // mirror); Claude's reading of the frames otherwise.
   const leg = r.singleLeg ? r.leg : (r.named?.leg ?? r.leg);
   return {
-    id: `${Date.now()}`, at: new Date().toISOString(), file: file?.name ?? '', fps: Math.round(r.fps),
+    id: `${Date.now()}`, at: new Date().toISOString(), file: file?.name ?? '', fps: Math.round(r.fps), marks: rsiMarks(r),
     exercise: r.exercise, leg, noRebound: !!r.noRebound, boxCm: r.boxCm ?? null, boxFrom: r.boxFrom ?? null, boxEstCm: r.boxEstCm == null ? null : Math.round(r.boxEstCm),
     askBox: r.askBox, rsiErrPct: r.rsiErrPct, camera: r.camera ?? null,
-    jumps: r.jumps.map(j => ({ td: j.td, contactMs: Math.round(j.contactMs), flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1), rsi: +j.rsi.toFixed(2), ri: +j.ri.toFixed(2), slow: j.slow, landingFlexed: j.landingFlexed })),
+    jumps: r.jumps.map(j => ({ td: j.td, t: +((r.ts?.[j.td] ?? j.td / (r.fps || 120)) - (r.ts?.[0] ?? 0)).toFixed(3), contactMs: Math.round(j.contactMs), flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1), rsi: +j.rsi.toFixed(2), ri: +j.ri.toFixed(2), slow: j.slow, landingFlexed: j.landingFlexed })),
     standing: (r.standing ?? []).map(j => ({ td: j.td, to: j.to, flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1) })),
     best5: r.best5 ? { rsi: +r.best5.rsi.toFixed(2), ri: +r.best5.ri.toFixed(2), contactMs: Math.round(r.best5.contactMs) } : null,
   };
 }
-const bestOf = rec => rec.jumps.reduce((b, j) => (!b || j.rsi > b.rsi ? j : b), null);
+const bestOf = rec => (rec.jumps ?? []).reduce((b, j) => (!b || j.rsi > b.rsi ? j : b), null);
 
 function tile(label, value, sub = '') { return `<div><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`; }
 
@@ -55,7 +55,7 @@ function resultHtml(rec) {
   const many = rec.jumps.length > 1;
   const st0 = (rec.standing ?? []).find(x => x.td < rec.jumps[0].td && (x.to ?? x.td) < rec.jumps[0].td) ?? null;
   const startRow = st0 ? `<tr><th>štart</th><td>–</td><td>${st0.flightMs}</td><td>${num(st0.heightCm, 1)}</td><td>–</td><td>–</td></tr>` : '';
-  const rows = startRow + rec.jumps.map((j, k) => `<tr class="${j === b ? 'on' : ''}"><th>${k + 1}.</th><td>${j.contactMs}${j.slow ? '⚠' : ''}</td><td>${j.flightMs}</td><td>${num(j.heightCm, 1)}</td><td><b>${num(j.rsi, 2)}</b></td><td>${num(j.ri, 2)}</td></tr>`).join('');
+  const rows = startRow + rec.jumps.map((j, k) => `<tr class="${j === b ? 'on' : ''}"${rec.hasClip && j.t != null ? ` data-seek="${j.t}"` : ''}><th>${k + 1}.</th><td>${j.contactMs}${j.slow ? '⚠' : ''}</td><td>${j.flightMs}</td><td>${num(j.heightCm, 1)}</td><td><b>${num(j.rsi, 2)}</b></td><td>${num(j.ri, 2)}</td></tr>`).join('');
   // RSI of every rebound as a line with its own scale (a bar from zero would hide 1.3 vs 1.6)
   const bars = many ? (() => {
     const v = rec.jumps.map(j => j.rsi), lo = Math.min(...v), hi = Math.max(...v), pad = (hi - lo) * 0.15 || 0.1;
@@ -84,7 +84,7 @@ function resultHtml(rec) {
 function historyHtml(list) {
   if (!list.length) return '';
   const byEx = {};
-  for (const r of list) (byEx[`${r.exercise}|${r.leg}`] ??= []).push(r);
+  for (const r of list) if (!r.pending) (byEx[`${r.exercise}|${r.leg}`] ??= []).push(r);
   const groups = Object.entries(byEx).map(([k, rs]) => {
     const [ex, leg] = k.split('|');
     const vals = rs.map(r => r.best5?.rsi ?? bestOf(r)?.rsi).filter(Number.isFinite);
@@ -124,7 +124,7 @@ export function rsiMarks(r) {
   const start = (r.standing ?? []).filter(st => jumps.length && st.to < jumps[0].td).at(-1);
   if (start) {
     const up = at(start.to) + dt, fl = start.flightMs / 1000;
-    out.push({ from: up, to: up + fl, title: hurdles ? '1. prekážka · Let' : '1. skok · Let', big: `${s3(fl)} s`, small: '' });
+    out.push({ from: up, to: up + fl, title: hurdles ? '1. prekážka · let' : '1. skok · let', big: cm1(start.heightCm), small: `let ${s3(fl)} s · zo státia` });
   }
   const off = start ? 1 : 0;
   // Vertical jumps from standing (no rebounds): the flight, then the height for 3 s after landing.
@@ -137,28 +137,52 @@ export function rsiMarks(r) {
     });
     return out.sort((a, b) => a.from - b.from);
   }
-  // A series (hops, hurdle hops): each contact's time on the ground and each flight, numbered, and
-  // the averages after the last landing (Stanley, 2026-11-14: "gct len a dĺžka letu").
+  // A series (hops, hurdle hops, hops over cones): on the ground the contact time; in the air the
+  // height, with that rebound's contact and RSI under it; after the last landing the best rebound
+  // and the averages (Stanley, 2026-11-14: "výšku aj kontakt pre každý a aj RSI").
   jumps.forEach((j, k) => {
     const c = j.contactMs / 1000, fl = j.flightMs / 1000, h = j.heightCm;
     const down = at(j.td), up = at(j.to) + dt, land = up + fl;
     const n = hurdles ? `pred ${k + 1 + off}. prekážkou · ` : many ? `${k + 1}. odraz · ` : '';
     const nf = hurdles ? `${k + 1 + off}. prekážka · ` : n;
-    out.push({ from: down, to: up, title: `${n}Na zemi`, big: `${s3(c)} s`, small: '' });
-    out.push({ from: up, to: land, title: `${nf}Let`, big: `${s3(fl)} s`, small: many || hurdles ? '' : `výška ${cm(h)} · RSI ${s2(j.rsi)}` });
+    out.push({ from: down, to: up, title: `${n}na zemi`, big: `${s3(c)} s`, small: '' });
+    out.push({ from: up, to: land, title: `${nf}let`, big: cm1(h), small: `zem ${s3(c)} s · RSI ${s2(j.rsi)}` });
     if (!many && !hurdles) out.push({ from: land, to: land + 2.5, title: 'RSI', big: s2(j.rsi), small: `zem ${s2(c)} s · let ${s2(fl)} s · ${cm(h)}` });
   });
   if (many || hurdles) {
     const last = jumps.at(-1), end = at(last.to) + dt + last.flightMs / 1000;
-    const avg = (list, k) => list.reduce((a, j) => a + j[k], 0) / list.length / 1000;
-    const flights = [...(start ? [start] : []), ...jumps];
-    out.push({ from: end, to: end + 3, title: `${hurdles ? prekazok(flights.length) : odrazy(jumps.length)} · priemer`, big: `${s3(avg(jumps, 'contactMs'))} s`, small: `na zemi · let ${s3(avg(flights, 'flightMs'))} s` });
+    const mean = k => jumps.reduce((a, j) => a + j[k], 0) / jumps.length;
+    const bi = jumps.reduce((b, j, k) => (j.rsi > jumps[b].rsi ? k : b), 0);
+    out.push({ from: end, to: end + 3, title: `${hurdles ? prekazok(jumps.length + off) : odrazy(jumps.length)} · najlepší ${bi + 1 + (hurdles ? off : 0)}.`, big: `RSI ${s2(jumps[bi].rsi)}`, small: `priemer: zem ${s3(mean('contactMs') / 1000)} s · ${cm1(mean('heightCm'))} · RSI ${s2(mean('rsi'))}` });
   }
   return out.sort((a, b) => a.from - b.from);
 }
 
+// The clip with the marks over it, as on the video in Photos: one box that changes with the
+// moment (on the ground, in the air, the summary), and a strip with one piece per rebound, the best
+// one green (Stanley, 2026-11-14: "nech je to vidno na overlay ako sprint").
+const RATES = '<div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div>';
+function videoHtml(rec) {
+  if (!rec.hasClip) return '';
+  const b = bestOf(rec), n = rec.jumps?.length ?? 0;
+  const strip = n > 1 ? `<div class="rsi-strip">${rec.jumps.map((j, k) => `<span data-k="${k}"${j === b ? ' class="best"' : ''}></span>`).join('')}</div>` : '';
+  return `<div class="sp-video rsi-video"><div class="sp-vbox" data-rsi-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
+    ${rec.pending ? `<span class="pd-chip">${rec.error ? '⚠ analýza zlyhala' : '◌ analýza beží'}</span>` : '<div class="rsi-ov hidden"></div>'}${strip}</div>${RATES}`;
+}
+const pendingSteps = rec => {
+  const st = rec.stage ?? '', up = /nahr/i.test(st);
+  const step = (cls, txt, note = '') => `<div class="pd-step ${cls}"><span class="pd-dot">${cls === 'done' ? '✓' : ''}</span>${esc(txt)}${note ? `<small>${esc(note)}</small>` : ''}</div>`;
+  return `<h2>Analýza</h2>
+    ${step(rec.hasClip ? 'done' : 'now', 'Video uložené v telefóne')}
+    ${step(rec.error ? 'next' : up ? 'now' : 'done', 'Nahrávam na server', up ? st : '')}
+    ${step(rec.error ? 'next' : up ? 'next' : 'now', 'Hľadám dotyky a lety', !up && st ? st : '')}
+    ${step('next', 'Zem, let, výška, RSI pre každý odraz')}
+    ${rec.error ? `<p class="banner bad">${esc(rec.error)}</p>${rec.hasClip ? `<button class="btn" data-rsi-retry="${esc(rec.id)}">Skúsiť znova</button>` : ''}` : '<p class="note">Video si môžeš pozrieť hneď. Čísla a overlay sa doplnia samé.</p>'}`;
+};
+
 // bare: the Tréning tab owns the buttons and the lists; this root shows only the open result.
-export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, cam = camera(), bare = false, onProgress = () => {}, onDone = () => {} }) {
+export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
+  saveClip = null, loadClip = null, dropClip = null }) {
   root.innerHTML = `
     <div class="card${bare ? ' hidden' : ''}"><h2>RSI</h2>
       <p class="note">Natáčaj <b>spredu</b>, pokojne aj z ruky (pohyb telefónu odrátam podľa pozadia), v zábere celé chodidlá a kus okolia. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
@@ -184,8 +208,47 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
   const show = (rec, who) => {
     current = { rec, who };
     $('rsi-result').classList.remove('hidden');
-    $('rsi-result').innerHTML = `<button class="top-who rsi-swap" data-rsi-swap>${esc(athletes[who].name)}<span class="who-swap" aria-hidden="true">⇄</span></button>${resultHtml(rec)}`;
+    $('rsi-result').innerHTML = rec.pending
+      ? `<h2>${esc(athletes[who]?.name ?? '')} · odrazy</h2>${videoHtml(rec)}<div data-rsi-prog="${esc(rec.id)}">${pendingSteps(rec)}</div>`
+      : `<button class="top-who rsi-swap" data-rsi-swap>${esc(athletes[who].name)}<span class="who-swap" aria-hidden="true">⇄</span></button>${videoHtml(rec)}${resultHtml(rec)}`;
+    attachClip(rec);
   };
+  // A list kept to 200; the clips of records that fall off go too.
+  const put = (a, list) => { const keep = list.slice(-200); for (const r of list.slice(0, list.length - keep.length)) if (r.hasClip) dropClip?.(r.id); save(a, keep); };
+  const patch = (a, id, f) => { const list = load(a), x = list.find(r => r.id === id); if (x) { f(x); save(a, list); } return x; };
+
+  // The open record's video, with the marks drawn over it while it plays.
+  let clipUrl = null, clipId = null, clipP = null;
+  async function attachClip(rec) {
+    if (!rec?.hasClip || !loadClip) return;
+    if (clipId !== rec.id) {
+      if (clipUrl) URL.revokeObjectURL(clipUrl);
+      clipUrl = null; clipId = rec.id;
+      clipP = loadClip(rec.id).catch(() => null).then(blob => { if (clipId === rec.id) clipUrl = blob ? URL.createObjectURL(blob) : null; });
+    }
+    await clipP;
+    const box = root.querySelector(`[data-rsi-clip="${CSS.escape(rec.id)}"]`);
+    if (!box || clipId !== rec.id) return;
+    box.innerHTML = clipUrl ? `<video src="${clipUrl}" controls playsinline muted preload="metadata"></video>` : '<p class="note">Video sa nenašlo v telefóne.</p>';
+    const v = box.querySelector('video'), ov = root.querySelector('.rsi-ov'), strip = [...root.querySelectorAll('.rsi-strip span')];
+    if (!v || rec.pending) return;
+    const marks = rec.marks ?? [], times = (rec.jumps ?? []).map(j => j.t);
+    let lastKey = '';
+    const tick = () => {
+      const t = v.currentTime, m = marks.find(x => t >= x.from && t < x.to);
+      const key = m ? `${m.title}|${m.big}` : '';
+      if (ov && key !== lastKey) {
+        lastKey = key;
+        ov.classList.toggle('hidden', !m);
+        ov.innerHTML = m ? `<small>${esc(m.title)}</small><b>${esc(m.big)}</b>${m.small ? `<i>${esc(m.small)}</i>` : ''}` : '';
+      }
+      strip.forEach((el, k) => el.classList.toggle('on', times[k] != null && t >= times[k]));
+    };
+    const loop = () => { if (!v.isConnected) return; tick(); v.requestVideoFrameCallback ? v.requestVideoFrameCallback(loop) : null; };
+    v.addEventListener('timeupdate', tick); v.addEventListener('seeked', tick);
+    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(loop);
+    tick();
+  }
   // The box height typed in when the video could not show it.
   root.addEventListener('change', e => {
     if (!e.target.matches('[data-rsi-box]') || !current) return;
@@ -195,6 +258,27 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     rec.boxCm = cm; rec.boxFrom = 'typed';
     save(who, load(who).map(r => (r.id === rec.id ? rec : r)));
     show(rec, who); renderHistory();
+  });
+  root.addEventListener('click', e => {
+    const rt = e.target.closest('[data-rate]');
+    if (rt) {
+      const v = root.querySelector('[data-rsi-clip] video');
+      if (v) { v.playbackRate = +rt.dataset.rate; v.defaultPlaybackRate = +rt.dataset.rate; }
+      root.querySelectorAll('[data-rate]').forEach(x => x.classList.toggle('on', x === rt));
+      return;
+    }
+    // a row of the table: the video jumps to that rebound
+    const sk = e.target.closest('[data-seek]');
+    if (sk) {
+      const v = root.querySelector('[data-rsi-clip] video');
+      if (v) { v.pause(); v.currentTime = Math.max(0, +sk.dataset.seek - 0.05); v.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      return;
+    }
+    const re = e.target.closest('[data-rsi-retry]');
+    if (re && current && loadClip) {
+      const { rec, who } = current;
+      loadClip(rec.id).then(blob => { if (blob) analyze(new File([blob], 'rsi.mov', { type: blob.type || 'video/quicktime' }), null, { id: rec.id, who }); else alert('Video sa v telefóne nenašlo.'); });
+    }
   });
   // Wrong person: the result moves to the other athlete's history.
   root.addEventListener('click', e => {
@@ -206,31 +290,62 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     show(rec, to); renderHistory();
   });
 
-  async function analyze(file, filmed = null) {
-    if (busy && !filmed) return;
+  // The record exists from the moment the clip is in (pending, with its video), so it can be
+  // watched at once; the numbers and the overlay fill it in when the analysis lands (Stanley,
+  // 2026-11-14: "video hneď a čísla neskôr", as for the sprint). retry: { id, who } of a pending one.
+  async function analyze(file, filmed = null, retry = null) {
+    if (busy && !filmed && !retry) return;
     const who = getAthlete(), el = $('rsi-progress');
     // the progress line, here and on the Tréning tab
     const prog = { classList: el.classList, set textContent(t) { el.textContent = t; onProgress(t); } };
     if (!cloudReady()) { prog.classList.remove('hidden'); prog.textContent = 'Najprv ulož prístupový kľúč v nastaveniach.'; if (filmed) cam.finalize({ id: filmed.id, marks: [] }).catch(() => {}); return; }
     busy = true; $('rsi-pick').classList.add('disabled');
     prog.classList.remove('hidden'); prog.textContent = filmed ? 'Rozoberám natočené video…' : 'Nahrávam video…';
+    let pid = retry?.id ?? null, pwho = retry?.who ?? who.id;
+    if (!pid) {
+      pid = `rsi${Date.now()}`;
+      const pend = { id: pid, at: new Date().toISOString(), file: file?.name ?? '', pending: true, stage: 'Nahrávam video', hasClip: false, jumps: [], standing: [] };
+      const list = load(pwho); list.push(pend); put(pwho, list);
+      if (saveClip) saveClip(pid, file).then(() => { const x = patch(pwho, pid, r => { r.hasClip = true; }); if (x && current?.rec.id === pid) show(x, pwho); }).catch(() => {});
+      show(pend, pwho);
+      onDone({ rec: pend, who: pwho });   // opens the screen now: the video first
+    } else {
+      const x = patch(pwho, pid, r => { r.error = null; r.stage = 'Nahrávam video'; });
+      if (x && current?.rec.id === pid) show(x, pwho);
+    }
+    let lastStage = '';
     try {
       const { result } = await analyzeInCloud(file, {
         sex: who.sex, name: who.name, height: who.height, mode: 'rsi', boxCm: null, athletes: await roster(),
-        onProgress: p => { prog.textContent = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`; },
+        onProgress: p => {
+          const t = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`;
+          if (t === lastStage) return;
+          lastStage = t; prog.textContent = t;
+          // only the steps are redrawn, so the video keeps playing
+          const box = current?.rec.id === pid && root.querySelector(`[data-rsi-prog="${CSS.escape(pid)}"]`);
+          if (box) box.innerHTML = pendingSteps({ ...current.rec, stage: t });
+        },
       });
       if (result?.error) throw new CloudError(result.error);
-      const rec = record(result, file);
-      const id = result.who?.id in athletes ? result.who.id : who.id;
+      const old = load(pwho).find(r => r.id === pid);
+      const rec = { ...record(result, file), id: pid, at: old?.at ?? new Date().toISOString(), hasClip: !!old?.hasClip };
+      const id = result.who?.id in athletes ? result.who.id : pwho;
       rememberAthlete(id);
-      const list = load(id); list.push(rec); save(id, list);
+      // the pending record becomes the result, under whoever the server saw
+      save(pwho, load(pwho).filter(r => r.id !== pid));
+      const list = load(id); list.push(rec); list.sort((x, y) => String(x.at).localeCompare(String(y.at))); put(id, list);
       prog.classList.add('hidden'); onProgress('');
-      show(rec, id); renderHistory();
-      onDone({ rec, who: id });
+      if (!current || current.rec.id === pid) show(rec, id);
+      renderHistory();
+      onDone({ rec, who: id }, { quiet: true });
       // the filmed clip goes to Photos now, once, with the numbers on it
       if (filmed) cam.finalize({ id: filmed.id, marks: rsiMarks(result) }).catch(() => {});
     } catch (err) {
-      prog.textContent = err?.message || 'Analýza zlyhala. Skús to znova.';
+      const msg = err?.message || 'Analýza zlyhala. Skús to znova.';
+      prog.textContent = msg;
+      const x = patch(pwho, pid, r => { r.error = msg; r.stage = null; });
+      if (x && current?.rec.id === pid) show(x, pwho);
+      onDone({ rec: x, who: pwho }, { quiet: true });
       if (filmed) cam.finalize({ id: filmed.id, marks: [] }).catch(() => {});   // saved as filmed, never lost
     } finally {
       busy = false; $('rsi-pick').classList.remove('disabled');
@@ -263,6 +378,12 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
   // localhost only: lets a developer render a stored result without a server run
   if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__rsiShow = (rec, who = getAthlete().id) => { show(rec, who); renderHistory(); };
   const film = () => cam?.open({ fps: 240, mode: 'rsi', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
+  // A clip left pending by a closed app has no upload behind it any more: say so, keep the video.
+  for (const a of Object.keys(athletes)) {
+    const list = load(a); let ch = false;
+    for (const r of list) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila (appka sa zavrela). Video je uložené, skús znova.'; ch = true; }
+    if (ch) save(a, list);
+  }
   return {
     shown() { renderHistory(); },
     film, analyze, busy: () => busy,
@@ -270,6 +391,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     open(id, who) { const rec = load(who).find(r => r.id === id); if (rec) show(rec, who); },
     // One line for the Tréning and História lists.
     summary({ rec, who }) {
+      if (rec.pending) return { kind: 'rsi', id: rec.id, who, at: Date.parse(rec.at), title: `${athletes[who]?.name ?? ''} · odrazy`, sub: rec.error ? 'analýza zlyhala' : 'analýza beží…', value: '…', valueSub: '' };
       const b = bestOf(rec), st = (rec.standing ?? []).reduce((x, y) => (!x || y.heightCm > x.heightCm ? y : x), null);
       const name = NAMES[rec.exercise] ?? rec.exercise, leg = rec.leg && rec.leg !== 'both' && rec.leg !== 'lr' ? ` ${LEG[rec.leg] ?? ''}` : '';
       return {
