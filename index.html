@@ -136,6 +136,19 @@
   </button>
 </nav>
 
+<script>
+// Tabs work from the first tap (Stanley 2026-11-14: after opening, a tab took several taps). The
+// app's code takes a moment to load on the phone; until it has, this switches the view itself and
+// app.js picks the tab up when it is ready.
+document.addEventListener('click', e => {
+  const b = !window.__appReady && e.target.closest('[data-tab]');
+  if (!b) return;
+  const name = b.dataset.tab;
+  for (const v of document.querySelectorAll('main > .view')) v.classList.toggle('hidden', v.id !== `view-${name}`);
+  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('on', t === b);
+  window.__bootTab = name;
+});
+</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

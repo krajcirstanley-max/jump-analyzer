@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -953,4 +953,5 @@ window.__loadPose = result => { pose = result; cloudCoach = null; $('res-progres
 window.__analyzePose = (file, opts) => analyzePose(file, () => true, opts);
 // Test hook: runs the cloud flow against a fake job ({ signal, onResult, onProgress }) => Promise.
 window.__followCloud = start => followCloud(runId, start);
+if (TABS.includes(window.__bootTab)) { tab = null; showTab(window.__bootTab); } // tapped before the app had loaded
 window.__appReady = true; // index.html shows a red bar if this line is never reached
