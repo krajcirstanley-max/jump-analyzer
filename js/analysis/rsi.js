@@ -71,9 +71,14 @@ function scaleAt(track, sex, height) {
 // Frames where one foot is planted: low and still for at least `minF` frames, grouped into
 // runs. Each run keeps its own level: from the front the athlete moves towards or away from the
 // phone between contacts, so the floor is not one image row.
+const PX = 5;   // px: the pose's own jitter on a planted toe (IMG_2213: 4.5 lost a hop, 5 and 6 read all 11)
 function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {}) {
   const n = y.length, v = y.map((_, i) => ((y[i + 1] ?? NaN) - (y[i - 1] ?? NaN)) * fps / 2);
-  const still = v.map(x => Math.abs(x) < stillMs * pxM); // px/s: under 0.35 m/s
+  // A far athlete is small in the picture (IMG_2213, hops over cones filmed from the side: 141 px
+  // per metre), and there 2 cm is under 3 px while a planted toe's keypoint wanders 5 px. The bands
+  // never go under the pose's own jitter: PX px for the level, the same over two frames for 'still'.
+  const tol = Math.max(tolM * pxM, PX);
+  const still = v.map(x => Math.abs(x) < Math.max(stillMs * pxM, PX * fps / 2)); // px/s: under 0.35 m/s
   const runs = [];
   let i = 0;
   while (i < n) {
@@ -82,7 +87,7 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {})
     // the level is the run's median; grow the run to every neighbouring frame within 2 cm of it
     const level = median(y.slice(i, j + 1));
     let a = i, b = j;
-    const near = v => Math.abs(v - level) <= tolM * pxM; // off the level either way is not this contact
+    const near = v => Math.abs(v - level) <= tol; // off the level either way is not this contact
     while (a - 1 >= 0 && near(y[a - 1])) a--;
     while (b + 1 < n && near(y[b + 1])) b++;
     // the band also catches the frames just before touchdown and just after toe-off, when the foot
@@ -94,7 +99,7 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {})
     while (b - 2 >= a && moving(y[b], y[b - 1], y[b - 2])) b--;
     // at the top of a flight the foot also hangs still for a moment; there it is lower (larger y)
     // on both sides, while a foot on the ground is higher on both sides (or the clip ends)
-    const k = Math.max(3, Math.round(fps / 30)), below = j2 => Number.isFinite(y[j2]) && y[j2] > level + tolM * pxM;
+    const k = Math.max(3, Math.round(fps / 30)), below = j2 => Number.isFinite(y[j2]) && y[j2] > level + tol;
     const apex = a - k >= 0 && b + k < n && below(a - k) && below(b + k);
     // A foot never rises from under the floor into a contact: lower just before the run means it
     // was still on its way up. And a short run whose level keeps sinking is the slow fall after
@@ -102,9 +107,11 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {})
     // mid-air and lost the jump (2026-11-14, 240 fps, hand-held: 764-806 and 824-851).
     const risingInto = a - k >= 0 && below(a - k);
     const q = Math.max(2, Math.round((b - a + 1) / 4));
-    const sinking = (b - a + 1) / fps < 0.3 && median(y.slice(b - q + 1, b + 1)) - median(y.slice(a, a + q)) > 0.025 * pxM;
-    if (!apex && !risingInto && !sinking && (b - a + 1) / fps * 1000 >= minMs) runs.push({ td: a, to: b, level });
-    i = b + 1;
+    const sinking = (b - a + 1) / fps < 0.3 && median(y.slice(b - q + 1, b + 1)) - median(y.slice(a, a + q)) > Math.max(0.025 * pxM, 1.25 * PX);
+    // and at least 3 frames: at 60 fps a 2-frame "contact" of the other foot just before the landing
+    // (IMG_2213, 381-382) split the hop and lost it; a real contact is 80 ms or more
+    if (!apex && !risingInto && !sinking && (b - a + 1) / fps * 1000 >= minMs && b - a + 1 >= 3) runs.push({ td: a, to: b, level });
+    i = Math.max(i + 1, b + 1);   // always forward: a run grown back and trimmed can end before i
   }
   // runs that touch or overlap after growing are one contact
   const merged = [];

@@ -182,7 +182,8 @@ const RING = 2 * Math.PI * 44;
 function hudHtml(h) {
   const tile = (t, side) => (t ? `<div class="hud-tile ${side}"><small>${esc(t.cap)}</small><b>${esc(t.v)}</b><i>${esc(t.u)}</i></div>` : '<div class="hud-tile empty"></div>');
   const fill = Math.max(0, Math.min(1, h.ring?.fill ?? 0));
-  return `${h.top ? `<p class="hud-top">${esc(h.top)}</p>` : ''}<div class="hud-row">${tile(h.left, 'l')}
+  // no line above (Stanley, 2026-11-14: „3. odraz z 5 netreba“)
+  return `<div class="hud-row">${tile(h.left, 'l')}
     <div class="hud-ring${h.ring?.best ? ' best' : ''}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="hud-track" cx="50" cy="50" r="44"/><circle class="hud-arc" cx="50" cy="50" r="44" stroke-dasharray="${RING.toFixed(1)}" style="stroke-dashoffset:${RING.toFixed(1)}" data-to="${(RING * (1 - fill)).toFixed(1)}"/></svg>
       <div class="hud-val"><b>${esc(h.ring?.v ?? '')}</b><i>${esc(h.ring?.u ?? '')}</i></div></div>${tile(h.right, 'r')}</div>`;
 }

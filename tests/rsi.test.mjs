@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { J, JI } from '../js/pose/models.js';
@@ -112,8 +113,10 @@ test('hand-held phone: with the camera motion taken out the drop jump reads the 
     const sh = shaken(result, ts);
     const raw = rsiAnalysis(sh.result, ts, { sex: 'male', height: 180 });
     const fixed = rsiAnalysis(sh.result, ts, { sex: 'male', height: 180, cam: sh.cam });
-    // uncorrected, the shake hides or splits the contact
-    assert.ok(raw.error || raw.jumps.length !== 1 || Math.abs(raw.jumps[0].contactMs - 200) > 2 * raw.edgeMs, `${fps} fps: shake did not matter`);
+    // Uncorrected, this mild shake used to hide or split the contact; since the bands never go
+    // under the pose's own jitter (5 px, 2026-11-15) it can survive. The corrected read must be
+    // exact either way, and never worse than the uncorrected one.
+    if (!raw.error && raw.jumps.length === 1) assert.ok(Math.abs(fixed.jumps[0].contactMs - 200) <= Math.abs(raw.jumps[0].contactMs - 200) + 1e-9, `${fps} fps: correction made it worse`);
     assert.equal(fixed.kind, 'drop_jump', `${fps} fps`);
     const j = fixed.jumps[0];
     assert.ok(Math.abs(j.contactMs - 200) <= 2 * fixed.edgeMs + 1e-9, `${fps} fps contact ${j.contactMs}`);
@@ -184,4 +187,20 @@ test('series marks: height, contact and RSI on every rebound, then the best one'
   const last = m.at(-1);
   assert.equal(last.title, '3 odrazy · najlepší 2.');
   assert.deepEqual([last.hud.ring.v, last.hud.left.v, last.hud.right.v], ['1,59', '22,4', '0,161']);
+});
+
+// Hops over a row of cones, filmed from the side with the phone following, 60 fps, the athlete far
+// (141 px per metre): every hop found, contacts as the frames show them (hop 4 on the ground at
+// 382-390, hop 5 at 419-428, by eye). The pose stays out of the public repo, so this runs only
+// where tests/real/w2213.json exists.
+test('cone hops from the side at 60 fps: all 11 hops, contacts as the frames show', { skip: !existsSync(new URL('./real/w2213.json', import.meta.url)) }, async () => {
+  const { readFileSync } = await import('node:fs');
+  const w = JSON.parse(readFileSync(new URL('./real/w2213.json', import.meta.url)));
+  const F = a => a?.map(x => x && Float32Array.from(x));
+  const r = rsiAnalysis({ fast: F(w.fast), accurate: F(w.accurate) }, w.ts, { sex: 'female', height: 171, cam: w.cam });
+  assert.equal(r.jumps.length, 11, JSON.stringify(r.events));
+  const at = td => r.jumps.find(j => Math.abs(j.td - td) <= 2);
+  assert.ok(Math.abs(at(383).contactMs - 150) <= 17, `hop 4 ${at(383).contactMs}`);
+  assert.ok(Math.abs(at(420).contactMs - 167) <= 17, `hop 5 ${at(420).contactMs}`);
+  r.jumps.forEach(j => assert.ok(j.rsi < 3, `RSI ${j.rsi} at ${j.td}`));
 });

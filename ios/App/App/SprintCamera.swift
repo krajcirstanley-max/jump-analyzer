@@ -279,7 +279,8 @@ enum SprintBurner {
     }
 
     static func hudImage(_ h: Hud, width w: CGFloat) -> UIImage {
-        let d = w * 0.36, topH = w * 0.07, H = d + topH, f = UIGraphicsImageRendererFormat.default(); f.scale = 1
+        // no line above the ring (Stanley, 2026-11-14: „3. odraz z 5 netreba“)
+        let d = w * 0.36, topH: CGFloat = 0, H = d, f = UIGraphicsImageRendererFormat.default(); f.scale = 1
         let rounded = { (size: CGFloat, weight: UIFont.Weight) -> UIFont in
             let base = UIFont.systemFont(ofSize: size, weight: weight)
             return base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
@@ -289,7 +290,7 @@ enum SprintBurner {
             NSAttributedString(string: s, attributes: [.font: rounded(size, weight), .foregroundColor: UIColor(white: 1, alpha: alpha), .paragraphStyle: center]).draw(in: r)
         }
         return UIGraphicsImageRenderer(size: CGSize(width: w, height: H), format: f).image { ctx in
-            if !h.top.isEmpty {
+            if topH > 0, !h.top.isEmpty {
                 let shadow = NSShadow(); shadow.shadowColor = UIColor(white: 0, alpha: 0.6); shadow.shadowBlurRadius = topH * 0.25
                 NSAttributedString(string: h.top, attributes: [.font: rounded(topH * 0.62, .bold), .foregroundColor: UIColor.white, .paragraphStyle: center, .shadow: shadow])
                     .draw(in: CGRect(x: 0, y: 0, width: w, height: topH))

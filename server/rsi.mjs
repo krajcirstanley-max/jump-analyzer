@@ -73,7 +73,13 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     if (rsi.error) return { error: rsi.error };
     // Contact edges from the toe against the floor, as for sprints (refineEdges explains why).
     let motion = null, toeError = null;
-    try {
+    // A phone that follows the athlete (hops over a row of cones, filmed from the side while turning:
+    // IMG_2213, the frame centre moved 1916 px) leaves no steady floor for the toe to stand on, and
+    // the toe edges cut contacts short: 0.083 s for a contact of 0.150 s by the frames (382-390 at
+    // 60 fps), RSI 4.46. There the pose's own contacts stand (383-391). A hand-held, still phone
+    // moves a few tens of px (the CMJ: 37) and keeps the toe edges.
+    const follows = !!camera && camera.moved > 0.1 * Math.min(meta.W, meta.H);
+    if (!follows) try {
       const track = fromWire(wire).clean;
       const it = frames.sequential(res.first, res.last, 1);
       let at = -1, cur = null;
@@ -119,6 +125,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     const noRebound = !rsi.jumps?.length && ev.some(e => e.onBox) && ev.some(e => !e.onBox && e.flightAfter == null);
     const result = {
       ...rsi, exercise, named, nameError, usesBox, noRebound, ...(boxCm == null && boxSeen ? { boxCm: boxSeen.cm, boxFrom: boxSeen.from } : {}), ...(who ? { who } : {}),
+      edges: follows ? 'pose' : toeError ? 'pose' : 'toe',
       camera: camera && { moved: camera.moved, rms: camera.rms, tracked: camera.tracked, step: camera.step, ms: camera.ms, used: !!cam }, cameraError,
       // RSI = jump height / contact time: the box never enters it. Its height is still noted, and
       // asked for only when the video could not show it (Stanley 2026-11-13: "ak nie tak treba
