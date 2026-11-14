@@ -508,3 +508,4 @@ div.att-open { cursor: default; }
 .conf-row .runup-l { margin-right: auto; }
 .conf-row input { width: 96px; min-height: 44px; font-size: 20px; font-weight: 700; text-align: center; }
 .conf-row + .note { margin-top: 4px; }
+.conf-from { margin-top: 8px; }

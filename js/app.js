@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.3';
+const APP_VERSION = '0.9.4';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -643,8 +643,14 @@ function prefillRunup() {
 function withExpected(r) {
   const pb = profiles[resultAthlete ?? athlete]?.pb ?? null;
   const sp = jump?.speed, toe = sp?.jumpFromToe, est = (jump?.metrics ?? []).find?.(m => m.key === 'estDistance' && m.status !== 'hidden')?.value;
+  // The video's own distance, before any tape correction (every metre scaled by tapeFix.k), measured
+  // the way the athlete measures: from the take-off line, or from the toe.
+  const line = toe > 0 && Number.isFinite(sp?.toeToLine), tf = sp?.tapeFix;
+  const from = jump?.tapeFrom ?? tf?.from ?? (line && sp.toeToLine < -0.3 ? 'toe' : 'board');
+  const k = tf?.applied ? tf.k : 1;
+  const videoDist = toe > 0 ? (from === 'board' && line ? toe - sp.toeToLine : toe) / k : est > 0 ? est : null;
   return { ...r, pb, judged: jump?.runupJudged ?? null, measured: jump?.measured ?? null, split: jump?.split ?? null,
-    videoSplit: sp?.split1to11 ?? null, videoDist: toe > 0 ? toe : est > 0 ? est : null, expected: r.value != null && r.value < 18 ? expectedDistance(r.value, pb) : null };
+    videoSplit: sp?.split1to11 ?? null, videoDist, tapeFrom: line ? from : null, tapeFix: tf ?? null, expected: r.value != null && r.value < 18 ? expectedDistance(r.value, pb) : null };
 }
 const redrawRunup = () => {
   runup = withExpected(runup ?? {});
@@ -654,12 +660,13 @@ const redrawRunup = () => {
 
 // The confirmed run-up differs from the one the numbers were judged at: judge them again (the
 // speed-dependent norms move with it). The coaching text stays as it was written.
-async function rejudge(id, v) {
-  if (!pose || !jump || jump.error || (jump.runupJudged ?? null) === v) return;
+// force: run again although the run-up is the same (a new tape distance rescales the metres).
+async function rejudge(id, v, force = false) {
+  if (!pose || !jump || jump.error || (!force && (jump.runupJudged ?? null) === v)) return;
   const a = resultAthlete, who = ATHLETES[a];
-  const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v });
+  const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null });
   if (next.error || id !== resultId) return;
-  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, split: jump.split, runup: v });
+  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v });
   if (player) { setOverlays(); player.refresh(); }
   await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump });
   if (id === resultId) present(jump.feel ?? null);
@@ -677,13 +684,27 @@ async function saveConfirm(k, raw) {
   const { field, lo, hi } = CONFIRM[k];
   const x = parseFloat(String(raw ?? '').trim().replace(',', '.'));
   const v = x >= lo && x <= hi ? Math.round(x * 100) / 100 : null;
+  const changed = jump[field] !== v;
   jump[field] = v;
   redrawRunup();
   const id = resultId;
   await saved;
   await hist.patchAttempt(id, { [field]: v });
   renderLists();
+  // A tape distance corrects the video's metres: run the numbers again with it.
+  if (field === 'measured' && changed) rejudge(id, jump.runup ?? null, true);
 }
+// Where the tape was laid from: the take-off line (default) or the take-off toe.
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-tape-from]');
+  if (!b || !resultId || !jump || jump.tapeFrom === b.dataset.tapeFrom) return;
+  jump.tapeFrom = b.dataset.tapeFrom;
+  redrawRunup();
+  const id = resultId;
+  await saved;
+  await hist.patchAttempt(id, { tapeFrom: jump.tapeFrom });
+  if (jump.measured != null) rejudge(id, jump.runup ?? null, true);
+});
 document.addEventListener('change', e => {
   const f = e.target.closest('[data-measured], [data-split]');
   if (f) saveConfirm('measured' in f.dataset ? 'measured' : 'split', f.value);
@@ -744,6 +765,7 @@ async function openAttempt(id) {
   jump.runup = rec.runup ?? null;
   jump.measured = rec.measured ?? null;
   jump.split = rec.split ?? null;
+  jump.tapeFrom = rec.tapeFrom ?? null;
   awaitingCoach = !!rec.coachPending;
   resultId = id;
   showPlace(id, rec.athlete);

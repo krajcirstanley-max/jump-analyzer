@@ -102,14 +102,22 @@ function splitRowHtml(r) {
       ${okBtn(saved != null, 'data-split-ok')}</div>
     <p class="note">${note}</p>`;
 }
+// The tape also corrects the video's metres (jump.js tapeFix): the line under the row says by how
+// much, or why not.
 function lengthRowHtml(r) {
-  const saved = r?.measured ?? null, video = r?.videoDist ?? null, v = saved ?? video;
-  const note = saved != null ? (same(saved, video) ? 'Potvrdené z videa.' : 'Zapísané z pásma.')
-    : video != null ? 'Z videa, od odrazovej špičky. Potvrď, alebo prepíš dĺžkou z pásma.' : 'Video dĺžku neurčilo. Zapíš ju z pásma.';
+  const saved = r?.measured ?? null, video = r?.videoDist ?? null, v = saved ?? video, from = r?.tapeFrom;
+  const where = from === 'toe' ? 'od odrazovej špičky' : from === 'board' ? 'od čiary dosky' : 'odhad z videa';
+  const tf = r?.tapeFix, pct = k => `${k > 1 ? '+' : '−'}${num(Math.abs((k - 1) * 100), 1)} %`;
+  const fixLine = saved == null || !tf || same(saved, video) ? ''
+    : tf.applied ? ` Mierka videa spresnená o ${pct(tf.k)}: kroky, rýchlosti a výšky sú prepočítané.`
+    : tf.tooFar ? ` Video ukázalo ${metres(tf.video)}, rozdiel ${pct(tf.k)} je priveľký na chybu mierky. Asi je zle prečítaná stopa v piesku, nič som neprepočítal.` : '';
+  const note = saved != null ? (same(saved, video) ? `Potvrdené z videa, ${where}.` : `Zapísané z pásma, ${where}.${fixLine}`)
+    : video != null ? `Z videa, ${where}. Potvrď, alebo prepíš dĺžkou z pásma.` : 'Video dĺžku neurčilo. Zapíš ju z pásma.';
+  const chips = from ? `<div class="filt conf-from"><button data-tape-from="board" class="${from === 'board' ? 'on' : ''}">od dosky</button><button data-tape-from="toe" class="${from === 'toe' ? 'on' : ''}">od špičky</button></div>` : '';
   return `<div class="conf-row"><span class="runup-l">Dĺžka skoku</span>
       <input data-measured type="text" inputmode="decimal" autocomplete="off" placeholder="napr. 6,50" value="${v != null ? num(v, 2) : ''}"><span class="runup-u">m</span>
       ${okBtn(saved != null, 'data-measured-ok')}</div>
-    <p class="note">${note}</p>`;
+    ${chips}<p class="note">${note}</p>`;
 }
 
 // The 1-11 m cell: the confirmed or typed time once there is one, else the video's.

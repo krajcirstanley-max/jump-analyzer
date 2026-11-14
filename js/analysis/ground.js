@@ -63,7 +63,10 @@ function coneClusters(conesByFrame, H, boardM) {
 // ground: { frames: { [i]: [sandFar, sandNear, lineFar, lineNear] } } in image pixels.
 // Works in a unit where the take-off line is 1 from the sand, then picks the board distance
 // (1, 2 or 3 m) from the athlete's leg length and scales everything by it.
-export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = null) {
+// fix: a uniform metre correction from the athlete's tape measure (jump.js tapeFix). Every metre
+// here is the world unit times boardM, so scaling boardM after the cones scales every distance,
+// speed and height by the same factor and leaves the times alone.
+export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = null, fix = 1) {
   const frames = ground?.frames;
   if (!frames) return { error: 'no ground' };
   const T = ev.takeoff, s = ev.takeoffFoot;
@@ -108,7 +111,7 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   let legUnits = legLength();
   if (!(legUnits > 0)) return { error: 'no leg length' };
   const implied = legM / legUnits; // metres per unit = the board distance the body implies
-  const boardM = ground.boardM ?? BOARDS.reduce((b, d) => (Math.abs(d - implied) < Math.abs(b - implied) ? d : b));
+  let boardM = ground.boardM ?? BOARDS.reduce((b, d) => (Math.abs(d - implied) < Math.abs(b - implied) ? d : b));
 
   // Freelap cones, when the clip shows them: 0.2, 10.2 and 20.2 m from the board, so a 10 m
   // baseline against the 2 m from the sand. On IMG_4677 (far, oblique phone) the board scale
@@ -134,6 +137,11 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
         for (const c of cones) { c.x = boardM + sc * (c.x - boardM); c.obs = c.obs.map(o => ({ ...o, x: boardM + sc * (o.x - boardM) })); }
       } else { Object.assign(H, H0); Object.assign(Hi, Hi0); legUnits = leg0; }
     }
+  }
+  const boardM0 = boardM;
+  if (fix > 0 && fix !== 1) {
+    boardM *= fix;
+    for (const c of cones) { c.x *= fix; c.obs = c.obs.map(o => ({ ...o, x: o.x * fix })); }
   }
   const legRatio = (legUnits * boardM) / legM;
   const X = i => comX(i) * boardM;
@@ -320,7 +328,7 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const pxPerM = pxPerUnit(T.td, comX(T.td)) / boardM;
   return {
     steps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
-    boardM, implied, legRatio, yAth, pxPerM, splits,
+    boardM: boardM0, fix, implied, legRatio, yAth, pxPerM, splits,
     speedLast, vxTO, speedLoss: vxTO - speedLast, speedLossPct: ((vxTO - speedLast) / speedLast) * 100,
     // + behind the take-off line (legal, distance given away), - past it towards the sand.
     toeToLine: toeTO - boardM, takeoffDist, landingReach: reach, jump, jumpDirect: direct, flightTime, partsGap: agree,
