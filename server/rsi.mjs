@@ -24,8 +24,8 @@ const SCHEMA = {
     boxFrom: { type: 'string', enum: ['label', 'estimate', 'unknown', 'none'] },
   },
 };
-const PROMPT = `You see a plyometric jump drill filmed from the front with a phone (on a tripod or hand-held). The image is a contact sheet: frames in time order, row by row, each stamped with its frame number in yellow.
-Name the drill: drop_jump (steps off a box, lands on both feet and rebounds up at once), drop_jump_single (the same on one leg), pogo (fast ankle bounces, knees nearly straight), repeated_hops (several rebound jumps in a row, both feet), hurdle_hops (repeated jumps over hurdles), cmj (one jump from standing with a dip first), squat_jump (one jump from a held squat, no dip), single_leg_hops (repeated hops on one leg), other.
+const PROMPT = `You see a plyometric jump drill filmed with a phone (from the front or the side, on a tripod or hand-held, the phone may follow the athlete). The image is a contact sheet: frames in time order, row by row, each stamped with its frame number in yellow.
+Name the drill: drop_jump (steps off a box, lands on both feet and rebounds up at once), drop_jump_single (the same on one leg), pogo (fast ankle bounces, knees nearly straight), repeated_hops (several rebound jumps in a row, both feet, in place or travelling forward, also over small cones or markers on the floor), hurdle_hops (repeated jumps over hurdles), cmj (one jump from standing with a dip first), squat_jump (one jump from a held squat, no dip), single_leg_hops (repeated hops on one leg), other.
 leg: the leg(s) that take the contacts, from the athlete's point of view (the athlete's left foot is on the right side of the image when facing the camera). Decide it from the landing and rebound frames: if one foot stays off the floor while the other lands and pushes off, it is single-leg (left or right), even if the athlete stands on both feet before or after. A single-leg drop jump is drop_jump_single. box: true if the athlete starts standing on a box or step.
 boxCm: the box height in centimetres, or null without a box. If a height is printed on the box, read it (boxFrom "label") and convert inches to cm (12" = 30 cm, 18" = 46 cm, 24" = 61 cm, 30" = 76 cm). Otherwise estimate it from the athlete standing next to or on it (boxFrom "estimate"; a shin is about a quarter of a person's height). If the box is not visible well enough to judge, boxCm null and boxFrom "unknown": the athlete will type it in. No box: null and "none". Always centimetres, never inches.`;
 
@@ -117,7 +117,9 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       try { named = await nameExercise({ frames, first, last, boxes: res.boxes, client, focus }); } catch (e) { nameError = String(e?.message || e).slice(0, 200); }
     }
     // Claude's name wins, 'other' included (a clip that is not a drill); without Claude, the pattern
-    const exercise = named?.exercise ?? rsi.kind;
+    // A row of rebounds is hops whatever the picture looked like: Claude called hops over cones,
+    // filmed from the side, "other" (IMG_2213, 11 rebounds), and the screen then said it was no drill.
+    const exercise = named?.exercise === 'other' && rsi.jumps.length >= 3 ? rsi.kind : named?.exercise ?? rsi.kind;
     const usesBox = named?.box ?? Boolean(rsi.boxEstCm);
     // The box height read off the video (printed label or estimate), in cm, unless the app sent one.
     const boxSeen = usesBox && named?.boxCm > 0 ? { cm: Math.round(named.boxCm), from: named.boxFrom } : null;

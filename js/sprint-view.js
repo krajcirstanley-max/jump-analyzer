@@ -174,9 +174,10 @@ function pendingSteps(rec) {
 // bare: the app's Tréning tab owns the buttons and the list; this root then shows only the open
 // analysis (the detail screen). onProgress(text) and onDone(rec) report back to it.
 export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
-  saveClip = null, loadClip = null, dropClip = null }) {
+  saveClip = null, loadClip = null, dropClip = null, makePlayer = null }) {
   let unsub = null, last = '', busy = false, progress = '', current = null;
   let clipUrl = null, clipId = null, clipP = null;   // the open analysis's video as an object URL
+  let live = null;   // the app's own player on the open clip: { id, player, input }
   const say = t => { progress = t; onProgress(t); };
 
   const name = r => (r.who ? athletes[r.who]?.name : null) ?? r.chip ?? '';
@@ -315,9 +316,27 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     attachClip(rec);
   }
 
+  // The app's own player (the jumps' one: decodes the clip itself) where it is there: a plain
+  // <video> showed a struck-out play button on the phone (2026-11-15, RSI); same storage here.
   async function attachClip(rec) {
     const box = root.querySelector('[data-clip]');
     if (!rec?.hasClip || !box || !loadClip) return;
+    if (makePlayer) {
+      if (live?.id === rec.id && live.root === box) return;
+      live?.player?.dispose?.(); live?.input?.dispose?.();
+      const mine = { id: rec.id, root: box }; live = mine;
+      const blob = await loadClip(rec.id).catch(() => null);
+      if (live !== mine || !box.isConnected) return;
+      if (!blob) { box.innerHTML = '<p class="note">Video sa nenašlo v telefóne.</p>'; return; }
+      try {
+        box.innerHTML = ''; box.classList.add('player');
+        const made = await makePlayer(box, blob);
+        if (live !== mine || !box.isConnected) { made.player?.dispose?.(); made.input?.dispose?.(); return; }
+        Object.assign(mine, made);
+        box.closest('section')?.querySelector('.sp-rate')?.classList.add('hidden');   // the player has its own speeds
+        return;
+      } catch (e) { console.warn('Sprint clip: own player failed', e); box.classList.remove('player'); }
+    }
     if (clipId !== rec.id) {
       if (clipUrl) URL.revokeObjectURL(clipUrl);
       clipUrl = null; clipId = rec.id;

@@ -627,3 +627,6 @@ div.att-open { cursor: default; }
 .hud-val { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; }
 .hud-val b { font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
 .hud-val i { font-style: normal; font-size: 12px; font-weight: 700; opacity: .8; margin-top: 3px; text-align: center; padding: 0 8px; }
+/* the RSI marks sit on the picture inside the player, above its buttons */
+.rsi-stage { position: relative; }
+.rsi-stage .rsi-ov.hud { bottom: 12px; }

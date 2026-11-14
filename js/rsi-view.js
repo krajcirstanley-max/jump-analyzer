@@ -13,7 +13,8 @@ const LEG = { both: 'obe nohy', lr: 'obe nohy', left: 'ľavá', right: 'pravá',
 const num = (x, dp) => (Number.isFinite(x) ? Number(x).toFixed(dp).replace('.', ',') : '–');
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const key = a => `jump.rsi.${a}`;
-const load = a => { try { return JSON.parse(localStorage.getItem(key(a)) || '[]'); } catch { return []; } };
+const asHops = r => (r.exercise === 'other' && (r.jumps?.length ?? 0) >= 3 ? { ...r, exercise: 'repeated_hops' } : r);
+const load = a => { try { return JSON.parse(localStorage.getItem(key(a)) || '[]').map(asHops); } catch { return []; } };
 const save = (a, list) => { try { localStorage.setItem(key(a), JSON.stringify(list.slice(-200))); } catch { /* storage blocked */ } };
 
 // Keep only what the screen and the trend need.
@@ -169,13 +170,14 @@ export function rsiMarks(r) {
 // The clip with the marks over it, as on the video in Photos: one box that changes with the
 // moment (on the ground, in the air, the summary), and a strip with one piece per rebound, the best
 // one green (Stanley, 2026-11-14: "nech je to vidno na overlay ako sprint").
+let HAS_PLAYER = false;   // set by initRsi when the app's own player is there
 const RATES = '<div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div>';
 function videoHtml(rec) {
   if (!rec.hasClip) return '';
   const b = bestOf(rec), n = rec.jumps?.length ?? 0;
   const strip = n > 1 ? `<div class="rsi-strip">${rec.jumps.map((j, k) => `<span data-k="${k}"${j === b ? ' class="best"' : ''}></span>`).join('')}</div>` : '';
-  return `<div class="sp-video rsi-video"><div class="sp-vbox" data-rsi-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
-    ${rec.pending ? `<span class="pd-chip">${rec.error ? '⚠ analýza zlyhala' : '◌ analýza beží'}</span>` : '<div class="rsi-ov hidden"></div>'}${strip}</div>${RATES}`;
+  return `<div class="sp-video rsi-video"><div class="sp-vbox player rsi-player" data-rsi-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
+    ${rec.pending ? `<span class="pd-chip">${rec.error ? '⚠ analýza zlyhala' : '◌ analýza beží'}</span>` : '<div class="rsi-ov hidden"></div>'}${strip}</div>${HAS_PLAYER ? '' : RATES}`;
 }
 // The scoreboard over the video: height left, contact right, RSI in the ring (full = the best).
 const RING = 2 * Math.PI * 44;
@@ -200,7 +202,7 @@ const pendingSteps = rec => {
 
 // bare: the Tréning tab owns the buttons and the lists; this root shows only the open result.
 export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
-  saveClip = null, loadClip = null, dropClip = null }) {
+  saveClip = null, loadClip = null, dropClip = null, makePlayer = null }) {
   root.innerHTML = `
     <div class="card${bare ? ' hidden' : ''}"><h2>RSI</h2>
       <p class="note">Natáčaj <b>spredu</b>, pokojne aj z ruky (pohyb telefónu odrátam podľa pozadia), v zábere celé chodidlá a kus okolia. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
@@ -215,6 +217,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     <div class="card hidden${bare ? ' bare' : ''}" id="rsi-history"></div>`;
   const $ = id => root.querySelector(`#${id}`);
   let current = null, busy = false;
+  HAS_PLAYER = !!makePlayer;
 
   // Both athletes' histories, each under its name.
   const renderHistory = () => {
@@ -235,25 +238,48 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
   const put = (a, list) => { const keep = list.slice(-200); for (const r of list.slice(0, list.length - keep.length)) if (r.hasClip) dropClip?.(r.id); save(a, keep); };
   const patch = (a, id, f) => { const list = load(a), x = list.find(r => r.id === id); if (x) { f(x); save(a, list); } return x; };
 
-  // The open record's video, with the marks drawn over it while it plays.
-  let clipUrl = null, clipId = null, clipP = null;
+  // The open record's video in the app's own player (the one the jumps use: frames decoded onto a
+  // canvas, step by step, ½× to ⅒×). A plain <video> showed a struck-out play button on the phone
+  // (2026-11-15, cone hops at 60 fps). The marks are drawn over it frame by frame.
+  let live = null;   // { id, player, input }
+  const drop = () => { if (!live) return; live.player?.dispose?.(); live.input?.dispose?.(); live = null; };
   async function attachClip(rec) {
     if (!rec?.hasClip || !loadClip) return;
-    if (clipId !== rec.id) {
-      if (clipUrl) URL.revokeObjectURL(clipUrl);
-      clipUrl = null; clipId = rec.id;
-      clipP = loadClip(rec.id).catch(() => null).then(blob => { if (clipId === rec.id) clipUrl = blob ? URL.createObjectURL(blob) : null; });
-    }
-    await clipP;
     const box = root.querySelector(`[data-rsi-clip="${CSS.escape(rec.id)}"]`);
-    if (!box || clipId !== rec.id) return;
-    box.innerHTML = clipUrl ? `<video src="${clipUrl}" controls playsinline muted preload="metadata"></video>` : '<p class="note">Video sa nenašlo v telefóne.</p>';
-    const v = box.querySelector('video'), ov = root.querySelector('.rsi-ov'), strip = [...root.querySelectorAll('.rsi-strip span')];
-    if (!v || rec.pending) return;
+    if (!box) return;
+    drop();
+    const id = rec.id, mine = { id };
+    live = mine;
+    const blob = await loadClip(id).catch(() => null);
+    if (live !== mine || !box.isConnected) return;
+    if (!blob) { box.innerHTML = '<p class="note">Video sa nenašlo v telefóne.</p>'; return; }
+    let player = null, frameAt = null, timeAt = null;
+    if (makePlayer) {
+      try {
+        box.innerHTML = '';
+        const made = await makePlayer(box, blob);
+        if (live !== mine || !box.isConnected) { made.player?.dispose?.(); made.input?.dispose?.(); return; }
+        Object.assign(mine, made); player = made.player;
+        const ts = player.ts, t0 = ts[0] ?? 0;
+        timeAt = i => (ts[i] ?? 0) - t0;
+        frameAt = t => { let i = 0; while (i < ts.length - 1 && ts[i] - t0 < t) i++; return i; };
+      } catch (e) { console.warn('RSI clip: own player failed', e); player = null; }
+    }
+    let v = null;
+    if (!player) {
+      box.innerHTML = `<video src="${URL.createObjectURL(blob)}" controls playsinline muted preload="metadata"></video>`;
+      v = box.querySelector('video');
+    }
+    mine.seek = t => { if (player) { player.pause(); player.show(frameAt(t)); } else if (v) { v.pause(); v.currentTime = t; } };
+    mine.rate = r => { if (v) { v.playbackRate = r; v.defaultPlaybackRate = r; } };
+    if (rec.pending) return;
+    const ov = root.querySelector('.rsi-ov'), strip = [...root.querySelectorAll('.rsi-strip span')];
+    // over the picture itself, not over the player's buttons
+    if (ov && player) { player.stage.classList.add('rsi-stage'); player.stage.appendChild(ov); }
     const marks = rec.marks ?? [], times = (rec.jumps ?? []).map(j => j.t);
     let lastKey = '';
-    const tick = () => {
-      const t = v.currentTime, m = marks.find(x => t >= x.from && t < x.to);
+    const tick = t => {
+      const m = marks.find(x => t >= x.from && t < x.to);
       const key = m ? `${m.title}|${m.big}` : '';
       if (ov && key !== lastKey) {
         lastKey = key;
@@ -266,10 +292,11 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       }
       strip.forEach((el, k) => el.classList.toggle('on', times[k] != null && t >= times[k]));
     };
-    const loop = () => { if (!v.isConnected) return; tick(); v.requestVideoFrameCallback ? v.requestVideoFrameCallback(loop) : null; };
-    v.addEventListener('timeupdate', tick); v.addEventListener('seeked', tick);
-    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(loop);
-    tick();
+    if (player) { player.frameHooks.push(i => tick(timeAt(i))); tick(timeAt(player.index)); return; }
+    const loop = () => { if (!v.isConnected) return; tick(v.currentTime); v.requestVideoFrameCallback?.(loop); };
+    v.addEventListener('timeupdate', () => tick(v.currentTime)); v.addEventListener('seeked', () => tick(v.currentTime));
+    v.requestVideoFrameCallback?.(loop);
+    tick(0);
   }
   // The box height typed in when the video could not show it.
   root.addEventListener('change', e => {
@@ -284,16 +311,15 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
   root.addEventListener('click', e => {
     const rt = e.target.closest('[data-rate]');
     if (rt) {
-      const v = root.querySelector('[data-rsi-clip] video');
-      if (v) { v.playbackRate = +rt.dataset.rate; v.defaultPlaybackRate = +rt.dataset.rate; }
+      live?.rate?.(+rt.dataset.rate);
       root.querySelectorAll('[data-rate]').forEach(x => x.classList.toggle('on', x === rt));
       return;
     }
     // a row of the table: the video jumps to that rebound
     const sk = e.target.closest('[data-seek]');
     if (sk) {
-      const v = root.querySelector('[data-rsi-clip] video');
-      if (v) { v.pause(); v.currentTime = Math.max(0, +sk.dataset.seek - 0.05); v.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      live?.seek?.(Math.max(0, +sk.dataset.seek - 0.05));
+      root.querySelector('[data-rsi-clip]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
     const re = e.target.closest('[data-rsi-retry]');

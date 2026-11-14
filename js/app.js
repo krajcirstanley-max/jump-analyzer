@@ -20,7 +20,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.16.3';
+const APP_VERSION = '0.16.4';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -66,6 +66,15 @@ async function roster() {
   })));
 }
 
+// The jumps' own player for a stored clip (RSI, sprint): it decodes the clip itself, so it plays
+// where a plain <video> would not (a struck-out play button on the phone, 2026-11-15).
+async function clipPlayer(root, blob) {
+  const r = await inspectClip(blob, mb, { name: 'clip.mov' });
+  const p = new Player(root, new FrameSource(mb, r.track, r.packetTimestamps, r.keyTimestamps));
+  await p.show(0);
+  return { player: p, input: r.input };
+}
+
 // RSI tab: its own screen and storage.
 const rsiView = initRsi({
   root: document.getElementById('rsi'), athletes: ATHLETES, bare: true,
@@ -73,6 +82,7 @@ const rsiView = initRsi({
   onProgress: t => trainProgress(t),
   onDone: ({ rec, who }, o) => { refreshFeeds(); if (!o?.quiet) openDetail('rsi', rec.id, who); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
+  makePlayer: clipPlayer,
 });
 
 // Freelap tab: Start listens for the chips, Stop takes nothing in.
@@ -88,6 +98,7 @@ const sprintView = initSprint({
   onProgress: t => trainProgress(t),
   onDone: (rec, o) => { refreshFeeds(); if (!o?.quiet) openDetail('sprint', rec.id); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
+  makePlayer: clipPlayer,
 });
 const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
 freelapView.setLinker(sprintOfRun);
