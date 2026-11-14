@@ -164,17 +164,24 @@ test('countermovement jump with the feet drawn up in the air: one flight, no con
   assert.ok(r.standing[0].heightCm > 30 && r.standing[0].heightCm < 40, `height ${r.standing[0].heightCm}`);
 });
 
-// The marks on the video for a series: on the ground the contact; in the air the height with that
-// rebound's contact and RSI; after the last landing the best rebound and the averages.
+// The marks on the video for a series, as a scoreboard: each rebound from its take-off to the
+// next one's with its height, contact and RSI (the ring full for the best), then the best and the
+// averages.
 test('series marks: height, contact and RSI on every rebound, then the best one', async () => {
   const { rsiMarks } = await import('../js/rsi-view.js');
   const ts = Array.from({ length: 1000 }, (_, i) => i / 240);
   const jumps = [[150, 0.171, 0.410, 20.6, 1.21], [300, 0.152, 0.443, 24.1, 1.59], [450, 0.160, 0.428, 22.5, 1.40]]
     .map(([td, c, f, h, rsi]) => ({ td, to: td + Math.round(c * 240) - 1, contactMs: c * 1000, flightMs: f * 1000, heightCm: h, rsi }));
   const m = rsiMarks({ ts, fps: 240, exercise: 'repeated_hops', jumps, standing: [] });
-  assert.deepEqual(m.slice(0, 2).map(x => [x.title, x.big, x.small]), [['1. odraz · na zemi', '0,171 s', ''], ['1. odraz · let', '20,6 cm', 'zem 0,171 s · RSI 1,21']]);
+  assert.equal(m.length, 4);
+  const h1 = m[0].hud, h2 = m[1].hud;
+  assert.equal(h1.top, '1. odraz z 3');
+  assert.deepEqual([h1.left.v, h1.left.u, h1.right.v, h1.right.u, h1.ring.v, h1.ring.u], ['20,6', 'cm', '0,171', 's', '1,21', 'RSI']);
+  assert.ok(Math.abs(h1.ring.fill - 1.21 / 1.59) < 1e-9 && !h1.ring.best);
+  assert.ok(h2.ring.fill === 1 && h2.ring.best);
+  // each rebound stays up until the next take-off
+  assert.ok(Math.abs(m[0].to - m[1].from) < 1e-9);
   const last = m.at(-1);
   assert.equal(last.title, '3 odrazy · najlepší 2.');
-  assert.equal(last.big, 'RSI 1,59');
-  assert.match(last.small, /priemer: zem 0,161 s · 22,4 cm · RSI 1,40/);
+  assert.deepEqual([last.hud.ring.v, last.hud.left.v, last.hud.right.v], ['1,59', '22,4', '0,161']);
 });

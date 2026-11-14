@@ -124,36 +124,44 @@ export function rsiMarks(r) {
   const start = (r.standing ?? []).filter(st => jumps.length && st.to < jumps[0].td).at(-1);
   if (start) {
     const up = at(start.to) + dt, fl = start.flightMs / 1000;
-    out.push({ from: up, to: up + fl, title: hurdles ? '1. prekážka · let' : '1. skok · let', big: cm1(start.heightCm), small: `let ${s3(fl)} s · zo státia` });
+    const next = jumps.length ? at(jumps[0].to) + dt : up + fl;
+    out.push({ from: up, to: next, title: hurdles ? '1. prekážka · let' : '1. skok · let', big: cm1(start.heightCm), small: `let ${s3(fl)} s · zo státia`,
+      hud: { top: hurdles ? '1. prekážka' : '1. skok', left: { cap: 'výška', v: num(start.heightCm, 1), u: 'cm' }, right: { cap: 'let', v: s3(fl), u: 's' }, ring: { v: '–', u: 'zo státia', fill: 0 } } });
   }
   const off = start ? 1 : 0;
-  // Vertical jumps from standing (no rebounds): the flight, then the height for 3 s after landing.
+  // The numbers ride on the video like a scoreboard (Stanley, 2026-11-14, a screenshot of another
+  // app: "takto overlay"): the height on the left, the contact on the right, the RSI in a ring in
+  // the middle, full for the best rebound of the clip. `hud` is that; title/big/small say the same
+  // in one line for anything that can only draw text.
+  // Vertical jumps from standing (no rebounds): the height in the ring, from take-off to 3 s after landing.
   if (!jumps.length) {
-    const st = r.standing ?? [];
+    const st = r.standing ?? [], top = Math.max(...st.map(j => j.heightCm));
     st.forEach((j, k) => {
-      const up = at(j.to) + dt, fl = j.flightMs / 1000, n = st.length > 1 ? `${k + 1}. výskok · ` : 'Výskok · ';
-      out.push({ from: up, to: up + fl, title: `${n}Let`, big: `${s3(fl)} s`, small: '' });
-      out.push({ from: up + fl, to: up + fl + 3, title: `${n}Výška`, big: cm1(j.heightCm), small: `let ${s3(fl)} s` });
+      const up = at(j.to) + dt, fl = j.flightMs / 1000, n = st.length > 1 ? `${k + 1}. výskok` : 'Výskok';
+      out.push({ from: up, to: up + fl + 3, title: n, big: cm1(j.heightCm), small: `let ${s3(fl)} s`,
+        hud: { top: n, left: { cap: 'let', v: s3(fl), u: 's' }, right: null, ring: { v: num(j.heightCm, 1), u: 'cm', fill: j.heightCm / top, best: j.heightCm === top && st.length > 1 } } });
     });
     return out.sort((a, b) => a.from - b.from);
   }
-  // A series (hops, hurdle hops, hops over cones): on the ground the contact time; in the air the
-  // height, with that rebound's contact and RSI under it; after the last landing the best rebound
-  // and the averages (Stanley, 2026-11-14: "výšku aj kontakt pre každý a aj RSI").
+  // A series (hops, hurdle hops, hops over cones): each rebound from its take-off to the next one's,
+  // then the best rebound and the averages for 3 s (Stanley, 2026-11-14: "výšku aj kontakt pre
+  // každý a aj RSI").
+  const best = Math.max(...jumps.map(j => j.rsi));
   jumps.forEach((j, k) => {
     const c = j.contactMs / 1000, fl = j.flightMs / 1000, h = j.heightCm;
-    const down = at(j.td), up = at(j.to) + dt, land = up + fl;
-    const n = hurdles ? `pred ${k + 1 + off}. prekážkou · ` : many ? `${k + 1}. odraz · ` : '';
-    const nf = hurdles ? `${k + 1 + off}. prekážka · ` : n;
-    out.push({ from: down, to: up, title: `${n}na zemi`, big: `${s3(c)} s`, small: '' });
-    out.push({ from: up, to: land, title: `${nf}let`, big: cm1(h), small: `zem ${s3(c)} s · RSI ${s2(j.rsi)}` });
-    if (!many && !hurdles) out.push({ from: land, to: land + 2.5, title: 'RSI', big: s2(j.rsi), small: `zem ${s2(c)} s · let ${s2(fl)} s · ${cm(h)}` });
+    const up = at(j.to) + dt, land = up + fl, nx = jumps[k + 1];
+    const name = hurdles ? `${k + 1 + off}. prekážka` : many ? `${k + 1}. odraz` : 'Odraz';
+    out.push({ from: up, to: nx ? at(nx.to) + dt : land + (many || hurdles ? 0 : 2.5), title: name, big: `RSI ${s2(j.rsi)}`, small: `zem ${s3(c)} s · ${cm1(h)}`,
+      hud: { top: many || hurdles ? `${name} z ${jumps.length + (hurdles ? off : 0)}` : name, left: { cap: 'výška', v: num(h, 1), u: 'cm' }, right: { cap: 'na zemi', v: s3(c), u: 's' },
+        ring: { v: s2(j.rsi), u: 'RSI', fill: j.rsi / best, best: many && j.rsi === best } } });
   });
   if (many || hurdles) {
     const last = jumps.at(-1), end = at(last.to) + dt + last.flightMs / 1000;
     const mean = k => jumps.reduce((a, j) => a + j[k], 0) / jumps.length;
     const bi = jumps.reduce((b, j, k) => (j.rsi > jumps[b].rsi ? k : b), 0);
-    out.push({ from: end, to: end + 3, title: `${hurdles ? prekazok(jumps.length + off) : odrazy(jumps.length)} · najlepší ${bi + 1 + (hurdles ? off : 0)}.`, big: `RSI ${s2(jumps[bi].rsi)}`, small: `priemer: zem ${s3(mean('contactMs') / 1000)} s · ${cm1(mean('heightCm'))} · RSI ${s2(mean('rsi'))}` });
+    const title = `${hurdles ? prekazok(jumps.length + off) : odrazy(jumps.length)} · najlepší ${bi + 1 + (hurdles ? off : 0)}.`;
+    out.push({ from: end, to: end + 3, title, big: `RSI ${s2(jumps[bi].rsi)}`, small: `priemer: zem ${s3(mean('contactMs') / 1000)} s · ${cm1(mean('heightCm'))} · RSI ${s2(mean('rsi'))}`,
+      hud: { top: title, left: { cap: 'priemer', v: num(mean('heightCm'), 1), u: 'cm' }, right: { cap: 'priemer', v: s3(mean('contactMs') / 1000), u: 's' }, ring: { v: s2(jumps[bi].rsi), u: 'najlepšie RSI', fill: 1, best: true } } });
   }
   return out.sort((a, b) => a.from - b.from);
 }
@@ -168,6 +176,15 @@ function videoHtml(rec) {
   const strip = n > 1 ? `<div class="rsi-strip">${rec.jumps.map((j, k) => `<span data-k="${k}"${j === b ? ' class="best"' : ''}></span>`).join('')}</div>` : '';
   return `<div class="sp-video rsi-video"><div class="sp-vbox" data-rsi-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
     ${rec.pending ? `<span class="pd-chip">${rec.error ? '⚠ analýza zlyhala' : '◌ analýza beží'}</span>` : '<div class="rsi-ov hidden"></div>'}${strip}</div>${RATES}`;
+}
+// The scoreboard over the video: height left, contact right, RSI in the ring (full = the best).
+const RING = 2 * Math.PI * 44;
+function hudHtml(h) {
+  const tile = (t, side) => (t ? `<div class="hud-tile ${side}"><small>${esc(t.cap)}</small><b>${esc(t.v)}</b><i>${esc(t.u)}</i></div>` : '<div class="hud-tile empty"></div>');
+  const fill = Math.max(0, Math.min(1, h.ring?.fill ?? 0));
+  return `${h.top ? `<p class="hud-top">${esc(h.top)}</p>` : ''}<div class="hud-row">${tile(h.left, 'l')}
+    <div class="hud-ring${h.ring?.best ? ' best' : ''}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="hud-track" cx="50" cy="50" r="44"/><circle class="hud-arc" cx="50" cy="50" r="44" stroke-dasharray="${RING.toFixed(1)}" style="stroke-dashoffset:${RING.toFixed(1)}" data-to="${(RING * (1 - fill)).toFixed(1)}"/></svg>
+      <div class="hud-val"><b>${esc(h.ring?.v ?? '')}</b><i>${esc(h.ring?.u ?? '')}</i></div></div>${tile(h.right, 'r')}</div>`;
 }
 const pendingSteps = rec => {
   const st = rec.stage ?? '', up = /nahr/i.test(st);
@@ -240,7 +257,11 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       if (ov && key !== lastKey) {
         lastKey = key;
         ov.classList.toggle('hidden', !m);
-        ov.innerHTML = m ? `<small>${esc(m.title)}</small><b>${esc(m.big)}</b>${m.small ? `<i>${esc(m.small)}</i>` : ''}` : '';
+        ov.classList.toggle('hud', !!m?.hud);
+        ov.innerHTML = !m ? '' : m.hud ? hudHtml(m.hud) : `<small>${esc(m.title)}</small><b>${esc(m.big)}</b>${m.small ? `<i>${esc(m.small)}</i>` : ''}`;
+        // the ring fills when a new rebound comes up
+        const arc = ov.querySelector('.hud-arc');
+        if (arc) requestAnimationFrame(() => requestAnimationFrame(() => { arc.style.strokeDashoffset = arc.dataset.to; }));
       }
       strip.forEach((el, k) => el.classList.toggle('on', times[k] != null && t >= times[k]));
     };

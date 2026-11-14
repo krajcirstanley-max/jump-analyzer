@@ -71,7 +71,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let id = call.getString("id") else { call.reject("No id"); return }
         let marks: [SprintBurner.Mark] = (call.getArray("marks") ?? []).compactMap { v in
             guard let m = v as? [String: Any], let from = (m["from"] as? NSNumber)?.doubleValue, let to = (m["to"] as? NSNumber)?.doubleValue else { return nil }
-            return SprintBurner.Mark(from: from, to: to, title: m["title"] as? String ?? "", big: m["big"] as? String ?? "", small: m["small"] as? String ?? "")
+            return SprintBurner.Mark(from: from, to: to, title: m["title"] as? String ?? "", big: m["big"] as? String ?? "", small: m["small"] as? String ?? "", hud: SprintBurner.Hud(m["hud"]))
         }
         RsiHold.shared.notify = { [weak self] name, data in self?.notifyListeners(name, data: data) }
         RsiHold.shared.finalize(id: id, marks: marks)
@@ -261,7 +261,63 @@ enum SprintBurner {
     }
 
     /// A label shown from `from` to `to` seconds into the clip: a small title, a big number, a line under it.
-    struct Mark { let from: Double; let to: Double; let title: String; let big: String; let small: String }
+    struct Mark { let from: Double; let to: Double; let title: String; let big: String; let small: String; var hud: Hud? = nil }
+
+    /// The scoreboard (2026-11-14, Stanley: "takto overlay"): the height in a tile on the left, the
+    /// contact on the right, the RSI in a ring in the middle (full = the best rebound), a line above.
+    struct Hud {
+        struct Tile { let cap: String; let v: String; let u: String }
+        let top: String; let left: Tile?; let right: Tile?; let ringV: String; let ringU: String; let fill: CGFloat; let best: Bool
+        init?(_ any: Any?) {
+            guard let d = any as? [String: Any] else { return nil }
+            let tile = { (x: Any?) -> Tile? in (x as? [String: Any]).map { Tile(cap: $0["cap"] as? String ?? "", v: $0["v"] as? String ?? "", u: $0["u"] as? String ?? "") } }
+            let ring = d["ring"] as? [String: Any] ?? [:]
+            top = d["top"] as? String ?? ""; left = tile(d["left"]); right = tile(d["right"])
+            ringV = ring["v"] as? String ?? ""; ringU = ring["u"] as? String ?? ""
+            fill = CGFloat(max(0, min(1, (ring["fill"] as? NSNumber)?.doubleValue ?? 0))); best = ring["best"] as? Bool ?? false
+        }
+    }
+
+    static func hudImage(_ h: Hud, width w: CGFloat) -> UIImage {
+        let d = w * 0.36, topH = w * 0.07, H = d + topH, f = UIGraphicsImageRendererFormat.default(); f.scale = 1
+        let rounded = { (size: CGFloat, weight: UIFont.Weight) -> UIFont in
+            let base = UIFont.systemFont(ofSize: size, weight: weight)
+            return base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
+        }
+        let center = NSMutableParagraphStyle(); center.alignment = .center
+        let text = { (s: String, size: CGFloat, weight: UIFont.Weight, alpha: CGFloat, r: CGRect) in
+            NSAttributedString(string: s, attributes: [.font: rounded(size, weight), .foregroundColor: UIColor(white: 1, alpha: alpha), .paragraphStyle: center]).draw(in: r)
+        }
+        return UIGraphicsImageRenderer(size: CGSize(width: w, height: H), format: f).image { ctx in
+            if !h.top.isEmpty {
+                let shadow = NSShadow(); shadow.shadowColor = UIColor(white: 0, alpha: 0.6); shadow.shadowBlurRadius = topH * 0.25
+                NSAttributedString(string: h.top, attributes: [.font: rounded(topH * 0.62, .bold), .foregroundColor: UIColor.white, .paragraphStyle: center, .shadow: shadow])
+                    .draw(in: CGRect(x: 0, y: 0, width: w, height: topH))
+            }
+            // the ring
+            let c = CGPoint(x: w / 2, y: topH + d / 2), lw = d * 0.07, r = d / 2 - lw / 2
+            UIColor(white: 0, alpha: 0.55).setFill(); UIBezierPath(arcCenter: c, radius: r, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+            let track = UIBezierPath(arcCenter: c, radius: r, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            track.lineWidth = lw; UIColor(white: 1, alpha: 0.25).setStroke(); track.stroke()
+            if h.fill > 0 {
+                let arc = UIBezierPath(arcCenter: c, radius: r, startAngle: -.pi / 2, endAngle: -.pi / 2 + .pi * 2 * h.fill, clockwise: true)
+                arc.lineWidth = lw; arc.lineCapStyle = .round
+                (h.best ? SprintOverlay.green : UIColor(red: 0.35, green: 0.72, blue: 0.94, alpha: 1)).setStroke(); arc.stroke()
+            }
+            text(h.ringV, d * 0.27, .heavy, 1, CGRect(x: c.x - d / 2, y: c.y - d * 0.24, width: d, height: d * 0.34))
+            text(h.ringU, d * 0.09, .bold, 0.8, CGRect(x: c.x - d * 0.4, y: c.y + d * 0.11, width: d * 0.8, height: d * 0.14))
+            // the tiles either side, centred on the ring
+            let tw = w * 0.24, th = d * 0.58, ty = c.y - th / 2
+            for (t, x) in [(h.left, w * 0.03), (h.right, w - w * 0.03 - tw)] {
+                guard let t = t else { continue }
+                let rect = CGRect(x: x, y: ty, width: tw, height: th)
+                UIColor(white: 0, alpha: 0.55).setFill(); UIBezierPath(roundedRect: rect, cornerRadius: th * 0.2).fill()
+                text(t.cap.uppercased(), th * 0.13, .bold, 0.75, CGRect(x: x, y: ty + th * 0.08, width: tw, height: th * 0.2))
+                text(t.v, th * 0.34, .heavy, 1, CGRect(x: x, y: ty + th * 0.27, width: tw, height: th * 0.45))
+                text(t.u, th * 0.14, .semibold, 0.8, CGRect(x: x, y: ty + th * 0.7, width: tw, height: th * 0.2))
+            }
+        }
+    }
 
     static func markImage(_ m: Mark, width w: CGFloat) -> UIImage {
         let h = w * 0.42, f = UIGraphicsImageRendererFormat.default(); f.scale = 1
@@ -289,12 +345,15 @@ enum SprintBurner {
         let comp = AVMutableVideoComposition(asset: asset) { req in
             let img = req.sourceImage, t = req.compositionTime.seconds
             guard let k = marks.lastIndex(where: { t >= $0.from && t < $0.to }) else { req.finish(with: img, context: nil); return }
-            let ext = img.extent, w = (min(ext.width, ext.height) * 0.62).rounded()
+            let ext = img.extent, hud = marks[k].hud
+            let w = hud != nil ? ext.width.rounded() : (min(ext.width, ext.height) * 0.62).rounded()
             var o = cache.object(forKey: NSNumber(value: k))
-            if o == nil, let cg = markImage(marks[k], width: w).cgImage { o = CIImage(cgImage: cg); cache.setObject(o!, forKey: NSNumber(value: k)) }
+            if o == nil, let cg = (hud.map { hudImage($0, width: w) } ?? markImage(marks[k], width: w)).cgImage { o = CIImage(cgImage: cg); cache.setObject(o!, forKey: NSNumber(value: k)) }
             guard let ov = o else { req.finish(with: img, context: nil); return }
             let margin = min(ext.width, ext.height) * 0.08
-            let placed = ov.transformed(by: CGAffineTransform(translationX: ext.midX - ov.extent.width / 2, y: ext.maxY - margin - ov.extent.height))
+            // the scoreboard sits low, over the floor, like a broadcast; the text card stays at the top
+            let y = hud != nil ? ext.minY + margin : ext.maxY - margin - ov.extent.height
+            let placed = ov.transformed(by: CGAffineTransform(translationX: ext.midX - ov.extent.width / 2, y: y))
             req.finish(with: placed.composited(over: img), context: nil)
         }
         comp.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, fps.rounded())))

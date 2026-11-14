@@ -610,3 +610,20 @@ div.att-open { cursor: default; }
 .rsi-strip span.best { background: rgba(61,220,151,.45); }
 .rsi-strip span.best.on { background: #22b877; }
 .rsi-table tr[data-seek] { cursor: pointer; }
+/* the RSI scoreboard over the video (2026-11-14, "takto overlay"): height, ring with RSI, contact */
+.rsi-ov.hud { top: auto; left: 0; right: 0; bottom: 64px; background: none; padding: 0 10px; border-radius: 0; min-width: 0; }
+.hud-top { margin: 0 0 6px; text-align: center; color: #fff; font-size: 13px; font-weight: 700; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.hud-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hud-tile { width: 25%; background: rgba(10,12,16,.62); border-radius: 14px; padding: 8px 6px; text-align: center; color: #fff; }
+.hud-tile.empty { background: none; }
+.hud-tile small { display: block; font-size: 10.5px; opacity: .75; text-transform: uppercase; letter-spacing: .04em; }
+.hud-tile b { display: block; font-size: 22px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.hud-tile i { display: block; font-style: normal; font-size: 12px; opacity: .8; }
+.hud-ring { position: relative; width: 38%; aspect-ratio: 1; }
+.hud-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.hud-track { fill: rgba(10,12,16,.62); stroke: rgba(255,255,255,.25); stroke-width: 7; }
+.hud-arc { fill: none; stroke: #5ab8f0; stroke-width: 7; stroke-linecap: round; transition: stroke-dashoffset .45s ease-out; }
+.hud-ring.best .hud-arc { stroke: #3ddc97; }
+.hud-val { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; }
+.hud-val b { font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+.hud-val i { font-style: normal; font-size: 12px; font-weight: 700; opacity: .8; margin-top: 3px; text-align: center; padding: 0 8px; }
