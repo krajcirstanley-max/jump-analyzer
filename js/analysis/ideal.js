@@ -105,5 +105,5 @@ export function idealFor(jump, result, sex = 'male') {
   if (!T || !result?.clean) return null;
   const kp = sharpen(result.clean, jump.fps)[T.td];
   const id = idealTouchdown(kp, { s: jump.takeoffFoot, dir: jump.dir, sex });
-  return id && { ...id, frame: T.td, side: jump.takeoffFoot, dir: jump.dir, changed: id.items.some(it => it.set) };
+  return id && { ...id, you: kp, frame: T.td, side: jump.takeoffFoot, dir: jump.dir, changed: id.items.some(it => it.set) };
 }

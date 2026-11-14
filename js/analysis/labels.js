@@ -104,29 +104,45 @@ export function jointLabels(jump, result, scale, { skip = null } = {}) {
   };
 }
 
-// The ideal pose (ideal.js) in green at its frame, in place of the athlete's skeleton. The numbers
-// go under the video, not on it: pills on the body covered the skeleton (Stanley, 2026-11-12).
-// state.on is the "Ty / Ideál" switch.
+// The ideal pose (ideal.js) as a ghost over the athlete's own skeleton: a wide, see-through green
+// body where the norms put it, and a short arrow from each joint that has to move to where it
+// should be (Stanley, 2026-11-14: "teraz to je také meh … ako ghost"). The numbers stay under
+// the video: pills on the body covered the skeleton (2026-11-12). state.on is the switch.
 export const IDEAL = '#1fbf6b';
 export function idealOverlay(ideal, scale, state) {
   return (ctx, toCanvas, index) => {
     if (!state.on || !ideal || index !== ideal.frame) return;
-    const kp = ideal.kp, ok = j => Number.isFinite(kp[j * 3]) && kp[j * 3 + 2] >= 0.5;
-    const at = j => toCanvas(kp[j * 3] * scale, kp[j * 3 + 1] * scale);
+    const kp = ideal.kp, you = ideal.you;
+    const ok = (q, j) => q && Number.isFinite(q[j * 3]) && q[j * 3 + 2] >= 0.5;
+    const at = (q, j) => toCanvas(q[j * 3] * scale, q[j * 3 + 1] * scale);
     const lw = Math.max(2.5, ctx.canvas.width / 180);
     ctx.save();
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = IDEAL; ctx.fillStyle = IDEAL; ctx.lineWidth = lw;
-    for (const [a, b] of BONES) {
-      const ia = JI[a], ib = JI[b];
-      if (!ok(ia) || !ok(ib)) continue;
-      const [x0, y0] = at(ia), [x1, y1] = at(ib);
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // the ghost body: a soft wide band, then a thin core line
+    for (const [w, a] of [[lw * 5, 0.42], [lw * 1.2, 1]]) {
+      ctx.globalAlpha = a; ctx.strokeStyle = IDEAL; ctx.lineWidth = w;
+      for (const [na, nb] of BONES) {
+        const ia = JI[na], ib = JI[nb];
+        if (!ok(kp, ia) || !ok(kp, ib)) continue;
+        const [x0, y0] = at(kp, ia), [x1, y1] = at(kp, ib);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
     }
+    // arrows: your joint → where the ideal puts it, only for joints that really move
+    ctx.globalAlpha = 1;
+    const min = Math.max(6, ctx.canvas.width / 90);
     for (const [name, j] of Object.entries(JI)) {
-      if (!ok(j) || name.endsWith('ear') || name === 'nose') continue;
-      const [x, y] = at(j);
-      ctx.beginPath(); ctx.arc(x, y, lw * 1.1, 0, Math.PI * 2); ctx.fill();
+      if (!ok(kp, j) || !ok(you, j) || /ear|nose|eye|wri|elb/.test(name)) continue;
+      const [x0, y0] = at(you, j), [x1, y1] = at(kp, j), d = Math.hypot(x1 - x0, y1 - y0);
+      if (d < min) continue;
+      const ux = (x1 - x0) / d, uy = (y1 - y0) / d, hd = Math.min(d * 0.45, lw * 3.2);
+      ctx.strokeStyle = '#fff'; ctx.fillStyle = IDEAL; ctx.lineWidth = lw * 0.9;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1 - ux * hd * 0.6, y1 - uy * hd * 0.6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - ux * hd - uy * hd * 0.55, y1 - uy * hd + ux * hd * 0.55);
+      ctx.lineTo(x1 - ux * hd + uy * hd * 0.55, y1 - uy * hd - ux * hd * 0.55);
+      ctx.closePath(); ctx.fill();
+      ctx.lineWidth = Math.max(1, lw * 0.35); ctx.stroke();
     }
     ctx.restore();
   };

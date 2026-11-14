@@ -12,7 +12,8 @@
     (document.body || document.documentElement).appendChild(d);
     document.getElementById('splash')?.remove();   // never leave the app hidden behind it
   };
-  addEventListener('error', e => show(`${e.message} @ ${String(e.filename).split('/').pop()}:${e.lineno}:${e.colno}`));
+  // "ResizeObserver loop …" is the browser skipping a layout pass (rotation, zoom), not a fault.
+  addEventListener('error', e => { if (!/ResizeObserver loop/.test(e.message)) show(`${e.message} @ ${String(e.filename).split('/').pop()}:${e.lineno}:${e.colno}`); });
   addEventListener('unhandledrejection', e => show(`promise: ${e.reason?.stack || e.reason?.message || e.reason}`));
   setTimeout(() => { if (!window.__appReady) show('Appka sa po 8 s nenačítala celá (app.js nedobehol).'); }, 8000);
 })();

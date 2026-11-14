@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.6';
+const APP_VERSION = '0.9.7';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -545,7 +545,7 @@ function idealToggle() {
     el.className = 'ideal-toggle hidden';
     el.setAttribute('role', 'radiogroup');
     el.setAttribute('aria-label', 'Porovnanie s ideálom');
-    el.innerHTML = '<button data-ideal="0" role="radio">Ty</button><button data-ideal="1" role="radio">Ideál</button><span class="ideal-note"></span>';
+    el.innerHTML = '<button data-ideal="0" role="radio">Ty</button><button data-ideal="1" role="radio">+ Ideál</button><span class="ideal-note"></span>';
     el.onclick = e => {
       const b = e.target.closest('[data-ideal]');
       if (!b) return;
@@ -586,7 +586,7 @@ function setOverlays() {
   player.overlays.length = 0;
   const k = player.src.width / pose.W;
   ideal = jump.error ? null : idealFor(jump, pose, ATHLETES[resultAthlete ?? athlete].sex);
-  player.overlays.push(skeletonOverlay(pose, k, { skip: i => idealState.on && ideal && i === ideal.frame }));
+  player.overlays.push(skeletonOverlay(pose, k));   // the ghost draws over it, never in place of it
   idealState.on = false;
   if (!jump.error) player.overlays.push(jointLabels(jump, pose, k, { skip: i => idealState.on && ideal && i === ideal.frame }));
   if (ideal) player.overlays.push(idealOverlay(ideal, k, idealState));
