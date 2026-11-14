@@ -492,7 +492,7 @@ div.att-open { cursor: default; }
 .fl-steps select { font: inherit; font-size: 16px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card, #fff); color: var(--text); }
 .fl-detail .filt { margin-top: 6px; }
 .fl-detail .note { margin-top: 10px; }
-.sp-vbox video { width: 100%; max-height: 70vh; border-radius: 12px; background: #000; display: block; }
+.sp-vbox video { width: 100%; max-height: 56vh; border-radius: 12px; background: #000; display: block; }
 .sp-rate { margin: 8px 0 0; }
 #splash { position: fixed; inset: 0; z-index: 90; background: var(--bg); display: grid; place-items: center; transition: opacity .25s; }
 #splash.gone { opacity: 0; pointer-events: none; }

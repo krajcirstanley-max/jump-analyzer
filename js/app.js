@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.9.1';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -84,7 +84,7 @@ const sprintView = initSprint({
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
   onProgress: t => trainProgress(t),
   onDone: rec => { refreshFeeds(); openDetail('sprint', rec.id); },
-  saveClip: hist.storeClip, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
+  saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
 });
 const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
 freelapView.setLinker(sprintOfRun);

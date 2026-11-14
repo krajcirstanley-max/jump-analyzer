@@ -54,7 +54,9 @@ export function sessionFor(open, at) {
   return { id: `s${at}`, start: at, ended: false };
 }
 
-// Runs grouped by training, newest training first, each with the best run per athlete.
+// Runs grouped by training, newest training first, each with the best run per athlete and type
+// (a run-up and a fly are different efforts, 2026-11-14), keyed "who|type".
+export const bestKey = r => `${r.who ?? r.chip}|${typeLabel(r)}`;
 export function trainings(reps) {
   const map = new Map();
   for (const r of reps) {
@@ -63,13 +65,14 @@ export function trainings(reps) {
     map.get(id).runs.push(r);
   }
   return [...map.values()].map(t => {
-    const best = {};
+    const best = {}, count = {};
     for (const r of t.runs) {
-      const k = r.who ?? r.chip;
+      const k = bestKey(r);
+      count[k] = (count[k] ?? 0) + 1;
       if (!best[k] || r.lap < best[k].lap) best[k] = r;
     }
     const ats = t.runs.map(r => r.at);
-    return { ...t, from: Math.min(...ats), to: Math.max(...ats), best };
+    return { ...t, from: Math.min(...ats), to: Math.max(...ats), best, count };
   }).sort((a, b) => b.to - a.to);
 }
 
@@ -126,8 +129,8 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     return `<div class="fl-legs" aria-label="Úseky">${parts}</div>`;
   }
 
-  function runHtml(r, best) {
-    const isBest = best[r.who ?? r.chip] === r;
+  function runHtml(r, best, count) {
+    const isBest = best[bestKey(r)] === r && count[bestKey(r)] > 1;   // a lone run of its type is no contest
     const del = armed === r.key
       ? `<button class="fl-del armed" data-fl="del" data-key="${esc(r.key)}">Zmazať</button>`
       : `<button class="fl-del" data-fl="del" data-key="${esc(r.key)}" aria-label="Zmazať čas">×</button>`;
@@ -148,9 +151,11 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     if (!shown.length) return '<div class="card"><p class="note">Žiadny beh tohto typu.</p></div>';
     return trainings(shown).map(t => {
       const current = open && !open.ended && t.id === open.id;
-      const summary = Object.values(t.best).map(b => {
-        const n = t.runs.filter(r => (r.who ?? r.chip) === (b.who ?? b.chip)).length;
-        return `<span><b>${esc(name(b))}</b> ${behy(n)} · najlepší ${sec(b.lap)} s</span>`;
+      const people = [...new Set(t.runs.map(r => r.who ?? r.chip))];
+      const summary = people.map(p => {
+        const mine = t.runs.filter(r => (r.who ?? r.chip) === p);
+        const tops = Object.entries(t.best).filter(([k]) => k.startsWith(`${p}|`)).map(([, b]) => b).sort((a, z) => a.lap - z.lap);
+        return `<span><b>${esc(name(mine[0]))}</b> ${behy(mine.length)} · ${tops.map(b => `${esc(typeLabel(b))} ${sec(b.lap)}`).join(' · ')}</span>`;
       }).join('');
       const delT = armed === `t:${t.id}`;
       return `<section class="card fl-training${current ? ' current' : ''}">
@@ -160,10 +165,10 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
         </header>
         <div class="fl-sum">${summary}</div>
         ${current ? `<div class="fl-plan"><p class="sp-lb">Ďalšie behy v tomto tréningu</p>${planHtml()}</div>` : ''}
-        ${t.runs.map(r => runHtml(r, t.best)).join('')}
+        ${t.runs.map(r => runHtml(r, t.best, t.count)).join('')}
         <div class="row fl-tactions">
           ${current ? '<button class="btn" data-fl="end">Ukončiť tréning</button>' : ''}
-          <button class="btn danger${delT ? ' armed' : ''}" data-fl="del-t" data-id="${esc(t.id)}">${delT ? 'Naozaj zmazať tréning?' : 'Zmazať tréning'}</button>
+          ${filter.type === 'all' ? `<button class="btn danger${delT ? ' armed' : ''}" data-fl="del-t" data-id="${esc(t.id)}">${delT ? 'Naozaj zmazať tréning?' : 'Zmazať tréning'}</button>` : ''}
         </div>
       </section>`;
     }).join('');

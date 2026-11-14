@@ -20,7 +20,7 @@ test('freelap trainings: grouped newest first with the best run per athlete', ()
   ];
   const t = trainings(reps);
   assert.deepEqual(t.map(x => x.runs.length), [3, 1]);
-  assert.equal(t[0].best.stanley.key, 'b');
-  assert.equal(t[0].best.miska.key, 'c');
+  assert.equal(t[0].best['stanley|letmý'].key, 'b');   // no splits: counted as letmý
+  assert.equal(t[0].best['miska|letmý'].key, 'c');
   assert.equal(t[1].id, 'd2026-11-12');
 });
