@@ -20,7 +20,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.15.1';
+const APP_VERSION = '0.15.2';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -586,10 +586,12 @@ function syncIdeal(i) {
     const deg = v => `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}°`;
     const moved = (ideal?.items ?? []).filter(it => it.set);
     // the take-off angle's ideal path is drawn on this frame too
-    if (flightIdeal && i === flightIdeal.frame) moved.push({ label: flightIdeal.gain < 0.005 ? 'najlepší uhol odrazu: už ho máš' : flightIdeal.gain < 0.02 ? `najlepší uhol odrazu: už ho skoro máš (+${Math.round(flightIdeal.gain * 100)} cm)` : `najlepší uhol odrazu (+${Math.round(flightIdeal.gain * 100)} cm)`, ideal: flightIdeal.ideal, you: flightIdeal.you, oneDp: true });
+    const atTO = flightIdeal && i === flightIdeal.frame;
+    if (atTO && !flightIdeal.ok) moved.push({ label: `najlepší uhol odrazu (+${Math.round(flightIdeal.gain * 100)} cm)`, ideal: flightIdeal.ideal, you: flightIdeal.you, oneDp: true });
+    const okNote = atTO && flightIdeal.ok ? `<small class="sty-note">Uhol odrazu ${flightIdeal.you.toFixed(1).replace('.', ',')}° je ideálny.</small>` : '';
     legend.innerHTML = !show ? '' : moved.length
-      ? `<b>${esc(ideal?.name ?? 'Ideál')} · priemer finalistov</b>${moved.map(it => `<span class="${it.oneDp || it.matters ? 'mat' : 'sty'}">${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}${moved.some(it => !it.oneDp && !it.matters) ? '<small class="sty-note">Sivé je v rozptyle finalistov, to je tvoj štýl, nie chyba.</small>' : ''}`
-      : `<b>${esc(ideal?.name ?? '')}: postava je v norme finalistov</b>`;
+      ? `<b>${esc(ideal?.name ?? 'Ideál')} · priemer finalistov</b>${moved.map(it => `<span class="${it.oneDp || it.matters ? 'mat' : 'sty'}">${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}${moved.some(it => !it.oneDp && !it.matters) ? '<small class="sty-note">Sivé je v rozptyle finalistov, to je tvoj štýl, nie chyba.</small>' : ''}${okNote}`
+      : `<b>${esc(ideal?.name ?? '')}: postava je v norme finalistov</b>${okNote}`;
   }
 }
 function setOverlays() {
@@ -610,9 +612,11 @@ function setOverlays() {
     const drop = Number.isFinite(T) && Number.isFinite(fl?.vyTO) ? ((G * T - fl.vyTO) ** 2 - fl.vyTO ** 2) / (2 * G) : NaN;
     const best = bestAngle(fl?.vxTO, fl?.vyTO, drop, ATHLETES[resultAthlete ?? athlete].height / 100);
     const idTO = ideals.find(x => x.frame === to);
-    // always drawn, also when the athlete is already there (Miška 19.1° vs best 19.9°: +1 cm)
-    const ideal = best ?? null;
-    flightIdeal = ideal ? { frame: to, you: best.from, ideal: ideal.angle, gain: ideal.gain } : null;
+    // drawn only when it is a degree or more away; closer than that the legend just says the
+    // angle is ideal (Stanley, 2026-11-14: "nechaj tak, len nech je poznámka, že ideál to je")
+    const ok = !!best && Math.abs(best.angle - best.from) < 1;
+    const ideal = best && !ok ? best : null;
+    flightIdeal = best ? { frame: to, you: best.from, ideal: best.angle, gain: best.gain, ok } : null;
     player.overlays.push(flightOverlay(jump, pose, k, idealState, { com: kp && centreOfMass(kp, sex), idealCom: idTO?.kp ? centreOfMass(idTO.kp, sex) : null, ideal }));
   }
   syncIdeal(player.index);
