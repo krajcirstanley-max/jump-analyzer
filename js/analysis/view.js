@@ -144,7 +144,9 @@ function speedHtml(s, sc, ru) {
   // cones are in the video; the last step in m/s moves under it.
   const sec = v => `${num(v, 2)} s`;
   const first = firstCellHtml(s, ru);
-  const split2 = s.split11to21 != null ? `<p class="note">11–21 m: <b>${sec(s.split11to21)}</b></p>` : '';
+  const halves = s.split6to11 != null && s.split1to6 != null
+    ? `<p class="note">11–6 m: <b>${sec(s.split6to11)}</b> · 6–1 m: <b>${sec(s.split1to6)}</b>${s.split1to6 > s.split6to11 * 1.02 ? ` · do dosky spomalíš o ${num((s.split1to6 / s.split6to11 - 1) * 100, 0)} %` : ''}</p>` : '';
+  const split2 = (s.split11to21 != null ? `<p class="note">11–21 m: <b>${sec(s.split11to21)}</b></p>` : '') + halves;
   return `<h2>Rýchlosť <small>${s.cones ? 'z kužeľov' : s.board ? 'z dosky' : 'odhad'}</small></h2>
     <div class="big">${first}${cell('Odraz', s.takeoff)}${lossCell}</div>${split2}${runupHtml(sc, ru)}${jumpLine}
     ${hiddenOne ? `<p class="met-why">${esc(hiddenReason(hiddenOne))}</p>` : ''}

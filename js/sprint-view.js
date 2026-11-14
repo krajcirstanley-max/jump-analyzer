@@ -23,7 +23,8 @@ try { // keep the analyses made under the old key, drop whatever else was there
   const old = JSON.parse(localStorage.getItem('jump.sprint') || 'null');
   if (Array.isArray(old) && !localStorage.getItem('jump.sprint.analyses')) localStorage.setItem('jump.sprint.analyses', JSON.stringify(old.filter(r => r?.id && Array.isArray(r.video?.steps))));
 } catch { /* storage blocked or not a list */ }
-const load = () => { try { const v = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(v) ? v.filter(r => r?.id && Array.isArray(r.video?.steps)) : []; } catch { return []; } };
+// pending: a run whose video is already saved and watchable while the analysis still runs (0.15.0)
+const load = () => { try { const v = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(v) ? v.filter(r => r?.id && (Array.isArray(r.video?.steps) || r.pending)) : []; } catch { return []; } };
 const MAX = 60;
 const store = v => { try { localStorage.setItem(KEY, JSON.stringify(v.slice(0, MAX))); } catch { /* storage blocked */ } };
 const FOOT = { l: 'L', r: 'P' };
@@ -141,6 +142,34 @@ export function resultHtml(rec, a, run, runs, athletes) {
   return video + overview + curve + steps + profileHtml(runs, athletes);
 }
 
+// The video first, the numbers when they come (Stanley, 2026-11-14: "video si viem pozrieť hneď po
+// behu bez overlay"). Shown from the moment the clip is saved until the analysis lands.
+function pendingHtml(rec, athletes) {
+  const who = athletes[rec.run?.who ?? rec.who]?.name ?? '';
+  return `<section class="card sp-card">
+      <h2>Šprint${who ? ` · ${esc(who)}` : ''} · ${esc(when(rec.at))}</h2>
+      <div class="sp-video pd-video">
+        <div class="sp-vbox" data-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
+        <span class="pd-chip">${rec.error ? '⚠ analýza zlyhala' : '◌ analýza beží'}</span>
+      </div>
+      <div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div>
+      <p class="note">Video si môžeš pozrieť hneď. Kroky, zem a vzduch a rýchlosť sa doplnia, keď analýza dobehne, a všetko sa uloží k behu.</p>
+    </section>
+    ${rec.run ? `<section class="card"><div class="pd-fl"><div><span>Freelap</span><b>${n2(rec.run.lap)} s</b></div><span>${rec.run.legs.map(n2).join(' + ')}</span></div></section>` : ''}
+    <section class="card" data-pd-prog="${esc(rec.id)}">${pendingSteps(rec)}</section>`;
+}
+// The analysis steps alone, redrawn in place on every progress tick so the video keeps playing.
+function pendingSteps(rec) {
+  const st = rec.stage ?? '', up = /nahr/i.test(st);
+  const step = (cls, txt, note = '') => `<div class="pd-step ${cls}"><span class="pd-dot">${cls === 'done' ? '✓' : ''}</span>${esc(txt)}${note ? `<small>${esc(note)}</small>` : ''}</div>`;
+  return `<h2>Analýza</h2>
+      ${step(rec.hasClip ? 'done' : 'now', 'Video uložené v telefóne')}
+      ${step(rec.error ? 'next' : up ? 'now' : 'done', 'Nahrávam na server', up ? st : '')}
+      ${step(rec.error ? 'next' : up ? 'next' : 'now', 'Hľadám kroky a postavu', !up && st ? st : '')}
+      ${step('next', 'Zem, vzduch, rýchlosť')}
+      ${rec.error ? `<p class="banner bad">${esc(rec.error)}</p><button class="btn" data-sp-retry="${esc(rec.id)}">Skúsiť znova</button>` : '<p class="note">Môžeš ísť na ďalší beh. Výsledok sa doplní sám.</p>'}`;
+}
+
 // ---------- Tab ----------
 // bare: the app's Tréning tab owns the buttons and the list; this root then shows only the open
 // analysis (the detail screen). onProgress(text) and onDone(rec) report back to it.
@@ -192,6 +221,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   // One stored analysis, drawn with today's Freelap data (a run picked by hand wins).
   function view(rec) {
+    if (rec.pending) return { a: null, run: rec.run ?? null, html: pendingHtml(rec, athletes) };
     const all = runs();
     const run = rec.runKey ? all.find(r => r.key === rec.runKey) ?? rec.run ?? null : null;
     const who = run?.who ?? rec.who ?? rec.video.who?.id ?? getAthlete()?.id ?? null;
@@ -199,15 +229,44 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     return { a, run, html: resultHtml(rec, a, run, all, athletes) };
   }
 
-  async function upload(file, filmed = null) {
-    if (busy && !filmed) return;
+  // The run's record exists from the start (pending), with its clip, so the video plays at once.
+  const patch = (id, f) => { const l = load(), x = l.find(r => r.id === id); if (x) { f(x); store(l); } return x; };
+  async function upload(file, filmed = null, retryId = null) {
+    if (busy && !filmed && !retryId) return;
     if (!cloudReady()) { say('Najprv ulož prístupový kľúč v nastaveniach.'); draw(); return; }
-    busy = true; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…'); draw();
+    busy = true; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…');
+    let pid = retryId;
+    if (!pid) {
+      const heard = filmed?.times?.[0];
+      const run0 = heard ? runs().find(r => r.key === heard.key) ?? { key: heard.key, lap: heard.lap, legs: heard.legs ?? [], who: CHIPS_BY_NAME(athletes)[heard.name] ?? null } : null;
+      const at = filmed?.recordedAt ?? file.lastModified ?? Date.now();
+      // what the recorder heard stays on the record, so a retry pairs the run the same way
+      const pend = { id: `sp${Date.now()}`, at, pending: true, stage: 'Nahrávam video', video: null, run: run0, runKey: run0?.key ?? null, who: run0?.who ?? getAthlete()?.id ?? null, mode: null,
+        filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null } : null };
+      const l = load(); l.unshift(pend);
+      for (const old of l.slice(MAX)) if (old.hasClip) dropClip?.(old.id);
+      store(l.slice(0, MAX));
+      pid = pend.id;
+      if (saveClip) saveClip(pid, file).then(() => { patch(pid, x => { x.hasClip = true; }); if (current === pid) draw(); }).catch(() => {});
+      current = pid;
+      onDone(pend);   // opens the run's screen now: the video first
+    } else patch(pid, x => { x.error = null; x.stage = 'Nahrávam video'; });
+    draw();
+    let lastStage = '', lastSave = 0;
     try {
       const me = getAthlete() ?? {};
       const { result } = await analyzeInCloud(file, {
         sex: me.sex, name: me.name, height: me.height, mode: 'sprint', athletes: await roster(),
-        onProgress: p => { say(`${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`); draw(); },
+        onProgress: p => {
+          const t = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`;
+          if (t === lastStage) return;
+          lastStage = t; onProgress(t);
+          const now = Date.now();
+          const x = now - lastSave > 1000 ? (lastSave = now, patch(pid, r => { r.stage = t; })) : Object.assign(load().find(r => r.id === pid) ?? {}, { stage: t });
+          // only the steps are redrawn: a full draw() would rebuild the <video> and restart it
+          const box = current === pid && root.querySelector(`[data-pd-prog="${CSS.escape(pid)}"]`);
+          if (box && x) box.innerHTML = pendingSteps({ ...x, stage: t });
+        },
       });
       if (result?.error) throw new CloudError(result.error);
       const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
@@ -219,19 +278,14 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         video.finishAt = +(t.arrived - LATENCY).toFixed(3);
         run = runs().find(r => r.key === t.key) ?? { key: t.key, lap: t.lap, legs: t.legs, who: CHIPS_BY_NAME(athletes)[t.name] ?? who ?? null, at: video.recordedAt + t.arrived * 1000 };
       } else run = pairRun(runs(), video, null);
-      const rec = { id: `sp${Date.now()}`, at: video.recordedAt ?? Date.now(), video, runKey: run?.key ?? null, run: run ?? null, who: run?.who ?? result.who?.id ?? me.id ?? null, mode: null };
-      const list = load(); list.unshift(rec);
-      for (const old of list.slice(MAX)) if (old.hasClip) dropClip?.(old.id);
-      store(list);
-      // The clip stays with its analysis, to watch it next to the numbers (Stanley 2026-11-14).
-      if (saveClip) saveClip(rec.id, file).then(() => {
-        const l = load(), x = l.find(r => r.id === rec.id);
-        if (x) { x.hasClip = true; store(l); if (current === rec.id) draw(); }
-      }).catch(() => {});
-      current = rec.id; say('');
-      onDone(rec);
+      // the pending record becomes the analysis; its clip is already stored under the same id
+      const rec = patch(pid, x => Object.assign(x, { at: video.recordedAt ?? x.at, video, runKey: run?.key ?? x.runKey ?? null, run: run ?? x.run ?? null, who: run?.who ?? x.run?.who ?? result.who?.id ?? me.id ?? null, pending: false, stage: null, error: null, filmed: null }));
+      say('');
+      // the screen was opened when the run was filmed: only refresh the lists now, no jump
+      if (rec) onDone(rec, { quiet: true });
     } catch (err) {
-      say(err?.message || 'Analýza zlyhala. Skús to znova.');
+      const msg = err?.message || 'Analýza zlyhala. Skús to znova.';
+      say(msg); patch(pid, x => { x.error = msg; });
     } finally {
       busy = false; draw();
     }
@@ -253,7 +307,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     const body = rec ? view(rec).html : '';
     const past = list.length ? `<div class="card"><h2>Rozbory</h2><ul class="sp-list">${list.map(r => {
       const who = athletes[r.run?.who ?? r.who]?.name ?? '';
-      const k = r.mode ?? (r.run ? modeOfRun(r.run) : r.video.modeGuess);
+      const k = r.pending ? null : r.mode ?? (r.run ? modeOfRun(r.run) : r.video.modeGuess);
+      if (r.pending) return `<li><button class="sp-item${r.id === current ? ' on' : ''}" data-sp-open="${esc(r.id)}"><b>${esc(who)} · šprint · ${r.error ? 'analýza zlyhala' : 'analýza beží…'}</b><small>${esc(when(r.at))}</small></button></li>`;
       return `<li><button class="sp-item${r.id === current ? ' on' : ''}" data-sp-open="${esc(r.id)}"><b>${esc(who)} · ${KIND[k]}${r.run ? ` ${r.run.legs.length * 10} m · ${n2(r.run.lap)}` : ''}</b><small>${esc(when(r.at))}</small></button></li>`;
     }).join('')}</ul></div>` : '';
     root.innerHTML = head + body + past;
@@ -288,6 +343,13 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     }
     const o = e.target.closest('[data-sp-open]');
     if (o) { current = o.dataset.spOpen === current ? null : o.dataset.spOpen; draw(); root.scrollIntoView?.({ behavior: 'smooth' }); return; }
+    const rt2 = e.target.closest('[data-sp-retry]');
+    if (rt2 && loadClip) {
+      const id = rt2.dataset.spRetry;
+      const r0 = load().find(r => r.id === id);
+      loadClip(id).then(blob => { if (blob) upload(new File([blob], 'sprint.mov', { type: blob.type || 'video/quicktime', lastModified: r0?.at ?? Date.now() }), r0?.filmed?.times ? r0.filmed : null, id); else alert('Video sa v telefóne nenašlo.'); });
+      return;
+    }
     const k = e.target.closest('[data-sp-kind]');
     if (k && current) { const list = load(), r = list.find(x => x.id === current); if (r) { r.mode = k.dataset.spKind; store(list); draw(); } }
   });
@@ -298,6 +360,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // localhost only: lets a developer render a stored result without a server run
   if (['localhost', '127.0.0.1'].includes(globalThis.location?.hostname)) globalThis.__sprintShow = rec => { const list = load(); list.unshift(rec); store(list); current = rec.id; draw(); };
 
+  // A run left pending by a closed app has no upload behind it any more: say so, keep its video, offer a retry.
+  { const l = load(); let ch = false; for (const r of l) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila (appka sa zavrela). Video je uložené, skús znova.'; ch = true; } if (ch) store(l); }
   draw();
   return {
     shown: draw, film, upload, records: load,
@@ -305,6 +369,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     busy: () => busy,
     // One line for the Tréning and História lists.
     summary(rec) {
+      if (rec.pending) {
+        const who = rec.run?.who ?? rec.who ?? null;
+        return { kind: 'sprint', id: rec.id, at: rec.at, who, title: `${athletes[who]?.name ?? ''}${who ? ' · ' : ''}šprint`, sub: rec.error ? 'analýza zlyhala' : 'analýza beží…', value: rec.run ? n2(rec.run.lap) : '…', valueSub: rec.run ? 's' : '' };
+      }
       const run = rec.runKey ? runs().find(r => r.key === rec.runKey) ?? rec.run ?? null : rec.run ?? null;
       const who = run?.who ?? rec.who ?? null, k = rec.mode ?? (run ? modeOfRun(run) : rec.video.modeGuess);
       const steps = rec.video.steps ?? [];

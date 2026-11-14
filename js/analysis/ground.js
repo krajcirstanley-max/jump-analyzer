@@ -38,7 +38,10 @@ function coneClusters(conesByFrame, H, boardM) {
   const best = {};
   for (const g of groups) {
     if (g.length < 3) continue;
-    const x = median(g.map(o => o.x)), k = Math.round((x - boardM - 0.2) / 10);
+    const x = median(g.map(o => o.x));
+    // a cone half-way, 5.2 m from the line (the 6 m mark, Berlin 2009's middle photocell)
+    if (Math.abs(x - (boardM + 5.2)) <= 0.8) { if (!best[0.5] || g.length > best[0.5].obs.length) best[0.5] = { k: 0.5, x, obs: g }; continue; }
+    const k = Math.round((x - boardM - 0.2) / 10);
     if (k < 0 || k > 2 || Math.abs(x - (boardM + 0.2 + 10 * k)) > 0.8 + 1.2 * k) continue;
     if (!best[k] || g.length > best[k].obs.length) best[k] = { k, x, obs: g };
   }
@@ -120,7 +123,7 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   // take-off line, so the line and the board distance stay where they were found.
   const cones = coneClusters(ground.cones, H, boardM);
   let coneScale = null;
-  const measured = cones.filter(c => !c.byOrder);
+  const measured = cones.filter(c => !c.byOrder && Number.isInteger(c.k));
   if (measured.length >= 2) {
     const a = measured[0], b = measured.at(-1), sc = (10 * (b.k - a.k)) / (b.x - a.x);
     if (sc > 0.85 && sc < 1.15) {
@@ -308,6 +311,11 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     return mt - mv / sl;
   };
   const t1 = crossing(0), t11 = crossing(1), t21 = crossing(2);
+  // The 6 m mark (Stanley, 2026-11-14: "1-6 m a 6-11 m, tým by bolo vidno stratu"), Berlin 2009's
+  // middle photocell. Only from a cone standing there (5.2 m from the line): read off the runway's
+  // homography the mark landed 1.8 m away from where the far cone put it on IMG_4677, and the
+  // halves came out 0.49 / 0.59 s, too loose to show as a measurement.
+  const t6 = cones.some(c => c.k === 0.5) ? crossing(0.5) : NaN;
   // The 1-11 m time has to agree with the speed into the board: from 11 m to 1 m out the run is
   // at its top speed, so 10 m over the time sits within a few percent of the last step (IMG_4677:
   // 9.34 against 9.44 m/s, 1 %). On IMG_4658 (filmed from 40 m) the cone crossings gave 1.17 s,
@@ -317,6 +325,9 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const s1 = t1 - t11, s2 = t11 - t21;
   const splits = {
     s1to11: fits(s1) ? s1 : null, s11to21: Number.isFinite(s2) && fits(s1) ? s2 : null,
+    // the two 5 m halves (each 0.35-1.0 s to count)
+    s6to11: fits(s1) && t6 > t11 && t6 - t11 > 0.35 && t6 - t11 < 1 ? t6 - t11 : null,
+    s1to6: fits(s1) && t1 > t6 && t1 - t6 > 0.35 && t1 - t6 < 1 ? t1 - t6 : null,
     withheld: Number.isFinite(s1) && !fits(s1) ? +s1.toFixed(3) : null,
     source: cones.length >= 2 && coneScale ? 'cones' : 'board',
     cones: cones.map(c => ({ k: c.k, x: +c.x.toFixed(2), n: c.obs.length })), coneScale,

@@ -31,9 +31,10 @@ export const COEF = {
   linDist: 0.0053 + 0.0020,
   // the spread of athlete 1's fitted parameters: interquartile 21-27 cm on 24 for IMG_4677
   linBand: [0.875, 1.125],
-  // board contact, cm per ms at the same approach speed. Men: Czech n=45 regression, 2.4 ± 3.0 cm
-  // per 10 ms (not significant). Women: Nemtsev 2016, 16.3 cm per 10 ms (n=21, overfit).
-  contactCmPerMs: { m: [0.24, 0.24], f: [1.63, 1.63] },
+  // board contact, cm per ms at the same approach speed: Czech men n=45, 2.4 ± 3.0 cm per 10 ms (not
+  // significant). The women's Nemtsev 2016 figure (16.3 per 10 ms, n=21, overfit) gave Miška +40 cm
+  // for 24 ms on IMG_4594, which no evidence supports; both use the men's figure until women's data exist.
+  contactCmPerMs: { m: [0.24, 0.24], f: [0.24, 0.24] },
   // board contact shortens by 0.6 % per +0.1 m/s of approach speed (contact ∝ v^-0.6)
   contactPerSpeed: 0.06,
   // take-off angle falls 1.5° per +1 m/s approach (Béres 2014), velocity lost rises 4.6 points per m/s

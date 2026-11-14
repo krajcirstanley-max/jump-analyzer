@@ -20,7 +20,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.14.0';
+const APP_VERSION = '0.15.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -85,7 +85,7 @@ const sprintView = initSprint({
   root: document.getElementById('sprint'), athletes: ATHLETES, freelap: freelapView, bare: true,
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
   onProgress: t => trainProgress(t),
-  onDone: rec => { refreshFeeds(); openDetail('sprint', rec.id); },
+  onDone: (rec, o) => { refreshFeeds(); if (!o?.quiet) openDetail('sprint', rec.id); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
 });
 const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
@@ -215,13 +215,16 @@ async function swapAthlete() {
   if (!showJump()) return;
   await saved;
   const newId = resultId;
-  if (old.feel != null || old.runup != null || old.measured != null || old.split != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null, measured: old.measured ?? null, split: old.split ?? null });
-  if (newId === oldId) return;
+  const corrected = old.measured != null || old.split != null;
+  if (old.feel != null || old.runup != null || corrected || old.tapeFrom != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null, measured: old.measured ?? null, split: old.split ?? null, tapeFrom: old.tapeFrom ?? null });
+  if (newId === oldId) { if (corrected) { Object.assign(jump, { measured: old.measured ?? null, split: old.split ?? null, tapeFrom: old.tapeFrom ?? null }); rejudge(newId, old.runup ?? null, true); } return; }
   // The player still reads the old clip: let go of it, drop the old attempt, open the new one.
   runId++;
   clearResult();
   await hist.deleteAttempt(oldId);
-  openAttempt(newId);
+  await openAttempt(newId);
+  // the tape and the Freelap time correct the video: run the numbers again with them
+  if (corrected && resultId === newId) rejudge(newId, old.runup ?? null, true);
 }
 
 let isBusy = false;
@@ -569,7 +572,7 @@ function syncIdeal(i) {
   const el = idealToggle();
   if (!el) return;
   ideal = ideals.find(x => x.frame === i) ?? null;
-  const here = !!ideal;
+  const here = !!ideal || !!(flightIdeal && i === flightIdeal.frame);
   el.classList.toggle('hidden', !here);
   el.querySelectorAll('[data-ideal]').forEach(b => {
     const on = (b.dataset.ideal === '1') === idealState.on;
@@ -585,8 +588,8 @@ function syncIdeal(i) {
     // the take-off angle's ideal path is drawn on this frame too
     if (flightIdeal && i === flightIdeal.frame) moved.push({ label: `najlepší uhol odrazu (+${Math.round(flightIdeal.gain * 100)} cm)`, ideal: flightIdeal.ideal, you: flightIdeal.you, oneDp: true });
     legend.innerHTML = !show ? '' : moved.length
-      ? `<b>${esc(ideal.name ?? 'Ideál')} · priemer finalistov</b>${moved.map(it => `<span class="${it.oneDp || it.matters ? 'mat' : 'sty'}">${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}${moved.some(it => !it.oneDp && !it.matters) ? '<small class="sty-note">Sivé je v rozptyle finalistov, to je tvoj štýl, nie chyba.</small>' : ''}`
-      : `<b>${esc(ideal.name ?? '')}: postava je v norme finalistov</b>`;
+      ? `<b>${esc(ideal?.name ?? 'Ideál')} · priemer finalistov</b>${moved.map(it => `<span class="${it.oneDp || it.matters ? 'mat' : 'sty'}">${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}${moved.some(it => !it.oneDp && !it.matters) ? '<small class="sty-note">Sivé je v rozptyle finalistov, to je tvoj štýl, nie chyba.</small>' : ''}`
+      : `<b>${esc(ideal?.name ?? '')}: postava je v norme finalistov</b>`;
   }
 }
 function setOverlays() {
@@ -1069,7 +1072,8 @@ function chatSuggestions() {
   const s = (wi?.items ?? []).slice(0, 2).map(x => Q[x.id] ?? `Čo s tým: ${x.title.toLowerCase()}?`);
   return [...s, 'Zlepšujem sa?'];
 }
-const md = t => esc(t).replace(/„([^“]{1,60})“/g, '<span class="cue">„$1“</span>').split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+// The answer's light markdown: **bold**, the cue in „…“, paragraphs; anything else stays text.
+const md = t => esc(t).replace(/\*\*([^*]{1,80})\*\*/g, '<b>$1</b>').replace(/„([^“]{1,60})“/g, '<span class="cue">„$1“</span>').split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
 function drawChat() {
   const list = $('ch-list');
   list.innerHTML = chat.messages.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'bot'}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('')
@@ -1083,7 +1087,8 @@ async function openChat() {
   if (!jump || jump.error || !resultId) return;
   const rec = await hist.getAttempt(resultId);
   const who = ATHLETES[resultAthlete ?? athlete];
-  chat = { id: resultId, messages: rec?.chat ?? [], busy: false, error: null };
+  // an answer still on its way for this jump: keep that chat, don't drop the pending reply
+  if (!(chat?.id === resultId && chat.busy)) chat = { id: resultId, messages: rec?.chat ?? [], busy: false, error: null };
   const d = new Date(rec?.recordedAt || rec?.analysedAt || Date.now());
   $('ch-sub').textContent = `${who.name} · skok ${d.getDate()}. ${d.getMonth() + 1}.${rec?.file ? ` · ${rec.file.replace(/\.[^.]+$/, '')}` : ''}`;
   const by = Object.fromEntries((jump.metrics ?? []).map(m => [m.key, m]));

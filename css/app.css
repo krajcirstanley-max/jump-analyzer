@@ -583,3 +583,16 @@ div.att-open { cursor: default; }
 .tl-sum small { display: block; font-size: 12px; color: var(--muted); }
 .ideal-legend .sty { opacity: .55; } .ideal-legend .sty strong { color: inherit; }
 .ideal-legend .sty-note { display: block; width: 100%; color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+/* 0.15.0: sprint video first, analysis later */
+.pd-video { position: relative; }
+.pd-chip { position: absolute; top: 10px; left: 10px; background: rgba(10,12,16,.78); color: #fff; font-size: 13px; padding: 6px 10px; border-radius: 999px; pointer-events: none; }
+.pd-step { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 14px; border-top: 1px solid var(--line); }
+.pd-step:first-of-type { border-top: 0; }
+.pd-dot { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: #fff; flex-shrink: 0; }
+.pd-step.done .pd-dot { background: var(--accent); }
+.pd-step.now .pd-dot { border: 2px solid var(--accent); border-top-color: transparent; animation: spin .8s linear infinite; }
+.pd-step.next .pd-dot { border: 2px solid var(--line); } .pd-step.next { color: var(--muted); }
+.pd-step small { margin-left: auto; color: var(--muted); font-size: 12px; }
+.pd-fl { display: flex; justify-content: space-between; align-items: baseline; }
+.pd-fl span { color: var(--muted); font-size: 13px; display: block; } .pd-fl b { font-size: 22px; }

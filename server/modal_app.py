@@ -170,6 +170,7 @@ class Analyzer:
         t0 = time.time()
         while time.time() - t0 < 380:
             if time.time() >= float(jobs.get("warm:until") or 0):
+                jobs["warm:beat"] = 0   # gone: the next tap starts a new hold at once
                 return "cooled"
             jobs["warm:beat"] = time.time()
             time.sleep(15)

@@ -91,6 +91,7 @@ def parse_athletes(raw):
 # on the GPU side checks it (modal_app.Analyzer.hold). Capped, and every analysis extends it.
 HOLD_MAX_MIN = 45
 HOLD_STALE_S = 45   # no heartbeat for this long: the hold is gone, start a new one
+HOLD_BOOT_S = 240   # a new hold's claim covers the GPU's cold start (~3 min) before its first beat
 
 
 def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time, hold=None, chat=None):
@@ -128,7 +129,8 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
                 t = now()
                 jobs["warm:until"] = max(float(jobs.get("warm:until") or 0), t + min(minutes, HOLD_MAX_MIN) * 60)
                 if t - float(jobs.get("warm:beat") or 0) > HOLD_STALE_S:
-                    jobs["warm:beat"] = t   # claimed now, so a second tap does not start a second hold
+                    # claimed into the future: taps during the ~3 min boot must not start more holds
+                    jobs["warm:beat"] = t + HOLD_BOOT_S - HOLD_STALE_S
                     hold()
                 return warm_state()
             warm()

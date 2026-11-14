@@ -64,6 +64,15 @@ def test_no_token_no_answer_and_errors_hide_the_token():
         pass
 
 
+def test_an_error_result_is_not_an_answer():
+    for stdout in ['{"is_error": true, "result": "Invalid API key"}']:
+        try:
+            C.answer(ok_payload(), token="t", run=Run(stdout=stdout))
+            raise AssertionError("error text came back as an answer")
+        except RuntimeError as e:
+            assert "Invalid" not in str(e)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

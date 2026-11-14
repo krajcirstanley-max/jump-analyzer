@@ -139,14 +139,21 @@ def test_training_session_holds_once_extends_and_cools():
     h = {"Authorization": "Bearer tok-s"}
     r = e.client.post("/warm?minutes=30", headers=h).json()
     assert r["until"] == 1000 + 30 * 60 and e.holds == [1000]
-    e.t[0] = 1010   # a second tap while the hold is alive: no second hold, the deadline moves
-    e.jobs["warm:beat"] = 1005
-    assert e.client.post("/warm?minutes=30", headers=h).json()["until"] == 1010 + 30 * 60
+    e.t[0] = 1100   # still booting, no beat yet: another tap must not start a second hold
+    assert e.client.post("/warm?minutes=30", headers=h).json()["until"] == 1100 + 30 * 60
     assert e.holds == [1000]
-    e.t[0] = 1100   # heartbeat gone stale: a new hold
+    e.t[0] = 1200   # the hold is beating: still one hold
+    e.jobs["warm:beat"] = 1195
+    e.client.post("/warm?minutes=30", headers=h)
+    assert e.holds == [1000]
+    e.t[0] = 1300   # heartbeat gone stale: a new hold
     e.client.post("/warm?minutes=500", headers=h)
-    assert e.holds == [1000, 1100]
-    assert e.jobs["warm:until"] == 1100 + 45 * 60   # capped
+    assert e.holds == [1000, 1300]
+    assert e.jobs["warm:until"] == 1300 + 45 * 60   # capped
+    e.jobs["warm:beat"] = 0   # a hold that cooled clears its beat: the next tap starts one at once
+    e.t[0] = 1310
+    e.client.post("/warm?minutes=10", headers=h)
+    assert e.holds == [1000, 1300, 1310]
     assert e.client.post("/cool", headers=h).json()["until"] == 0
     assert e.client.get("/warm", headers=h).json()["until"] == 0
     assert e.client.post("/cool").status_code == 401

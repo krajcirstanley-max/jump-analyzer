@@ -123,6 +123,17 @@ function timelineOf(contacts, ev, ground, landing, apex, fps) {
     const next = rows[i + 1];
     r.air = next ? (next.td - r.to - 1) / fps : landing != null ? (landing - r.to - 1) / fps : null;
   });
+  // Early run-up rows the tracking split or merged (Miška IMG_4594: 0.125 s down, 0.033 s up, then
+  // 0.300 s down) are dropped rather than shown as steps: under 0.05 s in the air or over 0.25 s on
+  // the ground is not a running step. The last three contacts are the runway-refined ones and stay.
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (r.id) continue;
+    if ((r.air != null && r.air < 0.05) || r.contact > 0.25) { rows.splice(i, 1); }
+  }
+  rows.forEach((r, i) => { const next = rows[i + 1]; if (next && !r.id) r.air = (next.td - r.to - 1) / fps; });
+  // a dropped row in the middle would make the previous row's flight swallow a whole step
+  for (let i = rows.length - 2; i >= 0; i--) if (!rows[i].id && rows[i].air > 0.3) rows.splice(0, i + 1), (i = 0);
   return { rows, apex: apex != null ? (apex - T.to) / fps : null, landing: landing != null ? (landing - T.to) / fps : null, landingFrame: landing ?? null };
 }
 
@@ -193,7 +204,7 @@ function speedCard(flight, by, ev, track) {
       : Number.isFinite(sp.withheld) ? ` Čas 1–11 m neukazujem: z kužeľov vyšlo ${sp.withheld.toFixed(2).replace('.', ',')} s, čo nesedí s rýchlosťou rozbehu pri doske. Kužele sú na to v zábere príliš ďaleko.` : '';
     return { last, takeoff, loss, lossPct: Number.isFinite(g.speedLossPct) ? g.speedLossPct : null, sure: g.sure, board: true,
       jumpFromToe: Number.isFinite(g.jump) && ev.landing != null ? g.jump : null,
-      split1to11: fine(sp.s1to11), split11to21: fine(sp.s11to21), cones: !!sp.coneScale,
+      split1to11: fine(sp.s1to11), split11to21: fine(sp.s11to21), split6to11: sp.s6to11 ?? null, split1to6: sp.s1to6 ?? null, cones: !!sp.coneScale,
       tapeFix: g.tapeFix ?? null, toeToLine: Number.isFinite(g.toeToLine) ? g.toeToLine : null,
       note: `Metre z dosky (čiara odrazu ${String(g.boardM).replace('.', ',')} m od piesku).${cones}${tapeNote(g.tapeFix)} Kontrola s dĺžkou nohy: rozdiel ${diff} %. Rýchlosti asi ±0,2 m/s, dĺžka skoku asi ±0,2 m.${splitNote}${toLine ? ` ${toLine}` : ''}` };
   }
@@ -286,7 +297,9 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // last stride / 11-1 m mean 0.998, so the speed is held).
   const sUse = split > 0.8 && split < 2.5 ? split : ground && !ground.error ? ground.splits?.s1to11 ?? null : null;
   if (sUse && ground && !ground.error) { ground.approach = 10 / sUse; ground.approachFrom = split ? 'freelap' : 'cones'; }
-  const flight = ground && !ground.error ? withGround(air, ground) : air;
+  // Gravity-scale clip (no board): a typed Freelap time still gives the approach and the hold.
+  const airOnly = sUse && !(ground && !ground.error) ? { ...air, approach: 10 / sUse, speedKeep: air.speedLast > 0 ? (air.speedLast * sUse / 10 - 1) * 100 : NaN } : air;
+  const flight = ground && !ground.error ? withGround(air, ground) : airOnly;
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
   const runThrough = result.events?.kind === 'runthrough';

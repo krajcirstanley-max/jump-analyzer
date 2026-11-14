@@ -86,6 +86,10 @@ def answer(payload, token, knowledge="", bin="claude", timeout=100, run=subproce
     except ValueError:
         out = {}
     text = (out.get("result") or "").strip() if isinstance(out, dict) else ""
+    # an expired token or an API error also comes back as JSON with its message in "result"
+    if (isinstance(out, dict) and out.get("is_error")) or p.returncode not in (0, None):
+        print("chat: claude error:", (text or p.stderr or "")[:200].replace(token, "[token]"))
+        raise RuntimeError("Odpoveď sa nepodarilo získať, skús znova.")
     if not text:
         hint = (p.stderr or p.stdout or "").replace(token, "[token]")[:200]
         print("chat: no answer:", hint)

@@ -34,7 +34,8 @@ export function idealTouchdown(kp, { s, dir, sex = 'male', bandOf = null }) {
   if (!(viewYaw(kp) <= MAX_YAW)) return null;
   const g = sex === 'female' ? 'f' : 'm';
   const BD = bandOf ?? (k => NORMS[k][g]);
-  const pick = (key, v) => { const [lo, hi] = BD(key); return { band: [lo, hi], ideal: v < lo || v > hi ? (lo + hi) / 2 : v, set: v < lo || v > hi }; };
+  // nearest edge of the target band (the band is the finalist mean ± 0.5°, or one-sided from it)
+  const pick = (key, v) => { const [lo, hi] = BD(key); return { band: [lo, hi], ideal: v < lo ? lo : v > hi ? hi : v, set: v < lo || v > hi }; };
 
   const H0 = P(kp, s + 'hip'), K0 = P(kp, s + 'knee'), A = P(kp, s + 'ank');
   const L1 = dist(H0, K0), L2 = dist(K0, A);
@@ -255,6 +256,7 @@ export const IDEAL_POSE = {
   kneeLand: { m: 131, f: 133.5, sd: 8 }, hipLand: { m: 95.5, f: 90, sd: 8 },
 };
 const DERIVED = new Set(['hipTO', 'inclTO', 'inclTD']);
+const ONE_SIDED = new Set(['kneeTD', 'trunkTO', 'kneeDrive']);
 // aim 'mid': the finalists' typical pose (IDEAL_POSE means, else the middle of the norm band), so the ghost shows what an
 // elite position looks like even where the athlete is already inside the band (Stanley, 2026-11-14:
 // "nemám pocit, že toto je ideál odrazu"). aim 'edge': the nearest edge of the band, the old rule.
@@ -288,6 +290,9 @@ export function idealsFor(jump, result, sex = 'male', { aim = 'mid' } = {}) {
       // too fights the angles that set them (IMG_4677 toe-off lean went to 21° against a mean of 18°)
       if (aim !== 'mid' || DERIVED.has(key)) return [lo - o, hi - o];
       const c = (IDEAL_POSE[key]?.[g] ?? (lo + hi) / 2) - o;
+      // one-sided where the evidence has a direction: past the mean on the good side is kept
+      // (straighter knee at touchdown, trunk forward at toe-off, higher free thigh)
+      if (ONE_SIDED.has(key)) return [c - 0.5, hi - o];
       return [c - 0.5, c + 0.5];
     };
     const id = build(kp, bandOf);
@@ -295,7 +300,7 @@ export function idealsFor(jump, result, sex = 'male', { aim = 'mid' } = {}) {
     const items = id.items.map(it => {
       const o = off(it.key), you = it.you + o, P0 = IDEAL_POSE[it.key];
       // beyond one finalist spread: worth changing; inside it: the athlete's own style
-      const matters = P0 ? Math.abs(you - P0[g]) > P0.sd : it.set;
+      const matters = P0 ? (ONE_SIDED.has(it.key) ? you < P0[g] - P0.sd : Math.abs(you - P0[g]) > P0.sd) : it.set;
       return { ...it, you, ideal: it.ideal + o, band: it.band ? NORMS[it.key]?.[g] ?? it.band : null, matters };
     });
     out.push({ ...id, items, phase, name, frame, you: kp, changed: items.some(it => it.set) });
