@@ -245,7 +245,7 @@ function fakeFetch(steps) {
   const calls = [];
   globalThis.fetch = async (url, opts = {}) => {
     calls.push({ url: String(url), opts });
-    if (String(url).endsWith('/warm')) return json(200, { ok: true });
+    if (/\/warm(\?|$)/.test(String(url))) return json(200, { ok: true });
     if (opts.signal?.aborted) throw new DOMException('x', 'AbortError');
     const s = steps.length > 1 ? steps.shift() : steps[0];
     if (s === 'net') throw new TypeError('Load failed');
@@ -289,7 +289,7 @@ test('analyzeInCloud uploads, follows the job and hydrates the result', async ()
   assert.equal(FakeXHR.opened[0].headers.Authorization, 'Bearer tok');
   assert.equal(stages[0].stage, 'Nahrávam video');
   assert.ok(stages.some(s => s.stage === 'Sledujem pohyb' && s.done === 3 && s.total === 9), 'server stages reach the athlete in Slovak');
-  assert.ok(calls.some(c => c.url.endsWith('/warm')), 'the warm-up goes out with the upload');
+  assert.ok(calls.some(c => /\/warm(\?|$)/.test(c.url)), 'the warm-up goes out with the upload');
   assert.equal(cloud.pendingCloudJob(), null);
 });
 
@@ -403,7 +403,7 @@ test('back-to-back jobs each keep their own pending entry', async () => {
   let aDone = false;
   globalThis.fetch = async url => {
     const u = String(url);
-    if (u.endsWith('/warm')) return json(200, { ok: true });
+    if (/\/warm(\?|$)/.test(u)) return json(200, { ok: true });
     if (u.includes('/jobs/A')) return json(200, aDone ? { state: 'done', result: wire, coach: null } : { state: 'running', stage: 'coach' });
     return json(200, { state: 'running', stage: 'coach' });
   };

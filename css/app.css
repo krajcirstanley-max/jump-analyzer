@@ -510,10 +510,3 @@ div.att-open { cursor: default; }
 .conf-row + .note { margin-top: 4px; }
 .conf-from { margin-top: 8px; }
 
-/* 0.9.9: training session (server kept warm) */
-.sess-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.sess-row h2 { margin: 0; }
-.sess { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.sess .btn.small { width: auto; }
-.sess-st { font-size: 13px; font-weight: 600; }
-.sess-st.hot { color: #1d9e75; } .sess-st.warming { color: var(--muted); }

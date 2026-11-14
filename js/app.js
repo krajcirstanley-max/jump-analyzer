@@ -14,11 +14,11 @@ import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
 import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
 import { CLOUD_URL } from './config.js';
-import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud, startTraining, endTraining, trainingStatus, trainingUntil, SESSION_MIN } from './cloud.js';
+import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud } from './cloud.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.10';
+const APP_VERSION = '0.9.11';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -846,7 +846,7 @@ document.querySelector('.segc').addEventListener('click', e => {
   drawKind(); drawFreelapMini();
 });
 $('train-film').addEventListener('click', () => {
-  if (cloudReady()) warmCloud();   // the camera is open for a while: start the server meanwhile
+  if (cloudReady()) warmCloud();   // the server boots (~3 min) while the athlete films
   if (kind === 'sprint') return sprintView.film();
   if (kind === 'rsi') return rsiView.film();
   jumpCam?.open({ fps: 240, mode: 'jump', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
@@ -990,44 +990,6 @@ renderCloud();
 
 // Before the picker: the upload takes about as long as a cold start of the server.
 $('train-pick').addEventListener('click', () => { if (cloudReady()) warmCloud(); });
-
-// ---------- training session: the server kept warm (cloud.js startTraining) ----------
-// "Začať tréning" holds a GPU up on the server for SESSION_MIN after the last analysis, so no
-// jump waits out the ~3 min cold start, locked phone or not. The row says whether it is up yet.
-let sess = { until: 0, hot: false }, sessTimer = null;
-const hhmm = t => new Date(t).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' });
-function drawSession() {
-  const el = $('train-session');
-  if (!el) return;
-  if (!cloudReady()) { el.innerHTML = ''; return; }
-  const on = sess.until > Date.now();
-  el.innerHTML = on
-    ? `<span class="sess-st ${sess.hot ? 'hot' : 'warming'}">${sess.hot ? `● server pripravený do ${hhmm(sess.until)}` : '◌ server sa zohrieva, asi 3 min'}</span><button class="btn small" data-sess="end">Ukončiť</button>`
-    : '<button class="btn small primary" data-sess="start">Začať tréning</button>';
-}
-async function pollSession() {
-  clearTimeout(sessTimer);
-  if (!cloudReady()) return drawSession();
-  const st = await trainingStatus();
-  if (st) sess = st; else sess = { until: trainingUntil(), hot: sess.hot };
-  drawSession();
-  if (sess.until > Date.now() && document.visibilityState === 'visible') sessTimer = setTimeout(pollSession, sess.hot ? 60_000 : 15_000);
-}
-$('train-session').addEventListener('click', async e => {
-  const b = e.target.closest('[data-sess]');
-  if (!b) return;
-  b.disabled = true;
-  try {
-    if (b.dataset.sess === 'start') { const r = await startTraining(); sess = { until: (r?.until ?? 0) * 1000, hot: !!r?.hot }; }
-    else { await endTraining(); sess = { until: 0, hot: false }; }
-  } catch (err) { alert(`Server sa nepodarilo zohriať: ${err?.message ?? err}`); }
-  drawSession();
-  pollSession();
-});
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollSession(); });
-sess.until = trainingUntil();
-drawSession();
-pollSession();
 
 $('file').addEventListener('change', e => {
   const f = e.target.files?.[0];
