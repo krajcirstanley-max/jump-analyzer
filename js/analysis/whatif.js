@@ -48,6 +48,11 @@ export const COEF = {
 };
 
 const linV = th => { const { vmax, vmin, a, inf } = COEF.lin; return (vmax - vmin) / (1 + (th / inf) ** a) + vmin; };
+// The take-off moved along Linthorne's speed-angle curve to a target angle (for the ideal path).
+export function idealTakeoff(vx, vy, target) {
+  const th0 = (Math.atan2(vy, vx) * 180) / Math.PI, v1 = (Math.hypot(vx, vy) * linV(target)) / linV(th0);
+  return { vx: v1 * Math.cos(rad(target)), vy: v1 * Math.sin(rad(target)), angle: target };
+}
 const flightTime = (vy, drop) => (vy + Math.sqrt(Math.max(0, vy * vy + 2 * G * drop))) / G;
 const band = (f, [a, b]) => { const x = f(a), y = f(b); return [Math.min(x, y), Math.max(x, y)]; };
 const add = (...bs) => bs.reduce((s, b) => [s[0] + b[0], s[1] + b[1]], [0, 0]);

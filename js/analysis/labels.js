@@ -155,3 +155,52 @@ export function idealOverlay(ideals, scale, state) {
     ctx.restore();
   };
 }
+
+// Take-off arrow and flight path (Stanley, 2026-11-14, after a screenshot of another app: "šípka od
+// bokov, ktorá ukazuje trajektóriu"). On the toe-off frame: an arrow from the centre of mass in the
+// take-off direction with its angle, then the parabola the centre of mass flies, continuing from the
+// arrow's tip so the two read as one line ("trajektórie trošku off šípiek" in the first mock). In
+// "+ Ideál" mode a green arrow and path from the ghost's take-off at the target angle, with the
+// speed it would keep on Linthorne 2005's speed-angle curve (whatif.js). Scale: the board's local
+// pixels per metre at touchdown; the camera pans, so the path is drawn in the toe-off frame's view.
+const G = 9.81;
+export function flightOverlay(jump, result, scale, state, { com, idealCom = null, ideal = null } = {}) {
+  const g = jump?.flight?.ground, to = jump?.takeoff?.to;
+  const vx = jump?.flight?.vxTO, vy = jump?.flight?.vyTO, ppm = g?.pxPerM;
+  if (to == null || !com || !(ppm > 0) || !Number.isFinite(vx) || !Number.isFinite(vy)) return () => {};
+  const dir = jump.dir ?? 1, L = 0.10, T = 0.45;
+  const at = (c, vxx, vyy, t) => [c[0] + dir * vxx * t * ppm, c[1] - (vyy * t - 0.5 * G * t * t) * ppm];
+  return (ctx, toCanvas, index) => {
+    if (index !== to) return;
+    const lw = Math.max(2.5, ctx.canvas.width / 180);
+    const P2 = p => toCanvas(p[0] * scale, p[1] * scale);
+    const pill = (txt, x, y, color) => {
+      ctx.save(); ctx.font = `600 ${lw * 4.6}px -apple-system, system-ui, sans-serif`;
+      const tw = ctx.measureText(txt).width;
+      ctx.fillStyle = 'rgba(10,12,16,0.82)'; ctx.beginPath(); ctx.roundRect(x - tw / 2 - lw * 2, y - lw * 3.6, tw + lw * 4, lw * 5.6, lw * 2.8); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = lw * 0.6; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(txt, x, y + lw * 0.8); ctx.restore();
+    };
+    const one = (c, vxx, vyy, color, label, above) => {
+      // the arrow is the straight start; the path continues from its tip with the same velocity
+      const tip = [c[0] + dir * vxx * L * ppm, c[1] - vyy * L * ppm];
+      const [ax, ay] = P2(c), [bx, by] = P2(tip);
+      ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineCap = 'round';
+      ctx.lineWidth = lw; ctx.setLineDash([lw * 2, lw * 1.6]); ctx.beginPath(); ctx.moveTo(bx, by);
+      for (let t = 0.01; t <= T; t += 0.01) { const [x, y] = P2(at(tip, vxx, vyy, t)); ctx.lineTo(x, y); }
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.lineWidth = lw * 1.5; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      const a = Math.atan2(by - ay, bx - ax), h = lw * 4.5;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - h * Math.cos(a - 0.42), by - h * Math.sin(a - 0.42)); ctx.lineTo(bx - h * Math.cos(a + 0.42), by - h * Math.sin(a + 0.42)); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      pill(label, (ax + bx) / 2, (ay + by) / 2 + (above ? -lw * 6 : lw * 6), color);
+    };
+    // the horizontal the angle is read against
+    const [hx, hy] = P2(com);
+    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([lw * 1.5, lw * 1.5]); ctx.lineWidth = lw * 0.6;
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + dir * lw * 26 * (ctx.canvas.width > 0 ? 1 : 1), hy); ctx.stroke(); ctx.restore();
+    const deg = Math.atan2(vy, vx) * 180 / Math.PI;
+    one(com, vx, vy, '#ff8a3d', `ty ${deg.toFixed(1).replace('.', ',')}°`, false);
+    if (state?.on && ideal) one(idealCom ?? com, ideal.vx, ideal.vy, IDEAL, `ideál ${String(Math.round(ideal.angle * 10) / 10).replace('.', ',')}°`, true);
+  };
+}

@@ -6,7 +6,8 @@ import { skeletonOverlay } from './pose/overlay.js';
 import { analyzeJump } from './analysis/jump.js';
 import { expectedDistance } from './analysis/runup.js';
 import { coaching } from './analysis/coach.js';
-import { jointLabels, idealOverlay } from './analysis/labels.js';
+import { jointLabels, idealOverlay, flightOverlay } from './analysis/labels.js';
+import { centreOfMass } from './analysis/kinematics.js';
 import { idealsFor } from './analysis/ideal.js';
 import { renderResult, showCoach, runupHtml, firstCellHtml } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
@@ -15,11 +16,11 @@ import { initSprint } from './sprint-view.js';
 import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud, askAboutJump } from './cloud.js';
-import { whatIf } from './analysis/whatif.js';
+import { whatIf, idealTakeoff } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.12.1';
+const APP_VERSION = '0.13.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -538,7 +539,7 @@ function finishPose() {
 // into them, drawn as a ghost (ideal.js, labels.js). The switch shows on those frames and stays
 // on while stepping between them.
 const idealState = { on: false };
-let ideals = [], ideal = null;   // ideal: the one on the frame being shown
+let ideals = [], ideal = null, flightIdeal = null;   // flightIdeal: { frame, you, ideal } take-off angle   // ideal: the one on the frame being shown
 function idealToggle() {
   const stage = player?.stage;
   if (!stage) return null;
@@ -581,8 +582,10 @@ function syncIdeal(i) {
     legend.classList.toggle('hidden', !show);
     const deg = v => `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}°`;
     const moved = (ideal?.items ?? []).filter(it => it.set);
+    // the take-off angle's ideal path is drawn on this frame too
+    if (flightIdeal && i === flightIdeal.frame) moved.push({ label: 'uhol odrazu', ideal: flightIdeal.ideal, you: flightIdeal.you, oneDp: true });
     legend.innerHTML = !show ? '' : moved.length
-      ? `<b>${esc(ideal.name ?? 'Ideál')} · ideál podľa noriem finalistov</b>${moved.map(it => `<span>${esc(it.label)} <strong>${deg(it.ideal)}</strong> <em>ty ${deg(it.you)}</em></span>`).join('')}`
+      ? `<b>${esc(ideal.name ?? 'Ideál')} · ideál podľa noriem finalistov</b>${moved.map(it => `<span>${esc(it.label)} <strong>${it.oneDp ? `${it.ideal.toFixed(1).replace('.', ',')}°` : deg(it.ideal)}</strong> <em>ty ${it.oneDp ? `${it.you.toFixed(1).replace('.', ',')}°` : deg(it.you)}</em></span>`).join('')}`
       : `<b>${esc(ideal.name ?? '')}: všetky uhly sú v norme</b>`;
   }
 }
@@ -590,11 +593,21 @@ function setOverlays() {
   player.overlays.length = 0;
   const k = player.src.width / pose.W;
   ideals = jump.error ? [] : idealsFor(jump, pose, ATHLETES[resultAthlete ?? athlete].sex);
+  flightIdeal = null;
   ideal = null;
   player.overlays.push(skeletonOverlay(pose, k));   // the ghost draws over it, never in place of it
   idealState.on = false;
   if (!jump.error) player.overlays.push(jointLabels(jump, pose, k, { skip: i => idealState.on && ideals.some(x => x.frame === i) }));
   if (ideals.length) player.overlays.push(idealOverlay(ideals, k, idealState));
+  if (!jump.error) {
+    // take-off arrow and flight path; the ideal one when the take-off angle is out of its norm
+    const sex = ATHLETES[resultAthlete ?? athlete].sex, to = jump.takeoff?.to, kp = pose.smooth?.[to];
+    const ang = (jump.metrics ?? []).find(m => m.key === 'takeoffAngle' && (m.status === 'low' || m.status === 'high'));
+    const idTO = ideals.find(x => x.frame === to);
+    const ideal = ang && Number.isFinite(jump.flight?.vxTO) ? idealTakeoff(jump.flight.vxTO, jump.flight.vyTO, ang.status === 'low' ? ang.norm[0] : ang.norm[1]) : null;
+    flightIdeal = ideal ? { frame: to, you: ang.value, ideal: ideal.angle } : null;
+    player.overlays.push(flightOverlay(jump, pose, k, idealState, { com: kp && centreOfMass(kp, sex), idealCom: idTO?.kp ? centreOfMass(idTO.kp, sex) : null, ideal }));
+  }
   syncIdeal(player.index);
 }
 
