@@ -115,7 +115,8 @@ export function idealOverlay(ideals, scale, state) {
   const list = Array.isArray(ideals) ? ideals : [ideals];
   return (ctx, toCanvas, index) => {
     const ideal = state.on && list.find(x => x && x.frame === index);
-    if (!ideal) return;
+    // nothing to move on this frame: a green copy on top of the athlete only hides the skeleton
+    if (!ideal || ideal.changed === false) return;
     const kp = ideal.kp, you = ideal.you;
     const ok = (q, j) => q && Number.isFinite(q[j * 3]) && q[j * 3 + 2] >= 0.5;
     const at = (q, j) => toCanvas(q[j * 3] * scale, q[j * 3 + 1] * scale);
