@@ -141,6 +141,23 @@ class Analyzer:
     def warm(self):
         return self.daemon.info
 
+    # A training session: stay up while the deadline in the jobs dict is ahead (api.py /warm with
+    # minutes). The method timeout is 450 s, so a hold hands over to a fresh one before it.
+    @modal.method()
+    def hold(self):
+        import time
+
+        t0 = time.time()
+        while time.time() - t0 < 380:
+            if time.time() >= float(jobs.get("warm:until") or 0):
+                return "cooled"
+            jobs["warm:beat"] = time.time()
+            time.sleep(15)
+        if time.time() < float(jobs.get("warm:until") or 0):
+            jobs["warm:beat"] = time.time()
+            Analyzer().hold.spawn()
+        return "handed over"
+
     @modal.method()
     def run(self, job_id, owner, params):
         from worker import claude_token_for, make_push, process_job
@@ -177,6 +194,7 @@ def web():
         commit_clips=clips.commit,
         start_job=lambda job_id, owner, params: Analyzer().run.spawn(job_id, owner, params),
         warm=lambda: Analyzer().warm.spawn(),
+        hold=lambda: Analyzer().hold.spawn(),
         tokens=load_tokens(os.environ.get("JUMP_TOKENS")),
         push_key=os.environ.get("VAPID_PUBLIC", ""),
     )

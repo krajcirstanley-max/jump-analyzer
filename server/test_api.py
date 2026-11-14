@@ -22,7 +22,7 @@ class Env:
     def __init__(self, start_fails=False):
         self.dir = tempfile.TemporaryDirectory()
         self.path = Path(self.dir.name)
-        self.jobs, self.started, self.warmed, self.commits = Store(), [], [], [0]
+        self.jobs, self.started, self.warmed, self.commits, self.holds = Store(), [], [], [0], []
         self.t = [1000.0]
         def start(job_id, owner, params):
             if start_fails:
@@ -33,7 +33,7 @@ class Env:
         self.client = TestClient(A.create_api(
             jobs=self.jobs, clips_dir=self.path, commit_clips=commit, start_job=start,
             warm=lambda: self.warmed.append(1), tokens={"stanley": "tok-s", "miska": "tok-m"},
-            push_key="PUB", now=lambda: self.t[0]), raise_server_exceptions=False)
+            push_key="PUB", now=lambda: self.t[0], hold=lambda: self.holds.append(self.t[0])), raise_server_exceptions=False)
     def post(self, body=b"clip", token="tok-s", q="sex=female&name=Mi%C5%A1ka", **kw):
         return self.client.post(f"/jobs?{q}", content=body, headers={"Authorization": f"Bearer {token}", **kw.pop("headers", {})})
     def get(self, job_id, token="tok-s"):
@@ -132,6 +132,24 @@ def test_warm_never_fails_the_caller():
     e = Env()
     assert e.client.post("/warm", headers={"Authorization": "Bearer tok-s"}).json() == {"ok": True}
     assert e.warmed == [1]
+
+
+def test_training_session_holds_once_extends_and_cools():
+    e = Env()
+    h = {"Authorization": "Bearer tok-s"}
+    r = e.client.post("/warm?minutes=30", headers=h).json()
+    assert r["until"] == 1000 + 30 * 60 and e.holds == [1000]
+    e.t[0] = 1010   # a second tap while the hold is alive: no second hold, the deadline moves
+    e.jobs["warm:beat"] = 1005
+    assert e.client.post("/warm?minutes=30", headers=h).json()["until"] == 1010 + 30 * 60
+    assert e.holds == [1000]
+    e.t[0] = 1100   # heartbeat gone stale: a new hold
+    e.client.post("/warm?minutes=500", headers=h)
+    assert e.holds == [1000, 1100]
+    assert e.jobs["warm:until"] == 1100 + 45 * 60   # capped
+    assert e.client.post("/cool", headers=h).json()["until"] == 0
+    assert e.client.get("/warm", headers=h).json()["until"] == 0
+    assert e.client.post("/cool").status_code == 401
 
 
 def test_push_subscribe_dedupes_and_validates():

@@ -85,7 +85,15 @@ def parse_athletes(raw):
     return out
 
 
-def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time):
+# A training session keeps one GPU container up (Stanley, 2026-11-14: "viem kliknúť začať tréning
+# a potom sa to automaticky zohreje"): the cold start is about 3 minutes, a jump every 3-5 minutes.
+# The deadline lives in the jobs dict, so it holds while the phone is locked in a pocket; the hold
+# on the GPU side checks it (modal_app.Analyzer.hold). Capped, and every analysis extends it.
+HOLD_MAX_MIN = 45
+HOLD_STALE_S = 45   # no heartbeat for this long: the hold is gone, start a new one
+
+
+def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time, hold=None):
     from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
     from fastapi.concurrency import run_in_threadpool
     from fastapi.middleware.cors import CORSMiddleware
@@ -108,13 +116,34 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
     def health():
         return {"ok": True}
 
+    def warm_state():
+        t, until, beat = now(), float(jobs.get("warm:until") or 0), float(jobs.get("warm:beat") or 0)
+        return {"ok": True, "until": until if until > t else 0, "hot": t - beat <= HOLD_STALE_S}
+
+    # minutes > 0: hold the GPU warm until then (a training session); 0: one warm-up as before.
     @api.post("/warm")
-    def warm_up(_=Depends(user)):
+    def warm_up(minutes: float = Query(0), _=Depends(user)):
         try:
+            if minutes > 0 and hold is not None:
+                t = now()
+                jobs["warm:until"] = max(float(jobs.get("warm:until") or 0), t + min(minutes, HOLD_MAX_MIN) * 60)
+                if t - float(jobs.get("warm:beat") or 0) > HOLD_STALE_S:
+                    jobs["warm:beat"] = t   # claimed now, so a second tap does not start a second hold
+                    hold()
+                return warm_state()
             warm()
         except Exception as e:  # a failed warm-up only costs the cold start
             print("warm-up failed:", e)
         return {"ok": True}
+
+    @api.get("/warm")
+    def warm_status(_=Depends(user)):
+        return warm_state()
+
+    @api.post("/cool")
+    def cool(_=Depends(user)):
+        jobs["warm:until"] = 0
+        return {"ok": True, "until": 0}
 
     @api.post("/jobs")
     async def create_job(

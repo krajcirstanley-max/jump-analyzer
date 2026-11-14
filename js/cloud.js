@@ -207,10 +207,45 @@ async function follow(id, { signal, onProgress, onResult, t0 }) {
 }
 
 // ---------- Public ----------
-// Starts a container ahead of the job; the upload takes about as long as a cold start.
+// Starts a container ahead of the job; the upload takes about as long as a cold start. During a
+// training session it also pushes the session's end out again.
 export function warmCloud() {
   if (!cloudReady()) return;
-  fetch(`${base()}/warm`, { method: 'POST', headers: auth() }).catch(() => {});
+  const q = trainingUntil() > Date.now() ? `?minutes=${SESSION_MIN}` : '';
+  fetch(`${base()}/warm${q}`, { method: 'POST', headers: auth() }).then(r => r.json()).then(keepUntil).catch(() => {});
+}
+
+// A training session keeps the GPU warm on the server until a deadline (api.py /warm), so the
+// first analysis does not wait out the ~3 min cold start, even with the phone locked. Every
+// analysis extends it; it ends on its own SESSION_MIN after the last one, or with endTraining.
+export const SESSION_MIN = 30;
+const SESSION_KEY = 'jump.session.until';
+export const trainingUntil = () => Number(store.get(SESSION_KEY)) || 0;
+function keepUntil(r) {
+  if (!r || typeof r.until !== 'number') return r;
+  if (r.until > 0) store.set(SESSION_KEY, String(Math.round(r.until * 1000))); else store.del(SESSION_KEY);
+  return r;
+}
+export async function startTraining() {
+  if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
+  const r = await fetch(`${base()}/warm?minutes=${SESSION_MIN}`, { method: 'POST', headers: auth() });
+  if (!r.ok) throw statusError(r.status);
+  return keepUntil(await r.json());
+}
+export async function endTraining() {
+  store.del(SESSION_KEY);
+  if (!cloudReady()) return;
+  await fetch(`${base()}/cool`, { method: 'POST', headers: auth() }).catch(() => {});
+}
+// { until (ms, 0 = none), hot } from the server; null when it can't be reached.
+export async function trainingStatus() {
+  if (!cloudReady()) return null;
+  try {
+    const r = await fetch(`${base()}/warm`, { headers: auth() });
+    if (!r.ok) return null;
+    const j = keepUntil(await r.json());
+    return { until: j.until > 0 ? j.until * 1000 : 0, hot: !!j.hot };
+  } catch { return null; }
 }
 
 export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, onProgress, onResult, signal } = {}) {
