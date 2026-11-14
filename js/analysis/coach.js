@@ -12,9 +12,14 @@ export const PHASES = [
   { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee', 'stepChange', 'speedKeep'] },
   { id: 'plant', label: 'Plant', weight: 0.35, keys: ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin', 'kneeVel', 'touchdownDist', 'speedLossTO'] },
   { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'freeDrop', 'trunkTO', 'trunkRotBoard', 'toHeight'] },
-  { id: 'flight', label: 'Let', weight: 0.05, keys: ['flight', 'peakHeight', 'trunkStability'] },
-  { id: 'landing', label: 'Dopad', weight: 0.15, keys: ['legsOut', 'landingReach', 'kneeLand', 'hipLand', 'estDistance'] },
+  { id: 'flight', label: 'Let', weight: 0.05, keys: ['trunkStability'] },
+  { id: 'landing', label: 'Dopad', weight: 0.15, keys: ['legsOut', 'landingReach', 'kneeLand', 'hipLand'] },
 ];
+// Flight time, the rise of the centre of mass and the estimated distance are results, not
+// technique: they follow from speed and take-off, and our clips are submaximal (sneakers, half
+// run-up), so against finalists they scored 0-30 and pulled the technique score down for effort
+// (Stanley, 2026-11-14: "neni skóre prísne?" on Let 35 and Dopad 28). They are still shown and
+// still feed O koľko ďalej; the score is technique only.
 
 // The same per-metric score as jump.js gives (metrics.js scoreMetric), for metrics that come
 // without one.

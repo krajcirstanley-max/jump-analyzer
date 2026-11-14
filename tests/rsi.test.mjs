@@ -129,3 +129,37 @@ test('hand-held phone, tracked every 4th frame: interpolated H is enough', () =>
   assert.equal(r.jumps.length, 5, JSON.stringify(r.events));
   r.jumps.forEach(j => assert.ok(Math.abs(j.contactMs - 180) <= 2 * r.edgeMs + 1e-9, `contact ${j.contactMs}`));
 });
+
+// A real CMJ from the phone (2026-11-14 23:00, Stanley, 240 fps, hand-held): the feet were drawn
+// up in the air, so for ~0.15 s around the top they barely moved, and the right foot left a few
+// frames before the left. The old reading took that hang for two short contacts in mid-air and
+// found no jump at all. Foot heights are the clip's own (camera flow), padded with standing.
+test('countermovement jump with the feet drawn up in the air: one flight, no contacts at the top', async () => {
+  const { readFileSync } = await import('node:fs');
+  const fx = JSON.parse(readFileSync(new URL('./fixtures/cmj-tuck.json', import.meta.url)));
+  // pose jitter of about ±1.5 px across and ±3 px up and down, as on the real clip
+  let seed = 3 * 7919; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+  const PX = 620, floorY = 1700, K = J.length, frames = [], ts = [];
+  const pad = 120, n = fx.l.length + 2 * pad;
+  const hAt = (s, i) => fx[s][Math.min(fx[s].length - 1, Math.max(0, i - pad))];
+  for (let i = 0; i < n; i++) {
+    ts.push(i / fx.fps);
+    const f = new Float32Array(K * 3);
+    const set = (nm, x, y) => { f[JI[nm] * 3] = x + 3 * rnd(); f[JI[nm] * 3 + 1] = y + 6 * rnd(); f[JI[nm] * 3 + 2] = 0.9; };
+    for (const [s, x] of [['l', 500], ['r', 580]]) {
+      const fy = floorY - hAt(s, i) * PX;
+      set(s + 'heel', x, fy - 5); set(s + 'bigtoe', x, fy); set(s + 'smalltoe', x + 10, fy);
+      set(s + 'ank', x, fy - 0.08 * PX);
+      // drawn-up feet: the knees come up less than the feet, so the leg looks shorter in the air
+      set(s + 'knee', x, floorY - 0.52 * PX - hAt(s, i) * 0.4 * PX); set(s + 'hip', x, floorY - 0.97 * PX - hAt(s, i) * 0.2 * PX);
+    }
+    frames.push(f);
+  }
+  const r = rsiAnalysis({ fast: frames, accurate: frames.map(() => null) }, ts, { sex: 'male', height: 180 });
+  assert.ok(!r.error, r.error);
+  assert.equal(r.jumps.length, 0, JSON.stringify(r.events));
+  assert.equal(r.kind, 'cmj', JSON.stringify(r.events));
+  assert.equal(r.standing.length, 1);
+  // flight ~0.53 s (feet off at frame ~745, down at ~873 of the clip): about 34 cm
+  assert.ok(r.standing[0].heightCm > 30 && r.standing[0].heightCm < 40, `height ${r.standing[0].heightCm}`);
+});

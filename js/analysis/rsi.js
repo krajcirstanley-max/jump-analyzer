@@ -96,7 +96,14 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {})
     // on both sides, while a foot on the ground is higher on both sides (or the clip ends)
     const k = Math.max(3, Math.round(fps / 30)), below = j2 => Number.isFinite(y[j2]) && y[j2] > level + tolM * pxM;
     const apex = a - k >= 0 && b + k < n && below(a - k) && below(b + k);
-    if (!apex && (b - a + 1) / fps * 1000 >= minMs) runs.push({ td: a, to: b, level });
+    // A foot never rises from under the floor into a contact: lower just before the run means it
+    // was still on its way up. And a short run whose level keeps sinking is the slow fall after
+    // the top, not a planted foot. Both took a CMJ with the feet drawn up for two contacts in
+    // mid-air and lost the jump (2026-11-14, 240 fps, hand-held: 764-806 and 824-851).
+    const risingInto = a - k >= 0 && below(a - k);
+    const q = Math.max(2, Math.round((b - a + 1) / 4));
+    const sinking = (b - a + 1) / fps < 0.3 && median(y.slice(b - q + 1, b + 1)) - median(y.slice(a, a + q)) > 0.025 * pxM;
+    if (!apex && !risingInto && !sinking && (b - a + 1) / fps * 1000 >= minMs) runs.push({ td: a, to: b, level });
     i = b + 1;
   }
   // runs that touch or overlap after growing are one contact
@@ -138,6 +145,13 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     for (let k = i; k <= j; k++) for (const [s, l] of Object.entries(down[k])) if (l >= lvl - STEP) { used.add(s); lv.push(l); }
     contacts.push({ td: i, to: j, level: Math.max(...lv), feet: [...used].sort().join('') });
     i = j;
+  }
+  // A short "contact" well above the ground on both sides of it is the foot hanging in the air
+  // (a CMJ with the feet drawn up, 2026-11-14): nobody lands 10 cm up and jumps back down in
+  // under 0.3 s. A box is stood on longer, and is not higher than the contact before it.
+  for (let k = contacts.length - 2; k >= 1; k--) {
+    const c = contacts[k], up = 0.10 * pxM;
+    if ((c.to - c.td + 1) / fps < 0.3 && c.level < contacts[k - 1].level - up && c.level < contacts[k + 1].level - up) contacts.splice(k, 1);
   }
   if (!contacts.length) return { error: 'Na videu som nenašiel žiadny dotyk so zemou.' };
 
