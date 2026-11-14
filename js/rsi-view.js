@@ -25,8 +25,8 @@ function record(r, file) {
     id: `${Date.now()}`, at: new Date().toISOString(), file: file?.name ?? '', fps: Math.round(r.fps),
     exercise: r.exercise, leg, noRebound: !!r.noRebound, boxCm: r.boxCm ?? null, boxFrom: r.boxFrom ?? null, boxEstCm: r.boxEstCm == null ? null : Math.round(r.boxEstCm),
     askBox: r.askBox, rsiErrPct: r.rsiErrPct, camera: r.camera ?? null,
-    jumps: r.jumps.map(j => ({ contactMs: Math.round(j.contactMs), flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1), rsi: +j.rsi.toFixed(2), ri: +j.ri.toFixed(2), slow: j.slow, landingFlexed: j.landingFlexed })),
-    standing: (r.standing ?? []).map(j => ({ flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1) })),
+    jumps: r.jumps.map(j => ({ td: j.td, contactMs: Math.round(j.contactMs), flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1), rsi: +j.rsi.toFixed(2), ri: +j.ri.toFixed(2), slow: j.slow, landingFlexed: j.landingFlexed })),
+    standing: (r.standing ?? []).map(j => ({ td: j.td, to: j.to, flightMs: Math.round(j.flightMs), heightCm: +j.heightCm.toFixed(1) })),
     best5: r.best5 ? { rsi: +r.best5.rsi.toFixed(2), ri: +r.best5.ri.toFixed(2), contactMs: Math.round(r.best5.contactMs) } : null,
   };
 }
@@ -50,7 +50,9 @@ function resultHtml(rec) {
       <p class="note">Pri výskoku z miesta je výška z času letu. RSI-mod by potreboval začiatok pohybu, ten sa z videa číta neisto.</p>`;
   }
   const many = rec.jumps.length > 1;
-  const rows = rec.jumps.map((j, k) => `<tr class="${j === b ? 'on' : ''}"><th>${k + 1}.</th><td>${j.contactMs}${j.slow ? '⚠' : ''}</td><td>${j.flightMs}</td><td>${num(j.heightCm, 1)}</td><td><b>${num(j.rsi, 2)}</b></td><td>${num(j.ri, 2)}</td></tr>`).join('');
+  const st0 = (rec.standing ?? []).find(x => x.td < rec.jumps[0].td && (x.to ?? x.td) < rec.jumps[0].td) ?? null;
+  const startRow = st0 ? `<tr><th>štart</th><td>–</td><td>${st0.flightMs}</td><td>${num(st0.heightCm, 1)}</td><td>–</td><td>–</td></tr>` : '';
+  const rows = startRow + rec.jumps.map((j, k) => `<tr class="${j === b ? 'on' : ''}"><th>${k + 1}.</th><td>${j.contactMs}${j.slow ? '⚠' : ''}</td><td>${j.flightMs}</td><td>${num(j.heightCm, 1)}</td><td><b>${num(j.rsi, 2)}</b></td><td>${num(j.ri, 2)}</td></tr>`).join('');
   // RSI of every rebound as a line with its own scale (a bar from zero would hide 1.3 vs 1.6)
   const bars = many ? (() => {
     const v = rec.jumps.map(j => j.rsi), lo = Math.min(...v), hi = Math.max(...v), pad = (hi - lo) * 0.15 || 0.1;
@@ -109,22 +111,35 @@ function camera(cap = globalThis.Capacitor) {
 // Times in seconds from the start of the clip.
 const s2 = x => num(x, 2), s3 = x => num(x, 3), cm = x => `${num(x, 0)} cm`;
 const odrazy = n => `${n} ${n >= 2 && n <= 4 ? 'odrazy' : 'odrazov'}`;
+const prekazok = n => `${n} ${n === 1 ? 'prekážka' : n >= 2 && n <= 4 ? 'prekážky' : 'prekážok'}`;
 export function rsiMarks(r) {
   const ts = r.ts, t0 = ts?.[0] ?? 0, dt = 1 / (r.fps || 120), at = f => (ts?.[f] ?? f * dt) - t0;
   const out = [], jumps = r.jumps ?? [], many = jumps.length > 1;
+  // Hurdle hops (Stanley, 2026-11-14: "prekážky chceme každý jeden"): the flight over the first
+  // hurdle comes from a standing start, so it is no rebound, but it is a hurdle: shown too.
+  const hurdles = r.exercise === 'hurdle_hops';
+  const start = (r.standing ?? []).filter(st => jumps.length && st.to < jumps[0].td).at(-1);
+  if (start) {
+    const up = at(start.to) + dt, fl = start.flightMs / 1000;
+    out.push({ from: up, to: up + fl, title: hurdles ? '1. prekážka · Let' : '1. skok · Let', big: `${s3(fl)} s`, small: '' });
+  }
+  const off = start ? 1 : 0;
   // A series (hops, hurdle hops): each contact's time on the ground and each flight, numbered, and
   // the averages after the last landing (Stanley, 2026-11-14: "gct len a dĺžka letu").
   jumps.forEach((j, k) => {
     const c = j.contactMs / 1000, fl = j.flightMs / 1000, h = j.heightCm;
-    const down = at(j.td), up = at(j.to) + dt, land = up + fl, n = many ? `${k + 1}. odraz · ` : '';
+    const down = at(j.td), up = at(j.to) + dt, land = up + fl;
+    const n = hurdles ? `pred ${k + 1 + off}. prekážkou · ` : many ? `${k + 1}. odraz · ` : '';
+    const nf = hurdles ? `${k + 1 + off}. prekážka · ` : n;
     out.push({ from: down, to: up, title: `${n}Na zemi`, big: `${s3(c)} s`, small: '' });
-    out.push({ from: up, to: land, title: `${n}Let`, big: `${s3(fl)} s`, small: many ? '' : `výška ${cm(h)} · RSI ${s2(j.rsi)}` });
-    if (!many) out.push({ from: land, to: land + 2.5, title: 'RSI', big: s2(j.rsi), small: `zem ${s2(c)} s · let ${s2(fl)} s · ${cm(h)}` });
+    out.push({ from: up, to: land, title: `${nf}Let`, big: `${s3(fl)} s`, small: many || hurdles ? '' : `výška ${cm(h)} · RSI ${s2(j.rsi)}` });
+    if (!many && !hurdles) out.push({ from: land, to: land + 2.5, title: 'RSI', big: s2(j.rsi), small: `zem ${s2(c)} s · let ${s2(fl)} s · ${cm(h)}` });
   });
-  if (many) {
+  if (many || hurdles) {
     const last = jumps.at(-1), end = at(last.to) + dt + last.flightMs / 1000;
-    const avg = k => jumps.reduce((a, j) => a + j[k], 0) / jumps.length / 1000;
-    out.push({ from: end, to: end + 3, title: `${odrazy(jumps.length)} · priemer`, big: `${s3(avg('contactMs'))} s`, small: `na zemi · let ${s3(avg('flightMs'))} s` });
+    const avg = (list, k) => list.reduce((a, j) => a + j[k], 0) / list.length / 1000;
+    const flights = [...(start ? [start] : []), ...jumps];
+    out.push({ from: end, to: end + 3, title: `${hurdles ? prekazok(flights.length) : odrazy(jumps.length)} · priemer`, big: `${s3(avg(jumps, 'contactMs'))} s`, small: `na zemi · let ${s3(avg(flights, 'flightMs'))} s` });
   }
   return out.sort((a, b) => a.from - b.from);
 }
