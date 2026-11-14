@@ -17,9 +17,9 @@ test('from the toe: the video distance is toe-to-mark', () => {
   assert.equal(f.applied, true);
 });
 
-test('far past the line defaults to the toe (short run-up, no board)', () => {
+test('the default is the toe: the group always measures from the take-off toe', () => {
   assert.equal(tapeFix({ jump: 5.2, toeToLine: -0.9 }, 5.3).from, 'toe');
-  assert.equal(tapeFix({ jump: 5.2, toeToLine: 0.1 }, 5.3).from, 'board');
+  assert.equal(tapeFix({ jump: 5.2, toeToLine: 0.1 }, 5.3).from, 'toe');
 });
 
 test('a gap beyond a scale error is reported, not applied; a tiny one changes nothing', () => {

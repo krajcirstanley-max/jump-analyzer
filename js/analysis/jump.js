@@ -190,8 +190,8 @@ function speedCard(flight, by, ev, track) {
 export const TAPE_MAX = 0.08;
 export function tapeFix(g, tape, from) {
   if (!(tape > 0) || !Number.isFinite(g.jump)) return null;
-  // Far past the line is a short run-up from a spot nearer the sand: no board to measure from.
-  const ref = from ?? (Number.isFinite(g.toeToLine) && g.toeToLine < -0.3 ? 'toe' : 'board');
+  // Stanley's group always measures from the take-off toe (2026-11-14: "vždy meriame od špičky").
+  const ref = from ?? 'toe';
   const video = ref === 'toe' || !Number.isFinite(g.toeToLine) ? g.jump : g.jump - g.toeToLine;
   if (!(video > 0)) return null;
   const k = tape / video, off = Math.abs(k - 1);

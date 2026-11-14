@@ -113,7 +113,7 @@ function lengthRowHtml(r) {
     : tf.tooFar ? ` Video ukázalo ${metres(tf.video)}, rozdiel ${pct(tf.k)} je priveľký na chybu mierky. Asi je zle prečítaná stopa v piesku, nič som neprepočítal.` : '';
   const note = saved != null ? (same(saved, video) ? `Potvrdené z videa, ${where}.` : `Zapísané z pásma, ${where}.${fixLine}`)
     : video != null ? `Z videa, ${where}. Potvrď, alebo prepíš dĺžkou z pásma.` : 'Video dĺžku neurčilo. Zapíš ju z pásma.';
-  const chips = from ? `<div class="filt conf-from"><button data-tape-from="board" class="${from === 'board' ? 'on' : ''}">od dosky</button><button data-tape-from="toe" class="${from === 'toe' ? 'on' : ''}">od špičky</button></div>` : '';
+  const chips = from ? `<div class="filt conf-from"><button data-tape-from="toe" class="${from === 'toe' ? 'on' : ''}">od špičky</button><button data-tape-from="board" class="${from === 'board' ? 'on' : ''}">od dosky</button></div>` : '';
   return `<div class="conf-row"><span class="runup-l">Dĺžka skoku</span>
       <input data-measured type="text" inputmode="decimal" autocomplete="off" placeholder="napr. 6,50" value="${v != null ? num(v, 2) : ''}"><span class="runup-u">m</span>
       ${okBtn(saved != null, 'data-measured-ok')}</div>

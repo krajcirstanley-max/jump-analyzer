@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.5';
+const APP_VERSION = '0.9.6';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -646,7 +646,7 @@ function withExpected(r) {
   // The video's own distance, before any tape correction (every metre scaled by tapeFix.k), measured
   // the way the athlete measures: from the take-off line, or from the toe.
   const line = toe > 0 && Number.isFinite(sp?.toeToLine), tf = sp?.tapeFix;
-  const from = jump?.tapeFrom ?? tf?.from ?? (line && sp.toeToLine < -0.3 ? 'toe' : 'board');
+  const from = jump?.tapeFrom ?? tf?.from ?? 'toe';   // they always measure from the toe
   const k = tf?.applied ? tf.k : 1;
   const videoDist = toe > 0 ? (from === 'board' && line ? toe - sp.toeToLine : toe) / k : est > 0 ? est : null;
   return { ...r, pb, judged: jump?.runupJudged ?? null, measured: jump?.measured ?? null, split: jump?.split ?? null,
