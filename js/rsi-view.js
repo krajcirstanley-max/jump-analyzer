@@ -107,16 +107,24 @@ function camera(cap = globalThis.Capacitor) {
 
 // What goes onto the filmed clip, each while it applies: the contact, the flight, then the result.
 // Times in seconds from the start of the clip.
-const s2 = x => num(x, 2), cm = x => `${num(x, 0)} cm`;
+const s2 = x => num(x, 2), s3 = x => num(x, 3), cm = x => `${num(x, 0)} cm`;
+const odrazy = n => `${n} ${n >= 2 && n <= 4 ? 'odrazy' : 'odrazov'}`;
 export function rsiMarks(r) {
   const ts = r.ts, t0 = ts?.[0] ?? 0, dt = 1 / (r.fps || 120), at = f => (ts?.[f] ?? f * dt) - t0;
-  const out = [];
-  for (const j of r.jumps ?? []) {
+  const out = [], jumps = r.jumps ?? [], many = jumps.length > 1;
+  // A series (hops, hurdle hops): each contact's time on the ground and each flight, numbered, and
+  // the averages after the last landing (Stanley, 2026-11-14: "gct len a dĺžka letu").
+  jumps.forEach((j, k) => {
     const c = j.contactMs / 1000, fl = j.flightMs / 1000, h = j.heightCm;
-    const down = at(j.td), up = at(j.to) + dt, land = up + fl;
-    out.push({ from: down, to: up, title: 'Na zemi', big: `${s2(c)} s`, small: '' });
-    out.push({ from: up, to: land, title: 'Let', big: `${s2(fl)} s`, small: `výška ${cm(h)} · RSI ${s2(j.rsi)}` });
-    out.push({ from: land, to: land + 2.5, title: 'RSI', big: s2(j.rsi), small: `zem ${s2(c)} s · let ${s2(fl)} s · ${cm(h)}` });
+    const down = at(j.td), up = at(j.to) + dt, land = up + fl, n = many ? `${k + 1}. odraz · ` : '';
+    out.push({ from: down, to: up, title: `${n}Na zemi`, big: `${s3(c)} s`, small: '' });
+    out.push({ from: up, to: land, title: `${n}Let`, big: `${s3(fl)} s`, small: many ? '' : `výška ${cm(h)} · RSI ${s2(j.rsi)}` });
+    if (!many) out.push({ from: land, to: land + 2.5, title: 'RSI', big: s2(j.rsi), small: `zem ${s2(c)} s · let ${s2(fl)} s · ${cm(h)}` });
+  });
+  if (many) {
+    const last = jumps.at(-1), end = at(last.to) + dt + last.flightMs / 1000;
+    const avg = k => jumps.reduce((a, j) => a + j[k], 0) / jumps.length / 1000;
+    out.push({ from: end, to: end + 3, title: `${odrazy(jumps.length)} · priemer`, big: `${s3(avg('contactMs'))} s`, small: `na zemi · let ${s3(avg('flightMs'))} s` });
   }
   return out.sort((a, b) => a.from - b.from);
 }
