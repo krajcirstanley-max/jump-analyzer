@@ -29,11 +29,12 @@ const lean = (kp, s, dir, sex) => {
 // kp: keypoints at the board touchdown (the track the numbers come from). s: stance side 'l'/'r'.
 // Returns { kp, items } or null when the view is too far off side-on or points are missing.
 // items: [{ key, label, you, ideal, band, set }] where set = the angle was moved.
-export function idealTouchdown(kp, { s, dir, sex = 'male' }) {
+export function idealTouchdown(kp, { s, dir, sex = 'male', bandOf = null }) {
   if (!kp || !has(kp, s + 'hip', s + 'knee', s + 'ank', 'lsho', 'rsho', 'lhip', 'rhip')) return null;
   if (!(viewYaw(kp) <= MAX_YAW)) return null;
   const g = sex === 'female' ? 'f' : 'm';
-  const pick = (key, v) => { const [lo, hi] = NORMS[key][g]; return { band: [lo, hi], ideal: v < lo || v > hi ? (lo + hi) / 2 : v, set: v < lo || v > hi }; };
+  const BD = bandOf ?? (k => NORMS[k][g]);
+  const pick = (key, v) => { const [lo, hi] = BD(key); return { band: [lo, hi], ideal: v < lo || v > hi ? (lo + hi) / 2 : v, set: v < lo || v > hi }; };
 
   const H0 = P(kp, s + 'hip'), K0 = P(kp, s + 'knee'), A = P(kp, s + 'ank');
   const L1 = dist(H0, K0), L2 = dist(K0, A);
@@ -71,12 +72,12 @@ export function idealTouchdown(kp, { s, dir, sex = 'male' }) {
   // our clips (IMG_4676: -19 to -23 against -36 to -26, "too far over the foot"). It has no joint
   // of its own: it follows from the leg angle and the trunk. When it is outside its norm, those two
   // are moved within their own norms, as little as gets the lean to the middle of its band.
-  const [ilo, ihi] = NORMS.inclTD[g], imid = (ilo + ihi) / 2;
+  const [ilo, ihi] = BD('inclTD'), imid = (ilo + ihi) / 2;
   let legT = lg.ideal, trunkT = tr.ideal, out = build(kn.ideal, legT, trunkT);
   const l0 = lean(kp, s, dir, sex);
   let l1 = lean(out, s, dir, sex);
   if (Number.isFinite(l1) && (l1 < ilo || l1 > ihi)) {
-    const [a0, a1] = NORMS.legTD[g], [b0, b1] = NORMS.trunkTD[g];
+    const [a0, a1] = BD('legTD'), [b0, b1] = BD('trunkTD');
     let best = null;
     for (let la = a0; la <= a1 + 1e-9; la += 0.5) for (let ta = b0; ta <= b1 + 1e-9; ta += 0.5) {
       const l = lean(build(kn.ideal, la, ta), s, dir, sex);
@@ -94,7 +95,7 @@ export function idealTouchdown(kp, { s, dir, sex = 'male' }) {
     { key: 'legTD', label: 'uhol nohy', you: leg0, ...lg },
     { key: 'trunkTD', label: 'trup', you: trunk0, ...tr },
   ];
-  if (Number.isFinite(l0) && Number.isFinite(l1)) items.push({ key: 'inclTD', label: 'náklon tela', you: l0, ideal: l1, band: NORMS.inclTD[g], set: Math.abs(l1 - l0) >= 0.5, derived: true });
+  if (Number.isFinite(l0) && Number.isFinite(l1)) items.push({ key: 'inclTD', label: 'náklon tela', you: l0, ideal: l1, band: BD('inclTD'), set: Math.abs(l1 - l0) >= 0.5, derived: true });
   return { kp: out, items };
 }
 
@@ -156,11 +157,11 @@ const item = (key, label, you, ideal, band, derived = false) => ({ key, label, y
 // Toe-off: knee, trunk and free-thigh drive have their own norms; the hip angle and the lean over
 // the toe follow from the stance leg's slope, so the whole body is turned about the toe (and the
 // knee nudged inside its band) until those two are in as well.
-export function idealToeoff(kp, { s, dir, sex = 'male' }) {
+export function idealToeoff(kp, { s, dir, sex = 'male', bandOf = null }) {
   const free = s === 'l' ? 'r' : 'l', g = sex === 'female' ? 'f' : 'm';
   if (!kp || !has(kp, s + 'hip', s + 'knee', s + 'ank', s + 'bigtoe', s + 'sho', 'lsho', 'rsho', 'lhip', 'rhip')) return null;
   if (!(viewYaw(kp) <= MAX_YAW)) return null;
-  const B = k => NORMS[k][g];
+  const B = bandOf ?? (k => NORMS[k][g]);
   const k0 = kneeOf(kp, s), t0 = trunkAngle(kp, dir), h0 = hipOf(kp, s, dir), i0 = inclOf(kp, s, dir, sex, 'bigtoe');
   const hasFree = has(kp, free + 'hip', free + 'knee');
   const f0 = hasFree ? driveOf(kp, free, dir) : NaN;
@@ -227,13 +228,14 @@ function legsAboutHips(o, s, dir, target) {
   if (has(o, other + 'hip', other + 'knee')) turn(t, leg(other), P(t, other + 'hip'), ang(t) - ang(o));
   return t;
 }
-export function idealLanding(kp, { s, dir, sex = 'male' }) {
+export function idealLanding(kp, { s, dir, sex = 'male', bandOf = null }) {
   const g = sex === 'female' ? 'f' : 'm';
   if (!kp || !has(kp, s + 'hip', s + 'knee', s + 'ank', s + 'sho', 'lsho', 'rsho', 'lhip', 'rhip') || !(viewYaw(kp) <= MAX_YAW)) return null;
   const k0 = kneeOf(kp, s), h0 = hipOf(kp, s, dir);
-  let out = openKnees(cp(kp), s, clampTo(k0, NORMS.kneeLand[g]));
-  out = legsAboutHips(out, s, dir, clampTo(h0, NORMS.hipLand[g]));
-  return { kp: out, items: [item('kneeLand', 'koleno', k0, kneeOf(out, s), NORMS.kneeLand[g]), item('hipLand', 'bedro', h0, hipOf(out, s, dir), NORMS.hipLand[g])] };
+  const B = bandOf ?? (k => NORMS[k][g]);
+  let out = openKnees(cp(kp), s, clampTo(k0, B('kneeLand')));
+  out = legsAboutHips(out, s, dir, clampTo(h0, B('hipLand')));
+  return { kp: out, items: [item('kneeLand', 'koleno', k0, kneeOf(out, s), B('kneeLand')), item('hipLand', 'bedro', h0, hipOf(out, s, dir), B('hipLand'))] };
 }
 
 // Every phase frame with a norm-based ideal, from the same track as the numbers. Each entry:
@@ -242,25 +244,47 @@ export function idealLanding(kp, { s, dir, sex = 'male' }) {
 export function idealsFor(jump, result, sex = 'male') {
   const T = jump?.takeoff;
   if (!T || !result?.clean) return [];
-  const track = sharpen(result.clean, jump.fps), s = jump.takeoffFoot, dir = jump.dir, g = sex === 'female' ? 'f' : 'm';
+  // Built on the track the skeleton overlay draws (smooth), so every joint the ideal leaves alone
+  // sits exactly on the athlete's own: on the sharpened track the arms came out elsewhere and the
+  // landing ghost showed "one arm one way, the other another" (Stanley, 2026-11-14). What is out of
+  // norm is decided by the numbers on the cards (sharpened track): each band is shifted by the gap
+  // between the card's value and the same angle on the drawn skeleton, and the legend speaks in the
+  // card's values.
+  const track = result.smooth ?? sharpen(result.clean, jump.fps), s = jump.takeoffFoot, dir = jump.dir, g = sex === 'female' ? 'f' : 'm';
   const by = Object.fromEntries((jump.metrics ?? []).map(m => [m.key, m]));
   const kf = id => (jump.keyFrames ?? []).find(k => k.id === id)?.frame;
+  const free = s === 'l' ? 'r' : 'l';
+  const read = (kp, key, ls) => ({
+    kneeTD: () => kneeOf(kp, s), legTD: () => legAngle(kp, s, dir), trunkTD: () => trunkAngle(kp, dir), inclTD: () => lean(kp, s, dir, sex),
+    kneeMin: () => kneeOf(kp, s), kneeTO: () => kneeOf(kp, s), hipTO: () => hipOf(kp, s, dir), trunkTO: () => trunkAngle(kp, dir),
+    kneeDrive: () => driveOf(kp, free, dir), inclTO: () => inclOf(kp, s, dir, sex, 'bigtoe'),
+    kneeLand: () => kneeOf(kp, ls), hipLand: () => hipOf(kp, ls, dir),
+  }[key]?.() ?? NaN);
   const out = [];
-  const add = (phase, frame, id, name) => { if (id && frame != null) out.push({ ...id, phase, name, frame, you: track[frame], changed: id.items.some(it => it.set) }); };
+  const add = (phase, frame, name, build, ls = s) => {
+    const kp = track[frame];
+    if (frame == null || !kp) return;
+    const off = key => { const m = by[key]; if (!m || m.frame !== frame || !Number.isFinite(m.value)) return 0; const d = read(kp, key, ls); return Number.isFinite(d) ? m.value - d : 0; };
+    const bandOf = key => NORMS[key][g].map(v => v - off(key));
+    const id = build(kp, bandOf);
+    if (!id) return;
+    const items = id.items.map(it => { const o = off(it.key); return { ...it, you: it.you + o, ideal: it.ideal + o, band: it.band ? NORMS[it.key]?.[g] ?? it.band : null }; });
+    out.push({ ...id, items, phase, name, frame, you: kp, changed: items.some(it => it.set) });
+  };
   // penultimate: the deepest knee bend there, against the bend one step earlier (penKnee)
   const pk = by.penKnee, pen = jump.pen;
   if (pk && pk.status !== 'hidden' && pen) {
-    const foot = pen.foot ?? (s === 'l' ? 'r' : 'l');
-    add('pen', pk.frame, idealKnee(track[pk.frame], { s: foot, key: 'penKnee', label: 'koleno v predposlednom', band: null,
-      target: k => k + (pk.value - clampTo(pk.value, NORMS.penKnee[g])) }), 'Predposledný krok');
+    const foot = pen.foot ?? free;
+    add('pen', pk.frame, 'Predposledný krok', kp => idealKnee(kp, { s: foot, key: 'penKnee', label: 'koleno v predposlednom', band: null,
+      target: k => k + (pk.value - clampTo(pk.value, NORMS.penKnee[g])) }));
   }
-  add('plant', T.td, idealTouchdown(track[T.td], { s, dir, sex }), 'Dotyk na doske');
+  add('plant', T.td, 'Dotyk na doske', (kp, bandOf) => idealTouchdown(kp, { s, dir, sex, bandOf }));
   const mf = kf('maxFlex');
-  if (mf != null && by.kneeMin?.status !== 'hidden') add('plant', mf, idealKnee(track[mf], { s, key: 'kneeMin', label: 'najväčší ohyb kolena', band: NORMS.kneeMin[g], target: k => clampTo(k, NORMS.kneeMin[g]) }), 'Najväčší ohyb na doske');
-  add('toeoff', T.to, idealToeoff(track[T.to], { s, dir, sex }), 'Odraz');
+  if (mf != null && by.kneeMin?.status !== 'hidden') add('plant', mf, 'Najväčší ohyb na doske', (kp, bandOf) => idealKnee(kp, { s, key: 'kneeMin', label: 'najväčší ohyb kolena', band: NORMS.kneeMin[g], target: k => clampTo(k, bandOf('kneeMin')) }));
+  add('toeoff', T.to, 'Odraz', (kp, bandOf) => idealToeoff(kp, { s, dir, sex, bandOf }));
   if (jump.landing != null && track[jump.landing]) {
     const ld = track[jump.landing], ls = has(ld, 'lank', 'rank') ? (P(ld, 'lank')[1] > P(ld, 'rank')[1] ? 'l' : 'r') : s;
-    add('landing', jump.landing, idealLanding(ld, { s: ls, dir, sex }), 'Dopad');
+    add('landing', jump.landing, 'Dopad', (kp, bandOf) => idealLanding(kp, { s: ls, dir, sex, bandOf }), ls);
   }
   return out;
 }

@@ -109,6 +109,7 @@ export function jointLabels(jump, result, scale, { skip = null } = {}) {
 // should be (Stanley, 2026-11-14: "teraz to je také meh … ako ghost"). The numbers stay under
 // the video: pills on the body covered the skeleton (2026-11-12). state.on is the switch.
 export const IDEAL = '#1fbf6b';
+const GHOSTLESS = /elb|wri|nose|ear|eye/;
 // ideals: one per phase frame (ideal.js idealsFor), or a single one.
 export function idealOverlay(ideals, scale, state) {
   const list = Array.isArray(ideals) ? ideals : [ideals];
@@ -126,6 +127,10 @@ export function idealOverlay(ideals, scale, state) {
       ctx.globalAlpha = a; ctx.strokeStyle = IDEAL; ctx.lineWidth = w;
       for (const [na, nb] of BONES) {
         const ia = JI[na], ib = JI[nb];
+        // No norm sets the arms or the head, so the ghost has nothing to say about them: copied
+        // from the athlete they read as "the ideal's arms" (Stanley, 2026-11-14: "jedna ruka a
+        // druhá je inak v ideáli, wtf"). Trunk and legs only.
+        if (GHOSTLESS.test(na) || GHOSTLESS.test(nb)) continue;
         if (!ok(kp, ia) || !ok(kp, ib)) continue;
         const [x0, y0] = at(kp, ia), [x1, y1] = at(kp, ib);
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
