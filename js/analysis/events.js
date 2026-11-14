@@ -272,21 +272,29 @@ export function keyFrames(track, contacts, fps, sex = 'male', opts = {}) {
 
   // Landing: after the apex, the lowest foot point is falling and then stops sharply
   // (largest upward-acceleration peak of the falling foot) - heels hitting the sand.
-  let landing = o.events?.landing ?? null;
-  if (landing == null && apex != null) {
+  // A landing named from the frames (Claude, on the server) is only where to look: it came 5-7
+  // frames late on Miška's jump (2026-11-14 22:40: 624, heels stopped in the sand at 617-619, she
+  // was already sitting, knee 36°, reach 0.17 m), and every landing number was read there. The
+  // pose decides within 0.12 s before to 0.05 s after it; with no clear stop there it stands.
+  const named = o.events?.landing ?? null;
+  let landing = named;
+  if (apex != null) {
     const low = i => { const kp = track[i]; if (!kp) return NaN; const a = footLow(kp, 'l'), b = footLow(kp, 'r'); return Math.max(a?.[1] ?? -Infinity, b?.[1] ?? -Infinity); };
     const ys = [];
     for (let i = apex; i <= Math.min(N - 1, apex + Math.round(0.8 * fps)); i++) ys.push(low(i));
     const v = ys.map((_, k) => (k === 0 || k === ys.length - 1 ? NaN : ((ys[k + 1] - ys[k - 1]) * fps) / 2));
-    let best = 0;
+    let best = 0, found = null;
     // Not before the centre of mass is back down to its takeoff height: earlier, the feet
     // "stop" when the athlete tucks them up in the air (IMG_4596: 1065 instead of ~1100).
     let back = 0;
     while (back < ys.length && !(comY(apex + back) >= comY(takeoff.to))) back++;
+    const lo = named != null ? named - Math.round(0.12 * fps) : -Infinity, hi = named != null ? named + Math.round(0.05 * fps) : Infinity;
     for (let k = Math.max(2, back); k < ys.length - 2; k++) {
+      if (apex + k < lo || apex + k > hi) continue;
       const stop = v[k - 2] - v[k + 2]; // downward speed lost over 4 frames
-      if (v[k - 2] > o.landFall * torso(apex + k) && stop > best) { best = stop; landing = apex + k; }
+      if (v[k - 2] > o.landFall * torso(apex + k) && stop > best) { best = stop; found = apex + k; }
     }
+    if (found != null) landing = found;
   }
 
   // Lowest centre of mass over the last two contacts (penultimate lowering).

@@ -360,3 +360,18 @@ test('a run-through (pop-up) keeps the approach and takeoff but has no landing t
   for (const k of ['contactTO', 'kneeTD', 'kneeTO', 'takeoffAngle', 'penKnee']) assert.equal(by(run)[k]?.value, by(full)[k]?.value, k);
   assert.ok(Number.isFinite(run.score.score));
 });
+
+// Miška, 2026-11-14 22:40: the landing named from the frames (624) came when she already sat in the
+// sand; the heels stopped at 617-619. The pose picks the frame near the named one. Her clip stays
+// out of the public repo, so this runs only where tests/real/miska-2240.json exists.
+test('a late named landing is moved to where the heels stop in the sand', { skip: !existsSync(new URL('./real/miska-2240.json', import.meta.url)) }, async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fromWire } = await import('../js/cloud.js');
+  const v = JSON.parse(readFileSync(new URL('./real/miska-2240.json', import.meta.url)));
+  const res = fromWire(v.result);
+  assert.equal(res.events.landing, 624);
+  const j = analyzeJump(res, 'female', res.ts, { height: 171 });
+  assert.ok(j.landing >= 616 && j.landing <= 620, `landing ${j.landing}`);
+  const reach = j.metrics.find(m => m.key === 'landingReach');
+  assert.ok(reach.value > 0.35, `reach ${reach.value}`);
+});
