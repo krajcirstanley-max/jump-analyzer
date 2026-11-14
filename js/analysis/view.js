@@ -2,6 +2,7 @@
 // every number. Renders a finished jump into the slots of index.html.
 import { profileHtml, rhythmHtml, wireCharts } from './charts.js';
 import { MAX_YAW } from './metrics.js';
+import { whatIf } from './whatif.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const num = (x, dp) => Number(x).toFixed(dp).replace('.', ',').replace(/^-/, '−');
@@ -262,11 +263,33 @@ function scoreHtml(jump, s, feel) {
       ${est ? `<span class="score-est">odhad dĺžky <b>≈ ${num(est.value, 2)} m</b></span>` : ''}</div>
   </div>`;
 }
+// "O koľko ďalej" (whatif.js): each fault of this jump moved to the norm, in centimetres, with
+// what else moves and its cue; the first one is the one thing to work on now.
+const DP = { '°': 1, cm: 1, ms: 0, 'm/s': 2, m: 2, '%': 0, s: 2 };
+const withU = (v, u) => `${num(v, DP[u] ?? 1)}${u === '°' ? '°' : u ? ` ${u}` : ''}`;
+const cmBand = g => { const [a, b] = g.map(v => Math.round(v * 100)); return a === b ? `+${a} cm` : `+${Math.max(0, a)} až ${b} cm`; };
+export function whatIfHtml(w) {
+  if (!w) return '';
+  if (!w.items.length) return '<h2>O koľko ďalej</h2><p class="note">V tomto skoku nie je nič mimo normy, čo by sa dalo vyčísliť.</p>';
+  const row = (x, i) => `<div class="wi${i === 0 ? ' pick' : ''}">
+      ${i === 0 ? '<span class="wi-tag">Teraz zlepšuj toto</span>' : ''}
+      <div class="wi-head"><b>${esc(x.title)}</b><span class="wi-gain">${x.gain ? cmBand(x.gain) : 'bez čísla'}</span></div>
+      <p class="wi-num">${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}</p>
+      ${x.cue ? `<p class="wi-cue">Cue: „${esc(x.cue)}“</p>` : ''}
+      ${x.moves || x.basis ? `<p class="note">${x.moves ? esc(x.moves) : ''}${x.basis ? ` ${x.basis === 'fyzika' ? 'Prepočet z tvojho odrazu.' : 'Odhad zo štúdií.'}` : ''}</p>` : ''}
+      ${!x.gain ? '<p class="note">Centimetre sa pre túto chybu nedajú spoľahlivo vyčísliť.</p>' : ''}
+    </div>`;
+  return `<h2>O koľko ďalej</h2>
+    <p class="note">Keby bola chyba z tohto skoku v norme. Vyber jednu vec, ďalšie video môže ukázať inú.</p>
+    ${w.items.map(row).join('')}
+    ${w.together ? `<p class="note wi-all">Všetko naraz sa nesčíta, jedna zmena posunie aj ostatné: spolu asi ${cmBand(w.together)}.</p>` : ''}`;
+}
+
 // The one thing to take away, under the phases.
 const takeHtml = c => (c?.take ? `<div class="take-card"><span>Hlavná vec</span><p>${esc(c.take)}</p></div>` : '');
 
 // els: slots from index.html. player: null when the clip is no longer on the phone.
-export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null } = {}) {
+export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null, sex = 'male' } = {}) {
   const phases = jump.phases ?? [];
   const firstFix = jump.coach?.fixes?.[0]?.phase;
   let sel = phases.find(p => p.id === firstFix)?.id ?? phases.find(p => p.id === 'plant')?.id ?? phases[0]?.id;
@@ -279,6 +302,7 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   els.speed.innerHTML = speedHtml(jump.speed, jump.stepCount, runup) + rhythmBars(jump.stepCount, jump.fps) + profileHtml(jump.profile) + rhythmHtml(jump.profile) + stepsHtml(jump.steps, jump.stepsHeightCm, jump.lowering);
   wireCharts(els.speed);
   els.coach.innerHTML = awaitingCoach ? COACH_WAIT : coachHtml(jump.coach);
+  if (els.whatif) els.whatif.innerHTML = whatIfHtml(whatIf(jump, sex, { preferKey: jump.coach?.fixes?.[0]?.metricKey ?? null }));
   els.all.innerHTML = allNumbers(jump);
 
   els.playerCard.classList.toggle('hidden', !player);

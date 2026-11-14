@@ -510,3 +510,14 @@ div.att-open { cursor: default; }
 .conf-row + .note { margin-top: 4px; }
 .conf-from { margin-top: 8px; }
 
+
+/* 0.10.0: O koľko ďalej */
+.wi { border-top: 1px solid var(--line); padding: 12px 0 4px; }
+.wi.pick { border: 2px solid var(--accent); border-radius: 14px; padding: 12px; margin: 10px 0 6px; }
+.wi-tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.wi-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.wi-gain { font-weight: 800; font-size: 18px; white-space: nowrap; color: var(--accent); }
+.wi-num { margin: 4px 0 0; font-size: 14px; }
+.wi-cue { margin: 6px 0 0; font-weight: 600; }
+.wi .note { margin-top: 4px; }
+.wi-all { margin-top: 10px; }

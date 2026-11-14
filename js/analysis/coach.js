@@ -243,7 +243,7 @@ function offending(fault, by) {
   return hits;
 }
 
-export function coaching(metrics = [], sex = 'male', { name } = {}) {
+export function coaching(metrics = [], sex = 'male', { name, all = false } = {}) {
   const who = name || (sex === 'female' ? 'Miška' : 'Stanley');
   const list = Array.isArray(metrics) ? metrics.filter(m => m && m.key) : [];
   const by = Object.fromEntries(list.map(m => [m.key, m]));
@@ -281,5 +281,10 @@ export function coaching(metrics = [], sex = 'male', { name } = {}) {
     strength: s ? s[1](by[s[0]]) : null,
     fixes,
     nextCue: fixes[0]?.cue ?? null,
+    // every fault found, in the same order, for the what-if card (whatif.js)
+    ...(all ? { ranked: found.map(({ f, m }) => ({ id: f.id, m, cue: (sex === 'female' && f.cueF ? f.cueF : f.cue) ?? null })) } : {}),
   };
 }
+
+// Title per fault id, for the what-if card.
+export const FAULT_INFO = Object.fromEntries(FAULTS.map(f => [f.id, { title: f.title, phase: f.phase }]));

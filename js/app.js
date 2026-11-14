@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.11';
+const APP_VERSION = '0.10.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -149,7 +149,7 @@ document.addEventListener('click', e => {
 // ---------- Výsledok states ----------
 const els = {
   feel: $('res-feel'), after: $('res-after'), score: $('res-score'), tiles: $('res-tiles'), chips: $('res-chips'),
-  playerCard: $('player-card'), detail: $('res-detail'), speed: $('res-speed'), coach: $('res-coach'), all: $('res-all'), take: $('res-take'),
+  playerCard: $('player-card'), detail: $('res-detail'), speed: $('res-speed'), coach: $('res-coach'), whatif: $('res-whatif'), all: $('res-all'), take: $('res-take'),
 };
 
 let current = null;          // inspectClip result of the clip on screen
@@ -742,7 +742,7 @@ document.addEventListener('click', async e => {
 function present(feel, noReplayNote) {
   runup = prefillRunup();
   renderResult(els, jump, player, {
-    feel, noReplayNote, awaitingCoach, runup,
+    feel, noReplayNote, awaitingCoach, runup, sex: ATHLETES[resultAthlete ?? athlete].sex,
     onFeel: async n => {
       const id = resultId;
       await saved;
