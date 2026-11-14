@@ -2,7 +2,7 @@
 // (London 2017 / Birmingham 2018 biomechanics reports) unless noted, with norms.
 // Angles need a side-on view; each is withheld when the camera looks too far along
 // the runway at that moment. Timing works from any view.
-import { P, has, mid, angle3, torsoLength, centreOfMass } from './kinematics.js';
+import { P, has, mid, dist, angle3, torsoLength, centreOfMass } from './kinematics.js';
 
 const deg = r => (r * 180) / Math.PI;
 
@@ -97,7 +97,18 @@ export const NORMS = {
   // WA17/WA18 men 3.22-4.20, women 2.51-3.46 (three 2017 finalists under 2.8).
   vyTO: { label: 'Zvislá rýchlosť pri odraze', unit: 'm/s', m: [3.2, 4.2], f: [2.5, 3.5], good: 'high' },
   // WA 2017 Fig. 7-8, "last step" mean horizontal CM velocity (penultimate contact + flight into board).
-  speedLast: { label: 'Rýchlosť z predposledného do odrazu', unit: 'm/s', m: [9.36, 10.0], f: [8.36, 9.2], good: 'high' },
+  // Berlin 2009 last stride (video, the same method as ours: its ratio to the 11-1 m photocell mean
+  // is 0.998, and ours matched Freelap on IMG_4677). Was WA17 (9.36-10.0 / 8.36-9.20), whose CoM
+  // method reads ~7 % low (verification 2026-11-14).
+  // 2026-11-14 research (no published norm for either; rules built from physics and Jin 2024):
+  // the legs go forward only after the flight apex (Schmolinsky via Marchetti; an early pike speeds
+  // the forward rotation, ~5 cm per 0.1 s early, derived) — ms from the apex, negative = before it;
+  legsOut: { label: 'Nohy dopredu po vrchole letu', unit: 'ms', m: [0, 470], f: [0, 430] },
+  // the free thigh is braked late in the contact (Jin et al. 2024, Heliyon 10:e31015: later braking
+  // 7.48 vs 7.26 m): degrees it has already fallen from its peak by toe-off when that peak came
+  // more than 20 ms early.
+  freeDrop: { label: 'Pokles švihového stehna pred odrazom', unit: '°', m: [0, 5], f: [0, 5] },
+  speedLast: { label: 'Rýchlosť z predposledného do odrazu', unit: 'm/s', m: [10.17, 10.78], f: [9.07, 9.59], good: 'high' },
   // WA 2017 Table 7, horizontal CM velocity at take-off.
   speedTO: { label: 'Rýchlosť pri odraze', unit: 'm/s', m: [7.82, 9.56], f: [7.2, 8.98], good: 'high' },
   // WA 2017, take-off velocity minus last-step velocity, per athlete (range of the finalists).
@@ -301,6 +312,35 @@ export function measure(track, ev, fps, sex = 'male', dir = 1, raw = track) {
       add('thighTO', thighAngle(to, free), T.to, true);
       add('kneeDrive', thighDrive(to, free, dir), T.to, true);
     }
+  }
+  // The free thigh's peak inside the contact and how far it has fallen by toe-off.
+  {
+    let peak = null;
+    for (let i = T.td; i <= T.to; i++) {
+      const k = track[i];
+      if (!k || !has(k, free + 'hip', free + 'knee')) continue;
+      const v = thighDrive(k, free, dir);
+      if (!peak || v > peak.v) peak = { v, i };
+    }
+    const kTO = track[T.to];
+    if (peak && kTO && has(kTO, free + 'hip', free + 'knee')) {
+      const early = ms(T.to - peak.i), drop = peak.v - thighDrive(kTO, free, dir);
+      add('freeDrop', early > 20 ? Math.max(0, drop) : 0, T.to, true);
+      const m = out.at(-1); if (m?.key === 'freeDrop') m.peakMs = early;
+    }
+  }
+  // Legs forward for the landing: the first frame after toe-off with both ankles half a leg ahead of
+  // the hips and both knees at 150° or more, against the flight apex.
+  if (ev.apex != null && landing != null) {
+    let out1 = null;
+    for (let i = T.to + 1; i < landing && out1 == null; i++) {
+      const k = track[i];
+      if (!k || !has(k, 'lhip', 'rhip', 'lknee', 'rknee', 'lank', 'rank')) continue;
+      const leg = f => dist(P(k, f + 'hip'), P(k, f + 'knee')) + dist(P(k, f + 'knee'), P(k, f + 'ank'));
+      const ahead = f => (P(k, f + 'ank')[0] - P(k, f + 'hip')[0]) * dir >= 0.5 * leg(f);
+      if (ahead('l') && ahead('r') && knee(k, 'l') >= 150 && knee(k, 'r') >= 150) out1 = i;
+    }
+    if (out1 != null) add('legsOut', ms(out1 - ev.apex), out1, true);
   }
   // Net trunk rotation from toe-off to the apex, positive forward, averaged over 5 frames at each end.
   if (ev.apex != null) {

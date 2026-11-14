@@ -19,7 +19,7 @@ import { whatIf } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -150,7 +150,7 @@ document.addEventListener('click', e => {
 // ---------- Výsledok states ----------
 const els = {
   feel: $('res-feel'), after: $('res-after'), score: $('res-score'), tiles: $('res-tiles'), chips: $('res-chips'),
-  playerCard: $('player-card'), detail: $('res-detail'), speed: $('res-speed'), coach: $('res-coach'), whatif: $('res-whatif'), all: $('res-all'), take: $('res-take'),
+  playerCard: $('player-card'), detail: $('res-detail'), speed: $('res-speed'), coach: $('res-coach'), whatif: $('res-whatif'), timeline: $('res-timeline'), all: $('res-all'), take: $('res-take'),
 };
 
 let current = null;          // inspectClip result of the clip on screen
@@ -665,11 +665,13 @@ const redrawRunup = () => {
 
 // The confirmed run-up differs from the one the numbers were judged at: judge them again (the
 // speed-dependent norms move with it). The coaching text stays as it was written.
+// Only a time the athlete typed is Freelap truth; confirming the video's own 1-11 m time adds nothing.
+const typedSplit = j => (j?.split != null && !(Math.abs(j.split - (j.speed?.split1to11 ?? -1)) < 0.006) ? j.split : null);
 // force: run again although the run-up is the same (a new tape distance rescales the metres).
 async function rejudge(id, v, force = false) {
   if (!pose || !jump || jump.error || (!force && (jump.runupJudged ?? null) === v)) return;
   const a = resultAthlete, who = ATHLETES[a];
-  const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null });
+  const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null, split: typedSplit(jump) });
   if (next.error || id !== resultId) return;
   jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v });
   if (player) { setOverlays(); player.refresh(); }
@@ -696,8 +698,9 @@ async function saveConfirm(k, raw) {
   await saved;
   await hist.patchAttempt(id, { [field]: v });
   renderLists();
-  // A tape distance corrects the video's metres: run the numbers again with it.
-  if (field === 'measured' && changed) rejudge(id, jump.runup ?? null, true);
+  // A tape distance or a Freelap time corrects the video: run every number again with it, so the
+  // phases, the main point and O koľko ďalej all follow (Stanley, 2026-11-14).
+  if (changed) rejudge(id, jump.runup ?? null, true);
 }
 // Where the tape was laid from: the take-off line (default) or the take-off toe.
 document.addEventListener('click', async e => {

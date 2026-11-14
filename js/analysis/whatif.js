@@ -21,7 +21,8 @@ export const COEF = {
   // Stanley's build on short run-ups, vx TD 7.09-8.21 → TO 6.41-7.07 m/s, least squares 0.585;
   // Bridgett & Linthorne 2006 (elite, 10.4 m/s) imply 0.70. Not the 6-8 cm per 0.1 m/s slope:
   // that has a 0.84 s flight built in; his own flight time is used instead.
-  transfer: [0.55, 0.70],
+  // Band: Béres (his build and level, 0.585) ± 0.05; the elite 0.70 is outside his group.
+  transfer: [0.55, 0.65],
   // take-off speed against take-off angle, Linthorne, Guzman & Bridgett 2005 eq. 4, Table III,
   // athlete 1 (1.88 m, 92 jumps, best-determined fit): v = (vmax - vmin) / (1 + (θ/θinf)^a) + vmin
   lin: { vmax: 9.9, vmin: 3.9, a: 6.8, inf: 30.2 },
@@ -73,9 +74,15 @@ export function whatIf(jump, sex = 'male', { height = null } = {}) {
     const info = FAULT_INFO[id] ?? {};
     const target = m.status === 'high' ? m.norm[1] : m.norm[0];
     const miss = Math.abs(m.value - target);
-    const it = { id, title: info.title ?? m.label, take: info.take ?? null, metricKey: m.key, label: m.label, now: m.value, target, unit: m.unit, cue, effects: [], total: null, basis: null };
+    const it = { id, title: info.title ?? m.label, take: info.take ?? null, img: info.img ?? null, metricKey: m.key, label: m.label, now: m.value, target, unit: m.unit, cue, effects: [], total: null, basis: null };
     const E = (label, value, cm, kind) => it.effects.push({ label, value, cm, kind: kind ?? (cm && mid(cm) < 0 ? 'down' : cm ? 'up' : 'same') });
 
+    if (id === 'speedLow' && m.unit === 'm/s' && m.value > 0) {
+      // Shown as the Freelap 1-11 m time (Stanley): his own time when typed, else the video's,
+      // else 10 / speed (Berlin 2009: last stride ≈ 11-1 m mean speed); the target scales with speed.
+      // the speed into the board is 10 / the 1-11 m time (typed, cones or board), so the two agree
+      it.freelap = { now: 10 / m.value, target: 10 / target };
+    }
     if (id === 'speedLow' && physics) {
       const dvx = band(t => t * miss, COEF.transfer);
       E('Vodorovná rýchlosť pri odraze', `${sgn(mid(dvx), 2)} m/s`, dvx.map(v => v * T));
@@ -128,6 +135,11 @@ export function whatIf(jump, sex = 'male', { height = null } = {}) {
     } else if (id === 'longContact' && m.key === 'contactTO') {
       E('Menej brzdenia na doske', `−${fx(miss, 0)} ms`, COEF.contactCmPerMs[g2].map(c => (c * miss) / 100));
       it.basis = 'štúdie';
+    } else if (id === 'earlyExtension' && Number.isFinite(m.value)) {
+      // ~5 cm per 0.1 s too early (forward rotation of a pike vs a layout, derived 2026-11-14), ±20 %
+      const early = Math.abs(Math.min(0, m.value)) / 1000;
+      E('Päty doletia ďalej', `nohy dopredu o ${fx(early * 1000, 0)} ms neskôr`, [0.4 * early, 0.6 * early]);
+      it.basis = 'odhad';
     } else if (id === 'landing' && m.key === 'landingReach') {
       E('Dosah nôh pri doskoku', `+${fx(miss * 100, 0)} cm`, [miss, miss]);
       it.basis = 'fyzika';

@@ -69,7 +69,7 @@ test('approved cues are short and the template only uses them', () => {
 test('Miška gets the float cue on a penultimate fault, Stanley does not', () => {
   const pen = [ms('contactPen', 170, [100, 125])];
   assert.equal(coaching(pen, 'female').nextCue, MISKA_ONLY_CUE);
-  assert.equal(coaching(pen, 'male').nextCue, 'predposledný naplocho');
+  assert.equal(coaching(pen, 'male').nextCue, 'prebehni predposledný');   // sitting: Stanley's cue since 2026-11-14
 });
 
 test('a takeoff fault outranks an equally bad penultimate fault', () => {

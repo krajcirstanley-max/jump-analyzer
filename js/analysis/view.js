@@ -283,16 +283,46 @@ export function whatIfHtml(w) {
   const row = (x, i) => `<div class="wi${i === 0 ? ' pick' : ''}">
       ${i === 0 ? '<span class="wi-tag">Teraz zlepšuj toto</span>' : ''}
       <div class="wi-head"><b>${esc(x.title)}</b><span class="wi-gain">${x.total ? cmText(x.total) : ''}</span></div>
-      <p class="wi-num">${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}</p>
+      <p class="wi-num">${x.freelap ? `Freelap 1–11 m: ${num(x.freelap.now, 2)} → ${num(x.freelap.target, 2)} s` : `${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}`}</p>
       ${x.cue ? `<p class="wi-cue">Cue: „${esc(x.cue)}“</p>` : ''}
+      ${x.img ? `<p class="wi-img"><b>Predstav si</b>${esc(x.img)}</p>` : ''}
       ${x.effects.length ? `<div class="fx"><span class="fx-l">Z toho</span>${x.effects.map(eff).join('')}
         ${x.total ? `<div class="sum"><span>Spolu za túto zmenu</span><b>${cmText(x.total)}</b></div>` : ''}</div>` : ''}
-      <p class="src">${x.basis === 'fyzika' ? 'Prepočet z tvojho odrazu.' : x.basis === 'štúdie' ? 'Z meraní v štúdiách pri rovnakej rýchlosti, štatisticky neisté.' : 'Centimetre sa pre túto chybu nedajú vyčísliť.'}${x.note ? ` ${esc(x.note)}` : ''}</p>
+      <p class="src">${x.basis === 'fyzika' ? 'Prepočet z tvojho odrazu.' : x.basis === 'štúdie' ? 'Z meraní v štúdiách pri rovnakej rýchlosti, štatisticky neisté.' : x.basis === 'odhad' ? 'Odhad z fyziky otáčania v lete, nie z merania.' : 'Centimetre sa pre túto chybu nedajú vyčísliť.'}${x.note ? ` ${esc(x.note)}` : ''}</p>
     </div>`;
   return `<h2>O koľko ďalej</h2>
     <p class="note">Keby bola chyba z tohto skoku v norme. Zoradené podľa toho, koľko ťa stojí. Vyber jednu vec, ďalšie video môže ukázať inú.</p>
     ${w.items.map(row).join('')}
     <p class="note wi-all">Zelené pridá, červené uberie, sivé je už v čísle nad ním.${w.together ? ` Rôzne zmeny sa nesčítajú, lebo jedna posunie druhú: všetky naraz asi ${cmText(w.together)}.` : ''}</p>`;
+}
+
+// "Zem, vzduch, let": every contact and flight, like the sprint view; a row jumps the video there.
+const n3 = v => num(v, 3).replace(/^0/, '');
+export function timelineHtml(jump) {
+  const t = jump?.timeline;
+  if (!t?.rows?.length) return '';
+  const by = Object.fromEntries((jump.metrics ?? []).map(m => [m.key, m]));
+  const FOOT = { l: 'Ľ', r: 'P' }, NAME = { third: '3. od konca', pen: 'predposl.', take: 'odraz' };
+  const bad = k => (by[k] && (by[k].status === 'low' || by[k].status === 'high') ? ' bad' : '');
+  const px = 480, rows = t.rows.map((r, i) => {
+    const take = r.id === 'take', air = take ? `<span class="air"></span>` : r.air != null ? `<span class="fl" style="width:${Math.round(r.air * px)}px"></span>` : '';
+    const ck = take ? bad('contactTO') : r.id === 'pen' ? bad('contactPen') : '';
+    return `<button class="tl-row${take ? ' key' : ''}" data-frame="${r.td}"><span>${i + 1}</span><span>${NAME[r.id] ? `<b>${NAME[r.id]}</b> ` : ''}${FOOT[r.foot] ?? ''}</span>
+      <span class="tl-bar"><span class="c" style="width:${Math.round(r.contact * px)}px"></span>${air}</span><span class="tl-n${ck}">${n3(r.contact)}</span><span class="tl-n">${r.air != null ? n3(r.air) : '–'}</span></button>`;
+  }).join('');
+  const land = t.landingFrame != null ? `<button class="tl-row key" data-frame="${t.landingFrame}"><span></span><span><b>dopad</b></span><span class="tl-go">${t.apex != null ? `vrchol letu +${num(t.apex, 2)} s · ` : ''}dopad +${num(t.landing, 2)} s ▸</span><span></span><span></span></button>` : '';
+  const box = (label, m, val, norm) => `<div><span>${label}</span><b class="${m && (m.status === 'low' || m.status === 'high') ? 'bad' : ''}">${val}</b>${norm ? `<small>${norm}</small>` : ''}</div>`;
+  const ct = by.contactTO, fl = by.flight, pen = t.rows.find(r => r.id === 'pen'), take = t.rows.find(r => r.id === 'take');
+  return `<h2>Zem, vzduch, let</h2>
+    <p class="note">Každý dotyk s rozbehom, odrazom a dopadom. Ťukni na riadok a video skočí na ten záber, nech si to overíš.</p>
+    <div class="tl-legend"><span><i class="c"></i>na zemi</span><span><i class="fl"></i>vo vzduchu</span></div>
+    <div class="tl-row head"><span>#</span><span>krok</span><span></span><span class="tl-n">zem</span><span class="tl-n">vzd.</span></div>
+    ${rows}${land}
+    <div class="tl-sum">
+      ${ct ? box('Odraz na zemi', ct, `${num(ct.value / 1000, 3)} s`, `finalisti ${num(ct.norm[0] / 1000, 3)}–${num(ct.norm[1] / 1000, 3)}`) : ''}
+      ${fl && fl.status !== 'hidden' ? box('Let', fl, `${num(fl.value / 1000, 2)} s`, `finalisti ${num(fl.norm[0] / 1000, 2)}–${num(fl.norm[1] / 1000, 2)}`) : ''}
+      ${pen && take ? box('Rytmus', null, `${n3(pen.contact)} → ${n3(take.contact)}`, 'predposl. → odraz') : ''}
+    </div>`;
 }
 
 // The one thing to take away, under the phases.
@@ -317,6 +347,7 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   wireCharts(els.speed);
   els.coach.innerHTML = awaitingCoach ? COACH_WAIT : coachHtml(jump.coach);
   if (els.whatif) els.whatif.innerHTML = whatIfHtml(wi);
+  if (els.timeline) { els.timeline.innerHTML = timelineHtml(jump); els.timeline.classList.toggle('hidden', !jump.timeline?.rows?.length); }
   els.all.innerHTML = allNumbers(jump);
 
   els.playerCard.classList.toggle('hidden', !player);

@@ -2,7 +2,7 @@
 // sum of its effects, ranked by cost, one pick, cue only, different changes never summed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { whatIf } from '../js/analysis/whatif.js';
+import { whatIf, COEF } from '../js/analysis/whatif.js';
 import { NORMS } from '../js/analysis/metrics.js';
 
 const metric = (key, value, status) => ({ key, label: NORMS[key].label, unit: NORMS[key].unit, value, norm: NORMS[key].m, status, frame: 1 });
@@ -25,10 +25,11 @@ test('flat take-off (Linthorne 2005 curve): vertical gain, horizontal cost and s
   assert.ok(x.total[1] - x.total[0] < 0.07, 'the range stays narrow');
 });
 
-test('speed: 55-70 % of the approach gain reaches take-off (Béres 2014), times his own flight time', () => {
+test('speed: the transfer share of the approach gain reaches take-off (Béres 2014), times his own flight time; shown as a Freelap time', () => {
   const x = whatIf(jump(), 'male', { height: 186 }).items.find(i => i.id === 'speedLow');
-  const vxRow = x.effects[0];
-  assert.ok(Math.abs(vxRow.cm[0] - 0.55 * 0.53 * 0.7) < 0.002 && Math.abs(vxRow.cm[1] - 0.70 * 0.53 * 0.7) < 0.002);
+  const vxRow = x.effects[0], miss = x.target - 8.83;
+  assert.ok(Math.abs(vxRow.cm[0] - COEF.transfer[0] * miss * 0.7) < 0.002 && Math.abs(vxRow.cm[1] - COEF.transfer[1] * miss * 0.7) < 0.002);
+  assert.ok(Math.abs(x.freelap.now - 10 / 8.83) < 1e-9 && Math.abs(x.freelap.target - 10 / x.target) < 1e-9);
 });
 
 test('deep sit: the take-off CoM rises by the extra drop (capped by the height norm); no speed was lost in this jump', () => {

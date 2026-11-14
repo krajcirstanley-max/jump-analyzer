@@ -11,9 +11,9 @@ import { scoreMetric } from './metrics.js';
 export const PHASES = [
   { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee', 'stepChange'] },
   { id: 'plant', label: 'Plant', weight: 0.35, keys: ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin', 'kneeVel', 'touchdownDist', 'speedLossTO'] },
-  { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'trunkTO', 'trunkRotBoard', 'toHeight'] },
+  { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'freeDrop', 'trunkTO', 'trunkRotBoard', 'toHeight'] },
   { id: 'flight', label: 'Let', weight: 0.05, keys: ['flight', 'peakHeight', 'trunkStability'] },
-  { id: 'landing', label: 'Dopad', weight: 0.15, keys: ['landingReach', 'kneeLand', 'hipLand', 'estDistance'] },
+  { id: 'landing', label: 'Dopad', weight: 0.15, keys: ['legsOut', 'landingReach', 'kneeLand', 'hipLand', 'estDistance'] },
 ];
 
 // The same per-metric score as jump.js gives (metrics.js scoreMetric), for metrics that come
@@ -45,7 +45,12 @@ export function techniqueScore(metrics) {
 // Coaching SOP §2, verbatim, for the next jump. Left out on purpose: „tlač dozadu" (SOP:
 // acceleration only), „ponad" (bounds only), and the two cues over the SOP's own 5-word
 // limit, „očami na značku, nie na dosku" and „ruky dole pri dotyku, hore cez odraz".
-export const APPROVED_CUES = ['vysoké boky', 'stlač zem pod seba', 'tvrdá pružina', 'predposledný naplocho', 'boky hore cez dosku', 'predposledný je float, nie krok'];
+// 2026-11-14: one cue per fault where research found one (Stanley approved the list with his own
+// Slovak wording: „drž vysoké boky do dosky", „dopredu cez dosku", „odraz ako na schod",
+// „oči na koniec doskočiska", „päty za čiaru", „zrýchľuj každým krokom do dosky").
+export const APPROVED_CUES = ['vysoké boky', 'stlač zem pod seba', 'tvrdá pružina', 'predposledný naplocho', 'boky hore cez dosku', 'predposledný je float, nie krok',
+  'rýchly posledný', 'prebehni predposledný', 'drž vysoké boky do dosky', 'dlhý – krátky', 'dopredu cez dosku', 'prebehni cez dosku', 'odraz ako na schod',
+  'oči na koniec doskočiska', 'švih a stop', 'zrýchľuj každým krokom do dosky', 'päty za čiaru', 'nohy von až pri piesku'];
 export const MISKA_ONLY_CUE = 'predposledný je float, nie krok';
 export const PHASE_IDS = ['pen', 'plant', 'toeoff', 'flight', 'landing'];
 
@@ -67,6 +72,7 @@ const TIER = { board: 1, approach: 0.85, vertical: 0.7, rest: 0.5 };
 const FAULTS = [
   {
     id: 'longContact', tier: 'board', phase: 'plant', cue: 'tvrdá pružina',
+    img: 'Si napnutá pružina, ktorá od dosky odskočí ostrým cvaknutím, nie plesknutím.',
     keys: [['contactTO', 'high', 10]],
     title: 'Kratší kontakt na doske',
     take: 'z kratšieho kontaktu na doske si odnesieš viac rýchlosti',
@@ -74,7 +80,8 @@ const FAULTS = [
     why: 'Pri 0,12 s je odraz rozhodnutý ešte pred dotykom. Napätie v členku musí prísť pred doskou a dá sa počuť: ostrý dopad je dobre, plieskavý zle.',
   },
   {
-    id: 'overReach', tier: 'board', phase: 'plant', cue: 'stlač zem pod seba',
+    id: 'overReach', tier: 'board', phase: 'plant', cue: 'rýchly posledný',
+    img: 'Posledný krok je krátky a rýchly, ako úder do bubna, a hneď si cez dosku.',
     keys: [['legTD', 'low', 1], ['inclTD', 'low', 1]],
     title: 'Chodidlo bližšie pod telo',
     take: 'keď chodidlo dopadne bližšie pod telo, doska ťa nebude brzdiť',
@@ -84,7 +91,8 @@ const FAULTS = [
     why: 'Noha vystrčená pred ťažisko brzdí. Rýchlosť z rozbehu zostane na doske.',
   },
   {
-    id: 'collapse', tier: 'board', phase: 'plant', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
+    id: 'collapse', tier: 'board', phase: 'plant', cue: 'tvrdá pružina',
+    img: 'Noha na doske je napnutá pružina, nepovolí, odpáli ťa.',
     keys: [['flexion', 'high', 0], ['kneeMin', 'low', 4]],
     title: 'Pevnejšie koleno na doske',
     take: 'pevnejšie koleno na doske dá odrazu viac pružiny',
@@ -95,6 +103,7 @@ const FAULTS = [
   },
   {
     id: 'stiffKneeTD', tier: 'board', phase: 'plant', cue: 'stlač zem pod seba',
+    img: 'Zem je pedál pod tebou, šliapneš naň dolu a dozadu, nie pred seba.',
     keys: [['kneeTD', 'low', 6]],
     title: 'Vystretejšia noha na dosku',
     take: 'vystretejšia noha pri dotyku prenesie viac rýchlosti do odrazu',
@@ -102,7 +111,8 @@ const FAULTS = [
     why: 'Vystretá a napätá noha prenesie rýchlosť do odrazu. Pokrčená ju stratí v kolene.',
   },
   {
-    id: 'sitting', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
+    id: 'sitting', tier: 'approach', phase: 'pen', cue: 'prebehni predposledný', cueF: 'predposledný je float, nie krok',
+    img: 'Predposledný krok sa odvalí ako koleso, nezastaví ako brzda.',
     keys: [['contactPen', 'high', 15]],
     title: 'Prebehni predposledný krok',
     take: 'keď predposledný krok prebehneš, rytmus do dosky ostane rýchly',
@@ -110,7 +120,8 @@ const FAULTS = [
     why: 'Predposledný pripraví odraz, ale s dlhým kontaktom je z neho brzda. Treba ho prebehnúť, telo klesá len o pár centimetrov.',
   },
   {
-    id: 'hipDropHigh', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
+    id: 'hipDropHigh', tier: 'approach', phase: 'pen', cue: 'drž vysoké boky do dosky', cueF: 'predposledný je float, nie krok',
+    img: 'Pred doskou podbehneš natiahnutú šnúru len o šírku dlane, nie prikrčený.',
     keys: [['hipDrop', 'high', 1.5]],
     title: 'Plytší predposledný krok',
     take: 'plytší predposledný krok ťa vynesie vyššie do odrazu',
@@ -119,6 +130,7 @@ const FAULTS = [
   },
   {
     id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
+    img: 'Ako lietadlo, ktoré sa pred vzletom na chvíľu prisaje k dráhe a potom sa odlepí.',
     keys: [['hipDrop', 'low', 1.5]],
     title: 'Trochu znížiť boky pred doskou',
     take: 'malé zníženie bokov pred doskou ti dá z čoho ísť hore',
@@ -126,7 +138,8 @@ const FAULTS = [
     why: 'Bez malého zníženia niet z čoho ísť hore a rýchlosť ostane vodorovná.',
   },
   {
-    id: 'flightToBoard', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
+    id: 'flightToBoard', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
+    img: 'Posledné dva kroky znejú ta-dam: dlhé „ta“, krátke rýchle „dam“.',
     keys: [['flightToBoard', 'high', 10], ['flightToBoard', 'low', 10]],
     title: 'Rytmus dlhý – krátky',
     take: 'rytmus dlhý – krátky v posledných dvoch krokoch udrží rýchlosť až do dosky',
@@ -134,7 +147,8 @@ const FAULTS = [
     why: 'Dlhší predposledný a kratší posledný krok držia rýchlosť až do dosky. Keď sa rytmus rozsype, odraz to už nedorovná.',
   },
   {
-    id: 'steep', tier: 'vertical', phase: 'toeoff', cue: 'boky hore cez dosku',
+    id: 'steep', tier: 'vertical', phase: 'toeoff', cue: 'dopredu cez dosku',
+    img: 'Doska je mostík, ktorý ťa pošle dopredu do piesku, nie hore k stropu.',
     keys: [['takeoffAngle', 'high', 0]],
     title: 'Viac dopredu cez dosku',
     take: 'odraz viac dopredu premení rýchlosť na dĺžku namiesto výšky',
@@ -142,7 +156,8 @@ const FAULTS = [
     why: 'Strmší odraz znamená dlhší kontakt a brzdenie. Väčší zisk je cez dosku než nad ňou.',
   },
   {
-    id: 'flat', tier: 'vertical', phase: 'toeoff', cue: 'boky hore cez dosku',
+    id: 'flat', tier: 'vertical', phase: 'toeoff', cue: 'odraz ako na schod',
+    img: 'Doskou vystúpiš hore na vysoký schod, nie dopredu po rovine.',
     keys: [['takeoffAngle', 'low', 1]],
     title: 'Strmší odraz',
     take: 'strmší odraz ti dá viac času vo vzduchu',
@@ -150,7 +165,8 @@ const FAULTS = [
     why: 'Plochý odraz nedá čas vo vzduchu a rýchly rozbeh to sám nedotiahne.',
   },
   {
-    id: 'diving', tier: 'vertical', phase: 'toeoff', cue: 'vysoké boky',
+    id: 'diving', tier: 'vertical', phase: 'toeoff', cue: 'oči na koniec doskočiska',
+    img: 'Pozeráš na koniec doskočiska a nesieš sa hrdo, ako čašník s plným podnosom.',
     keys: [['trunkTO', 'high', 5]],
     title: 'Vzpriamený trup cez dosku',
     take: 'vzpriamený trup cez dosku ti udrží let pokojný',
@@ -159,6 +175,7 @@ const FAULTS = [
   },
   {
     id: 'extension', tier: 'vertical', phase: 'toeoff', cue: 'stlač zem pod seba',
+    img: 'Dosku dotlačíš do konca, ako keď odkopneš loďku od mola.',
     keys: [['kneeTO', 'low', 4], ['hipTO', 'low', 5]],
     title: 'Dotiahnutý odraz',
     take: 'dotiahnutý odraz s vystretou nohou pridá rýchlosť z dosky',
@@ -168,7 +185,8 @@ const FAULTS = [
     why: 'Nedotiahnutý odraz znamená menej rýchlosti smerom hore z tej istej dosky.',
   },
   {
-    id: 'freeSide', tier: 'vertical', phase: 'toeoff', cue: 'boky hore cez dosku',
+    id: 'freeSide', tier: 'vertical', phase: 'toeoff', cue: 'švih a stop',
+    img: 'Ruky a voľná noha sú kladivo, ktoré tvrdo zastaví o nákovu, a ten úder ťa vymrští hore.',
     keys: [['kneeDrive', 'low', 3], ['thighTO', 'low', 3]],
     title: 'Švih a blok voľnej strany',
     take: 'švih a blok voľnej strany pridá odrazu výšku bez dlhšieho kontaktu',
@@ -178,7 +196,26 @@ const FAULTS = [
     why: 'Blok voľnej strany pridá rýchlosť nahor bez predĺženia kontaktu.',
   },
   {
-    id: 'speedLow', tier: 'rest', phase: 'pen', cue: 'vysoké boky',
+    id: 'blockEarly', tier: 'vertical', phase: 'toeoff', cue: 'švih a stop',
+    img: 'Ruky a voľná noha sú kladivo, ktoré tvrdo zastaví o nákovu až v momente odrazu.',
+    keys: [['freeDrop', 'high', 2]],
+    title: 'Blok voľnej strany až do odrazu',
+    take: 'keď voľnú stranu zastavíš až tesne pred odlepením, odraz dostane viac hore',
+    body: m => `Švihové stehno vrcholí ${Math.round(m.peakMs ?? 0)} ms pred odrazom a do odlepenia klesne o ${val(m)}. Pri dlhších skokoch sa zastaví neskôr.`,
+    why: 'Neskoré a tvrdé zastavenie voľnej strany išlo v štúdii na skokanoch s dlhšími skokmi (7,48 m oproti 7,26 m). Švih, ktorý dobehne skôr, odrazu už nepomôže.',
+  },
+  {
+    id: 'earlyExtension', tier: 'rest', phase: 'landing', cue: 'nohy von až pri piesku',
+    img: 'Po vrchole letu sa nesieš vystretý a nohy vystrelíš dopredu až tesne nad pieskom.',
+    keys: [['legsOut', 'low', 30]], requires: [['landingReach', 'low']],
+    title: 'Nohy dopredu až po vrchole letu',
+    take: 'keď vystrelíš nohy až po vrchole letu, päty doletia ďalej',
+    body: m => `Nohy idú dopredu ${Math.abs(Math.round(m.value))} ms pred vrcholom letu, správne je až po ňom.`,
+    why: 'Skoré zloženie tela do sedu ho rýchlejšie pretočí dopredu a päty spadnú do piesku skôr.',
+  },
+  {
+    id: 'speedLow', tier: 'rest', phase: 'pen', cue: 'zrýchľuj každým krokom do dosky',
+    img: 'Doska sa k tebe blíži s každým krokom rýchlejšie, posledné kroky sú najrýchlejšie z celého rozbehu.',
     keys: [['speedLast', 'low', 0.1], ['speedTD', 'low', 0.1]],
     title: 'Rýchlejšie do dosky',
     take: 'rýchlejší príchod do dosky ti pridá dĺžku',
@@ -187,6 +224,7 @@ const FAULTS = [
   },
   {
     id: 'trunkAir', tier: 'rest', phase: 'flight', cue: null,
+    img: 'Po odraze si napnutá struna od špičiek po prsty, dlhá a pokojná.',
     keys: [['trunkStability', 'high', 0]],
     title: 'Pokojný trup v lete',
     take: 'pokojnejší trup v lete ťa pripraví na dlhší doskok',
@@ -194,7 +232,8 @@ const FAULTS = [
     why: 'Let dĺžku nepridá, len drží telo v polohe na doskok.',
   },
   {
-    id: 'landing', tier: 'rest', phase: 'landing', cue: null,
+    id: 'landing', tier: 'rest', phase: 'landing', cue: 'päty za čiaru',
+    img: 'V piesku je čiara kúsok za tvojím obvyklým dopadom a päty ju musia preletieť.',
     keys: [['landingReach', 'low', 0.05], ['kneeLand', 'high', 5], ['hipLand', 'high', 5]],
     title: 'Dlhší doskok',
     take: 'nohy ďalej dopredu pri doskoku ti pridajú centimetre, ktoré už máš z odrazu',
@@ -235,6 +274,8 @@ const phaseWeight = id => PHASES.find(p => p.id === id)?.weight ?? 0.1;
 
 // A metric counts only when visible and beyond the norm by more than the margin.
 function offending(fault, by) {
+  // a fault that only counts together with another measurement out of its norm
+  if (fault.requires && !fault.requires.every(([k, side]) => by[k] && by[k].status === side)) return [];
   const hits = [];
   for (const [key, side, margin] of fault.keys) {
     const m = by[key];
@@ -289,4 +330,4 @@ export function coaching(metrics = [], sex = 'male', { name, all = false } = {})
 }
 
 // Title per fault id, for the what-if card.
-export const FAULT_INFO = Object.fromEntries(FAULTS.map(f => [f.id, { title: f.title, phase: f.phase, take: f.take }]));
+export const FAULT_INFO = Object.fromEntries(FAULTS.map(f => [f.id, { title: f.title, phase: f.phase, take: f.take, img: f.img ?? null }]));

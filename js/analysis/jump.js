@@ -30,7 +30,7 @@ function finish(m) {
 
 // Consecutive frame ranges for the timeline bands. With the landing hidden the flight runs to
 // the end of the clip and the landing phase is the single last frame.
-const NO_LANDING = new Set(['landingReach', 'kneeLand', 'hipLand', 'estDistance', 'flight']);
+const NO_LANDING = new Set(['landingReach', 'kneeLand', 'hipLand', 'estDistance', 'flight', 'legsOut']);
 
 function buildPhases(ev, metrics, score, last, runThrough = false) {
   const by = Object.fromEntries(metrics.map(m => [m.key, m]));
@@ -96,6 +96,33 @@ function profileData(f, ev) {
     parts: [g.takeoffDist, g.vxTO * g.flightTime, g.landingReach].every(Number.isFinite) ? { takeoff: g.takeoffDist, flight: g.vxTO * g.flightTime, landing: g.landingReach } : null,
     timeline: g.steps.map(st => ({ id: st.id, contactMs: st.contactMs, flightMs: st.flightMs ?? null })),
   };
+}
+
+// Every foot contact from the run-up to the board, then the flight to the landing: the "Zem,
+// vzduch, let" card, rows the athlete taps to check them on the video (Stanley, 2026-11-14: "ako pri
+// šprinte, nech to viem overiť"). The last three contacts take the runway-refined frames.
+function timelineOf(contacts, ev, ground, landing, apex, fps) {
+  const T = ev.takeoff;
+  // under 0.07 s is a flicker of the tracking (a run-up contact is 0.09-0.14 s), not a step
+  let cs = contacts.filter(c => c.td < T.td - 2 && c.to >= c.td && (c.to - c.td + 1) / fps >= 0.07).sort((a, b) => a.td - b.td);
+  const clean = [];
+  for (const c of cs) {
+    const p = clean.at(-1);
+    if (p && (c.td <= p.to || c.foot === p.foot)) { if (c.to - c.td > p.to - p.td) clean[clean.length - 1] = c; continue; }
+    clean.push(c);
+  }
+  const rows = clean.map(c => ({ td: c.td, to: c.to, foot: c.foot, id: null }));
+  rows.push({ td: T.td, to: T.to, foot: ev.takeoffFoot, id: 'take' });
+  for (const st of ground?.steps ?? []) {
+    const r = rows.find(x => Math.abs(x.td - st.td) <= 4);
+    if (r) Object.assign(r, { td: st.td, to: st.to, id: st.id });
+  }
+  rows.forEach((r, i) => {
+    r.contact = (r.to - r.td + 1) / fps;
+    const next = rows[i + 1];
+    r.air = next ? (next.td - r.to - 1) / fps : landing != null ? (landing - r.to - 1) / fps : null;
+  });
+  return { rows, apex: apex != null ? (apex - T.to) / fps : null, landing: landing != null ? (landing - T.to) / fps : null, landingFrame: landing ?? null };
 }
 
 // The penultimate's deepest knee bend as its own key frame: its ghost (ideal.js) is drawn there.
@@ -211,7 +238,11 @@ export function tapeFix(g, tape, from) {
 // run-up shorter than the full one the speed-dependent norms move to it (runup.js).
 // tape: the distance the athlete measured; tapeFrom: 'board' (from the take-off line, the default)
 // or 'toe' (from the take-off toe). See tapeFix.
-export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null } = {}) {
+// split: the athlete's own Freelap 1-11 m time. Berlin 2009 (photocells 11/6/1 m and video on
+// the same jumps): last-stride speed / 11-1 m mean speed = 0.998 ± 0.010 men, 0.998 ± 0.015 women,
+// so 10 / split is the speed into the board. Without a tape it corrects the video's metres like
+// the tape does; with a tape (which already set the metres) it replaces the last-step speed.
+export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null } = {}) {
   const clean = result.clean, smooth = result.smooth;
   if (!clean || !smooth) return { error: 'Chýba vyčistený záznam pohybu.' };
   const fps = result.fps ?? (ts ? (ts.length - 1) / (ts.at(-1) - ts[0]) : NaN);
@@ -233,6 +264,26 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const fix = ground && !ground.error ? tapeFix(ground, tape, tapeFrom) : null;
   if (fix?.applied) ground = groundAnalysis(result.ground, smooth, ev, times, sex, height, fix.k);
   if (fix && ground && !ground.error) ground.tapeFix = fix;
+  // The athlete's typed Freelap time first, else the video's own 1-11 m time between the cones (a
+  // known 10 m, exact frame timing; it only exists when it agrees with the board within 6 %).
+  // IMG_4677: 1.075 s → 9.30 m/s against 8.83 from the board scale; corrected, the jump reads
+  // 6.87 m from the toe against 6.85 m on the tape.
+  const sUse = split ?? ground?.splits?.s1to11 ?? null;
+  const vFree = sUse > 0.8 && sUse < 2.5 ? 10 / sUse : null;
+  if (vFree && ground && !ground.error && !fix?.applied && Number.isFinite(ground.speedLast) && ground.speedLast > 0) {
+    const k = vFree / ground.speedLast;
+    if (Math.abs(k - 1) >= 0.005 && Math.abs(k - 1) <= TAPE_MAX) {
+      ground = groundAnalysis(result.ground, smooth, ev, times, sex, height, k);
+      ground.splitFix = { k: +k.toFixed(4), split: sUse, typed: split != null, video: +(vFree / k).toFixed(2) };
+    }
+  }
+  if (vFree && ground && !ground.error) {
+    ground.speedLast = vFree;
+    ground.speedLoss = ground.vxTO - vFree;
+    ground.speedLossPct = ((ground.vxTO - vFree) / vFree) * 100;
+    ground.speedFromFreelap = split ?? null;
+    ground.speedFromCones = split == null ? sUse : null;
+  }
   const flight = ground && !ground.error ? withGround(air, ground) : air;
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
@@ -258,6 +309,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
     // The run-up the norms were judged at, and the distance a full effort from it should reach.
     runupJudged: steps, expected: steps ? expectedDistance(steps, pb) : null,
     profile: profileData(flight, ev),
+    timeline: timelineOf(contacts, ev, flight?.ground, runThrough ? null : ev.landing, ev.apex, fps),
     lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.comDropBoard } : null,
     replay: {
       from: Math.max(result.first ?? 0, ev.takeoff.td - Math.round(fps)),

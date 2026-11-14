@@ -560,3 +560,24 @@ div.att-open { cursor: default; }
 .ch-in input { flex: 1; min-height: 44px; border-radius: 22px; border: 1px solid var(--line); padding: 0 14px; font: inherit; font-size: 16px; background: var(--card); color: var(--text); }
 .ch-in button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 18px; }
 @media (prefers-color-scheme: dark) { .msg.bot .cue { background: #12392b; color: #8fdcb8; } }
+.wi-img { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 14px; }
+.wi-img b { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+
+/* 0.12.0: Zem, vzduch, let */
+.tl-row { display: grid; grid-template-columns: 26px 96px 1fr 42px 42px; align-items: center; gap: 4px; width: 100%; padding: 7px 0; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; font-variant-numeric: tabular-nums; }
+.tl-row.head { color: var(--muted); font-size: 12px; padding-bottom: 2px; border-top: 0; }
+.tl-row.key { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.tl-row b { font-weight: 600; }
+.tl-bar { display: flex; height: 12px; border-radius: 4px; overflow: hidden; }
+.tl-bar .c { background: var(--accent); } .tl-bar .fl { background: #9fe1cb; }
+.tl-bar .air { flex: 1; background: repeating-linear-gradient(90deg, #9fe1cb 0 10px, #c9efe0 10px 14px); }
+.tl-n { text-align: right; } .tl-n.bad, .tl-sum b.bad { color: #a3392b; }
+.tl-go { color: var(--accent); font-size: 12px; grid-column: 3 / 6; }
+.tl-legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); margin: 6px 0 4px; }
+.tl-legend i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.tl-legend i.c { background: var(--accent); } .tl-legend i.fl { background: #9fe1cb; }
+.tl-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.tl-sum div { background: var(--bg); border-radius: 10px; padding: 8px; }
+.tl-sum span { display: block; font-size: 12px; color: var(--muted); }
+.tl-sum b { font-size: 17px; }
+.tl-sum small { display: block; font-size: 12px; color: var(--muted); }
