@@ -98,6 +98,13 @@ function profileData(f, ev) {
   };
 }
 
+// The penultimate's deepest knee bend as its own key frame: its ghost (ideal.js) is drawn there.
+function withPenFlex(phases, pk) {
+  if (!pk || pk.frame == null) return phases;
+  return phases.map(p => (p.id !== 'pen' || p.keyFrames.some(k => k.frame === pk.frame) ? p
+    : { ...p, keyFrames: [...p.keyFrames, { id: 'penFlex', label: 'Najväčší ohyb predposledného', frame: pk.frame }].sort((a, b) => a.frame - b.frame) }));
+}
+
 // Metrics built from other metrics and the runway's contacts (research 2026-11-10: what the World
 // Athletics and Berlin reports carry that we could read). Hidden when what they rest on is hidden.
 function derivedMetrics(base, ev, f, fps, sex, height) {
@@ -243,7 +250,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   return {
     ...ev, dir, fps, flight, metrics, score, eventsSource: named ? 'claude' : 'pose', kind: runThrough ? 'runthrough' : 'jump',
     coach: coaching(metrics, sex),
-    phases: buildPhases(ev, metrics, score, last, runThrough),
+    phases: withPenFlex(buildPhases(ev, metrics, score, last, runThrough), by.penKnee),
     speed: speedCard(flight, by, ev, smooth),
     // The last three contacts in metres and milliseconds, only when the runway gave the scale.
     steps: flight?.ground?.steps ?? null, stepsHeightCm: height ?? null,

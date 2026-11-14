@@ -7,7 +7,7 @@ import { analyzeJump } from './analysis/jump.js';
 import { expectedDistance } from './analysis/runup.js';
 import { coaching } from './analysis/coach.js';
 import { jointLabels, idealOverlay } from './analysis/labels.js';
-import { idealFor } from './analysis/ideal.js';
+import { idealsFor } from './analysis/ideal.js';
 import { renderResult, showCoach, runupHtml, firstCellHtml } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
 import { initFreelap } from './freelap-view.js';
@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.7';
+const APP_VERSION = '0.9.8';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -532,10 +532,12 @@ function finishPose() {
   return showJump();
 }
 
-// "Ty / Ideál" at the board touchdown: the athlete's own skeleton with the angles that miss the
-// elite norms moved into them (ideal.js). The switch shows only on that frame.
+// "Ty / + Ideál" on every phase frame that has norms (penultimate, board touchdown, deepest knee,
+// toe-off, landing): the athlete's own skeleton with the angles that miss the elite norms moved
+// into them, drawn as a ghost (ideal.js, labels.js). The switch shows on those frames and stays
+// on while stepping between them.
 const idealState = { on: false };
-let ideal = null;
+let ideals = [], ideal = null;   // ideal: the one on the frame being shown
 function idealToggle() {
   const stage = player?.stage;
   if (!stage) return null;
@@ -564,7 +566,8 @@ function idealToggle() {
 function syncIdeal(i) {
   const el = idealToggle();
   if (!el) return;
-  const here = !!ideal && i === ideal.frame;
+  ideal = ideals.find(x => x.frame === i) ?? null;
+  const here = !!ideal;
   el.classList.toggle('hidden', !here);
   el.querySelectorAll('[data-ideal]').forEach(b => {
     const on = (b.dataset.ideal === '1') === idealState.on;
@@ -578,18 +581,19 @@ function syncIdeal(i) {
     const deg = v => `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}°`;
     const moved = (ideal?.items ?? []).filter(it => it.set);
     legend.innerHTML = !show ? '' : moved.length
-      ? `<b>Ideál podľa noriem finalistov</b>${moved.map(it => `<span>${esc(it.label)} <strong>${deg(it.ideal)}</strong> <em>ty ${deg(it.you)}</em></span>`).join('')}`
-      : '<b>Všetky uhly sú v norme</b>';
+      ? `<b>${esc(ideal.name ?? 'Ideál')} · ideál podľa noriem finalistov</b>${moved.map(it => `<span>${esc(it.label)} <strong>${deg(it.ideal)}</strong> <em>ty ${deg(it.you)}</em></span>`).join('')}`
+      : `<b>${esc(ideal.name ?? '')}: všetky uhly sú v norme</b>`;
   }
 }
 function setOverlays() {
   player.overlays.length = 0;
   const k = player.src.width / pose.W;
-  ideal = jump.error ? null : idealFor(jump, pose, ATHLETES[resultAthlete ?? athlete].sex);
+  ideals = jump.error ? [] : idealsFor(jump, pose, ATHLETES[resultAthlete ?? athlete].sex);
+  ideal = null;
   player.overlays.push(skeletonOverlay(pose, k));   // the ghost draws over it, never in place of it
   idealState.on = false;
-  if (!jump.error) player.overlays.push(jointLabels(jump, pose, k, { skip: i => idealState.on && ideal && i === ideal.frame }));
-  if (ideal) player.overlays.push(idealOverlay(ideal, k, idealState));
+  if (!jump.error) player.overlays.push(jointLabels(jump, pose, k, { skip: i => idealState.on && ideals.some(x => x.frame === i) }));
+  if (ideals.length) player.overlays.push(idealOverlay(ideals, k, idealState));
   syncIdeal(player.index);
 }
 

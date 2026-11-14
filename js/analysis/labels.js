@@ -109,9 +109,12 @@ export function jointLabels(jump, result, scale, { skip = null } = {}) {
 // should be (Stanley, 2026-11-14: "teraz to je také meh … ako ghost"). The numbers stay under
 // the video: pills on the body covered the skeleton (2026-11-12). state.on is the switch.
 export const IDEAL = '#1fbf6b';
-export function idealOverlay(ideal, scale, state) {
+// ideals: one per phase frame (ideal.js idealsFor), or a single one.
+export function idealOverlay(ideals, scale, state) {
+  const list = Array.isArray(ideals) ? ideals : [ideals];
   return (ctx, toCanvas, index) => {
-    if (!state.on || !ideal || index !== ideal.frame) return;
+    const ideal = state.on && list.find(x => x && x.frame === index);
+    if (!ideal) return;
     const kp = ideal.kp, you = ideal.you;
     const ok = (q, j) => q && Number.isFinite(q[j * 3]) && q[j * 3 + 2] >= 0.5;
     const at = (q, j) => toCanvas(q[j * 3] * scale, q[j * 3 + 1] * scale);

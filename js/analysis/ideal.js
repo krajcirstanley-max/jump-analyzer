@@ -98,12 +98,174 @@ export function idealTouchdown(kp, { s, dir, sex = 'male' }) {
   return { kp: out, items };
 }
 
-// The ideal for a jump: board touchdown, from the same track as the numbers. null when it can't
-// be built (view too far off side-on, points missing).
-export function idealFor(jump, result, sex = 'male') {
+// ---------- the other phases (2026-11-14: "ten ideál by mal byť na každom, čo viem kliknúť") ----------
+// Same idea as the touchdown: the athlete's own skeleton, only the angles outside a published
+// norm moved to the nearest edge of it, the foot on the ground staying where it is. Changing
+// one angle moves the others (Stanley: "keď zmeníš jednu vec v skoku, zmenia sa aj ostatné"),
+// so the derived ones (hip, lean) are solved for, not set: the smallest change of the free
+// parameters that brings every norm in.
+const ALL = Object.keys(JI);
+const cp = kp => Float32Array.from(kp);
+const put = (o, n, p) => { o[JI[n] * 3] = p[0]; o[JI[n] * 3 + 1] = p[1]; };
+const shift = (o, names, dx, dy) => { for (const n of names) { o[JI[n] * 3] += dx; o[JI[n] * 3 + 1] += dy; } };
+const turn = (o, names, c, rho) => {
+  const C = Math.cos(rho), S = Math.sin(rho);
+  for (const n of names) { const p = P(o, n), x = p[0] - c[0], y = p[1] - c[1]; put(o, n, [c[0] + C * x - S * y, c[1] + S * x + C * y]); }
+};
+const kneeOf = (o, s) => angle3(P(o, s + 'hip'), P(o, s + 'knee'), P(o, s + 'ank'));
+const hipOf = (o, s, dir) => {
+  const sh = P(o, s + 'sho'), h = P(o, s + 'hip'), k = P(o, s + 'knee'), a = angle3(sh, h, k);
+  const cr = (sh[0] - h[0]) * (k[1] - h[1]) - (sh[1] - h[1]) * (k[0] - h[0]);
+  return cr * dir < 0 ? 360 - a : a;
+};
+const driveOf = (o, s, dir) => { const h = P(o, s + 'hip'), k = P(o, s + 'knee'); return deg(Math.atan2((k[0] - h[0]) * dir, k[1] - h[1])); };
+const inclOf = (o, s, dir, sex, point) => { const c = centreOfMass(o, sex), f = P(o, s + point); return c ? deg(Math.atan2((c[0] - f[0]) * dir, f[1] - c[1])) : NaN; };
+const clampTo = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
+const outside = (v, [lo, hi]) => (!Number.isFinite(v) ? 0 : v < lo ? lo - v : v > hi ? v - hi : 0);
+// Turns a joint chain about a centre until fn(o) reads the target: a 1° scan over ±90°, then a
+// fine one around the best. Robust where the angle is not linear in the turn.
+function solveTurn(o, names, centre, fn, target) {
+  const v0 = fn(o);
+  if (!Number.isFinite(v0) || Math.abs(v0 - target) < 0.05) return o;
+  const c = typeof centre === 'function' ? centre(o) : centre;
+  const at = d => { const t = cp(o); turn(t, names, c, rad(d)); return t; };
+  const err = d => { const e = fn(at(d)) - target; return Number.isFinite(e) ? Math.abs(e) : Infinity; };
+  // An unsigned angle (the knee) reads the same target on both sides of straight: the smaller turn
+  // wins, or a 10° bend became a 64° flip of the thigh through the straight leg.
+  const cost = d => err(d) + 0.02 * Math.abs(d);
+  let bd = 0, be = cost(0);
+  for (let d = -90; d <= 90; d += 1) { const e = cost(d); if (e < be) { be = e; bd = d; } }
+  for (let d = bd - 1; d <= bd + 1 + 1e-9; d += 0.05) { const e = cost(d); if (e < be) { be = e; bd = d; } }
+  return bd === 0 ? o : at(bd);
+}
+// Stance knee to a target with the foot fixed: the hip turns about the knee, the rest of the body rides with the hip.
+function setKnee(o, s, target) {
+  const free = s === 'l' ? 'r' : 'l', H0 = P(o, s + 'hip');
+  const t = solveTurn(o, [s + 'hip'], P(o, s + 'knee'), q => kneeOf(q, s), target);
+  const H1 = P(t, s + 'hip');
+  shift(t, [free + 'hip', ...LEG.map(n => free + n), ...UPPER], H1[0] - H0[0], H1[1] - H0[1]);
+  return t;
+}
+const hipCentre = o => mid(P(o, 'lhip'), P(o, 'rhip'));
+const setTrunk = (o, dir, target) => solveTurn(o, UPPER, hipCentre, q => trunkAngle(q, dir), target);
+const setHip = (o, s, dir, target) => solveTurn(o, UPPER, hipCentre, q => hipOf(q, s, dir), target);
+const setDrive = (o, free, dir, target) => solveTurn(o, LEG.map(n => free + n), P(o, free + 'hip'), q => driveOf(q, free, dir), target);
+
+const item = (key, label, you, ideal, band, derived = false) => ({ key, label, you, ideal, band, set: Math.abs(ideal - you) >= 0.5, ...(derived ? { derived } : {}) });
+
+// Toe-off: knee, trunk and free-thigh drive have their own norms; the hip angle and the lean over
+// the toe follow from the stance leg's slope, so the whole body is turned about the toe (and the
+// knee nudged inside its band) until those two are in as well.
+export function idealToeoff(kp, { s, dir, sex = 'male' }) {
+  const free = s === 'l' ? 'r' : 'l', g = sex === 'female' ? 'f' : 'm';
+  if (!kp || !has(kp, s + 'hip', s + 'knee', s + 'ank', s + 'bigtoe', s + 'sho', 'lsho', 'rsho', 'lhip', 'rhip')) return null;
+  if (!(viewYaw(kp) <= MAX_YAW)) return null;
+  const B = k => NORMS[k][g];
+  const k0 = kneeOf(kp, s), t0 = trunkAngle(kp, dir), h0 = hipOf(kp, s, dir), i0 = inclOf(kp, s, dir, sex, 'bigtoe');
+  const hasFree = has(kp, free + 'hip', free + 'knee');
+  const f0 = hasFree ? driveOf(kp, free, dir) : NaN;
+  const kT = clampTo(k0, B('kneeTO')), tT = clampTo(t0, B('trunkTO')), fT = hasFree ? clampTo(f0, B('kneeDrive')) : NaN;
+  const toe = P(kp, s + 'bigtoe'), body = ALL.filter(n => n !== s + 'bigtoe');
+  const build = (a, k) => {
+    let o = setKnee(cp(kp), s, k);
+    turn(o, body, toe, rad(a) * dir);
+    o = setTrunk(o, dir, tT);
+    if (hasFree) o = setDrive(o, free, dir, fT);
+    return o;
+  };
+  let best = null;
+  const [klo, khi] = B('kneeTO');
+  const ks = [kT, ...[2, 4, 6, 8, 10, 12, 14].flatMap(d => [kT - d, kT + d])].filter(k => k >= klo - 1e-9 && k <= khi + 1e-9);
+  for (let a = -12; a <= 12; a += 1) for (const k of ks) {
+    const o = build(a, k);
+    const cost = 3 * (outside(hipOf(o, s, dir), B('hipTO')) + outside(inclOf(o, s, dir, sex, 'bigtoe'), B('inclTO'))) + 0.15 * Math.abs(a) + 0.1 * Math.abs(k - kT);
+    if (!best || cost < best.cost) best = { a, k, cost };
+  }
+  // refine around the coarse optimum
+  if (best.cost > 1e-9) for (let a = best.a - 1; a <= best.a + 1 + 1e-9; a += 0.25) for (let k = Math.max(klo, best.k - 2); k <= Math.min(khi, best.k + 2) + 1e-9; k += 0.5) {
+    const o = build(a, k);
+    const cost = 3 * (outside(hipOf(o, s, dir), B('hipTO')) + outside(inclOf(o, s, dir, sex, 'bigtoe'), B('inclTO'))) + 0.15 * Math.abs(a) + 0.1 * Math.abs(k - kT);
+    if (cost < best.cost) best = { a, k, cost };
+  }
+  const out = build(best.a, best.k);
+  const items = [
+    item('kneeTO', 'koleno', k0, kneeOf(out, s), B('kneeTO')),
+    item('hipTO', 'bedro', h0, hipOf(out, s, dir), B('hipTO')),
+    item('trunkTO', 'trup', t0, trunkAngle(out, dir), B('trunkTO')),
+  ];
+  if (hasFree) items.push(item('kneeDrive', 'švih kolena', f0, driveOf(out, free, dir), B('kneeDrive')));
+  const i1 = inclOf(out, s, dir, sex, 'bigtoe');
+  if (Number.isFinite(i0) && Number.isFinite(i1)) items.push(item('inclTO', 'náklon tela', i0, i1, B('inclTO'), true));
+  return { kp: out, items };
+}
+
+// One stance-knee angle with the foot fixed (deepest bend on the board, the penultimate).
+function idealKnee(kp, { s, key, label, target, band }) {
+  if (!kp || !has(kp, s + 'hip', s + 'knee', s + 'ank', 'lsho', 'rsho', 'lhip', 'rhip') || !(viewYaw(kp) <= MAX_YAW)) return null;
+  const k0 = kneeOf(kp, s);
+  const out = setKnee(cp(kp), s, target(k0));
+  return { kp: out, items: [item(key, label, k0, kneeOf(out, s), band)] };
+}
+
+// Landing: knee and hip of the leg that reaches the sand first. The flight path is already set
+// at this point, so the trunk stays where it is and the legs move: the shanks open about the
+// knees (a longer reach), then both legs turn about the hips. Both legs together, as they land.
+const DIST = ['ank', 'heel', 'bigtoe', 'smalltoe'];
+function openKnees(o, s, target) {
+  const other = s === 'l' ? 'r' : 'l';
+  const k0 = kneeOf(o, s);
+  const t = solveTurn(o, DIST.map(n => s + n), P(o, s + 'knee'), q => kneeOf(q, s), target);
+  // the same turn for the other shank, found by its own angle change
+  const dk = kneeOf(t, s) - k0;
+  return has(o, other + 'hip', other + 'knee', other + 'ank') ? solveTurn(t, DIST.map(n => other + n), P(t, other + 'knee'), q => kneeOf(q, other), kneeOf(o, other) + dk) : t;
+}
+// The landing leg turns about its own hip to the target; the other leg by the same angle about its hip.
+function legsAboutHips(o, s, dir, target) {
+  const other = s === 'l' ? 'r' : 'l', leg = f => ['knee', ...DIST].map(n => f + n);
+  const t = solveTurn(o, leg(s), P(o, s + 'hip'), q => hipOf(q, s, dir), target);
+  const ang = q => { const h = P(q, s + 'hip'), k = P(q, s + 'knee'); return Math.atan2(k[1] - h[1], k[0] - h[0]); };
+  if (has(o, other + 'hip', other + 'knee')) turn(t, leg(other), P(t, other + 'hip'), ang(t) - ang(o));
+  return t;
+}
+export function idealLanding(kp, { s, dir, sex = 'male' }) {
+  const g = sex === 'female' ? 'f' : 'm';
+  if (!kp || !has(kp, s + 'hip', s + 'knee', s + 'ank', s + 'sho', 'lsho', 'rsho', 'lhip', 'rhip') || !(viewYaw(kp) <= MAX_YAW)) return null;
+  const k0 = kneeOf(kp, s), h0 = hipOf(kp, s, dir);
+  let out = openKnees(cp(kp), s, clampTo(k0, NORMS.kneeLand[g]));
+  out = legsAboutHips(out, s, dir, clampTo(h0, NORMS.hipLand[g]));
+  return { kp: out, items: [item('kneeLand', 'koleno', k0, kneeOf(out, s), NORMS.kneeLand[g]), item('hipLand', 'bedro', h0, hipOf(out, s, dir), NORMS.hipLand[g])] };
+}
+
+// Every phase frame with a norm-based ideal, from the same track as the numbers. Each entry:
+// { frame, phase, kp, you, items, changed }. Phases without a published pose norm (the flight)
+// have none.
+export function idealsFor(jump, result, sex = 'male') {
   const T = jump?.takeoff;
-  if (!T || !result?.clean) return null;
-  const kp = sharpen(result.clean, jump.fps)[T.td];
-  const id = idealTouchdown(kp, { s: jump.takeoffFoot, dir: jump.dir, sex });
-  return id && { ...id, you: kp, frame: T.td, side: jump.takeoffFoot, dir: jump.dir, changed: id.items.some(it => it.set) };
+  if (!T || !result?.clean) return [];
+  const track = sharpen(result.clean, jump.fps), s = jump.takeoffFoot, dir = jump.dir, g = sex === 'female' ? 'f' : 'm';
+  const by = Object.fromEntries((jump.metrics ?? []).map(m => [m.key, m]));
+  const kf = id => (jump.keyFrames ?? []).find(k => k.id === id)?.frame;
+  const out = [];
+  const add = (phase, frame, id, name) => { if (id && frame != null) out.push({ ...id, phase, name, frame, you: track[frame], changed: id.items.some(it => it.set) }); };
+  // penultimate: the deepest knee bend there, against the bend one step earlier (penKnee)
+  const pk = by.penKnee, pen = jump.pen;
+  if (pk && pk.status !== 'hidden' && pen) {
+    const foot = pen.foot ?? (s === 'l' ? 'r' : 'l');
+    add('pen', pk.frame, idealKnee(track[pk.frame], { s: foot, key: 'penKnee', label: 'koleno v predposlednom', band: null,
+      target: k => k + (pk.value - clampTo(pk.value, NORMS.penKnee[g])) }), 'Predposledný krok');
+  }
+  add('plant', T.td, idealTouchdown(track[T.td], { s, dir, sex }), 'Dotyk na doske');
+  const mf = kf('maxFlex');
+  if (mf != null && by.kneeMin?.status !== 'hidden') add('plant', mf, idealKnee(track[mf], { s, key: 'kneeMin', label: 'najväčší ohyb kolena', band: NORMS.kneeMin[g], target: k => clampTo(k, NORMS.kneeMin[g]) }), 'Najväčší ohyb na doske');
+  add('toeoff', T.to, idealToeoff(track[T.to], { s, dir, sex }), 'Odraz');
+  if (jump.landing != null && track[jump.landing]) {
+    const ld = track[jump.landing], ls = has(ld, 'lank', 'rank') ? (P(ld, 'lank')[1] > P(ld, 'rank')[1] ? 'l' : 'r') : s;
+    add('landing', jump.landing, idealLanding(ld, { s: ls, dir, sex }), 'Dopad');
+  }
+  return out;
+}
+
+// The board touchdown alone (kept for older callers and tests).
+export function idealFor(jump, result, sex = 'male') {
+  return idealsFor(jump, result, sex).find(x => x.frame === jump?.takeoff?.td) ?? null;
 }

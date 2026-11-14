@@ -48,3 +48,34 @@ test('ideal: nothing changes when every angle is already in the norm', () => {
   const id = idealTouchdown(id0.kp, { s: 'l', dir: -1 });
   for (const it of id.items) assert.ok(!it.set || Math.abs(it.ideal - it.you) < 0.6, it.key);
 });
+
+// ---------- the other phases (2026-11-14) ----------
+import { idealLanding, idealToeoff } from '../js/analysis/ideal.js';
+import { NORMS } from '../js/analysis/metrics.js';
+
+test('landing: knee and hip moved into the norms by the legs, the trunk stays, segments kept', () => {
+  const kp = athlete();   // used as a landing pose: left knee ~153° is above 143°, so it bends to 143
+  const id = idealLanding(kp, { s: 'l', dir: -1, sex: 'male' });
+  assert.ok(id);
+  const knee = id.items.find(it => it.key === 'kneeLand');
+  assert.ok(Math.abs(knee.ideal - NORMS.kneeLand.m[1]) < 0.3, `knee ${knee.ideal}`);
+  for (const n of ['lhip', 'rhip', 'lsho', 'rsho', 'nose']) assert.deepEqual([...P(id.kp, n)], [...P(kp, n)]);
+  assert.ok(Math.abs(dist(P(kp, 'lknee'), P(kp, 'lank')) - dist(P(id.kp, 'lknee'), P(id.kp, 'lank'))) < 0.01);
+  assert.ok(Math.abs(dist(P(kp, 'lhip'), P(kp, 'lknee')) - dist(P(id.kp, 'lhip'), P(id.kp, 'lknee'))) < 0.01);
+  const hip = id.items.find(it => it.key === 'hipLand');
+  assert.ok(hip.ideal >= NORMS.hipLand.m[0] - 0.3 && hip.ideal <= NORMS.hipLand.m[1] + 0.3, `hip ${hip.ideal}`);
+});
+
+test('toe-off: every normed angle ends inside its band or as close as the body allows; the toe stays', () => {
+  const kp = athlete();
+  const id = idealToeoff(kp, { s: 'l', dir: -1, sex: 'male' });
+  assert.ok(id);
+  assert.deepEqual([...P(id.kp, 'lbigtoe')], [...P(kp, 'lbigtoe')]);
+  for (const key of ['kneeTO', 'trunkTO']) {
+    const it = id.items.find(x => x.key === key), [lo, hi] = NORMS[key].m;
+    assert.ok(it.ideal >= lo - 0.3 && it.ideal <= hi + 0.3, `${key} ${it.ideal}`);
+  }
+  // nothing already inside its band is moved
+  const again = idealToeoff(id.kp, { s: 'l', dir: -1, sex: 'male' });
+  for (const it of again.items.filter(x => !x.derived)) assert.ok(Math.abs(it.ideal - it.you) < 0.6, `${it.key} moved again`);
+});
