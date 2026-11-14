@@ -98,9 +98,11 @@ export class FrameSource {
     this.job = job;
     this.stats.runs++;
     const it = this.sink.canvases(this.ts[job.from]);
+    let failed = null;
     try {
       for await (const wc of it) {
         if (job.cancelled) break;
+        this.fails = 0;
         const idx = nearestIndex(this.ts, wc.timestamp);
         job.pos = idx;
         this.stats.yielded = (this.stats.yielded || 0) + 1;
@@ -124,9 +126,22 @@ export class FrameSource {
         }
         if (job.cancelled) break;
       }
+    } catch (e) {
+      // iOS refuses a new hardware decoder while others are still open (the loop head's run,
+      // the pose worker) or after the app was in the background: "_createDecoder" rejected,
+      // nothing caught it, and the red error bar came up (Stanley's phone, 2026-11-14). The
+      // player times the frame out and asks again; here the run is retried a few times.
+      failed = e;
     } finally {
-      await it.return?.();
+      try { await it.return?.(); } catch { /* the decoder never opened */ }
       if (this.job === job) this.job = null;
+    }
+    if (failed) {
+      if (this.disposed) return;
+      this.fails = (this.fails ?? 0) + 1;
+      console.warn('frame decode failed, retry', this.fails, failed);
+      if (this.fails <= 4) setTimeout(() => { if (!this.disposed && this.waiters.size && !this.job) this.#ensure(this.#nextWaiter(job.pos)); }, 250 * this.fails);
+      return;
     }
     // Anything still waiting gets a fresh run.
     if (this.waiters.size && !this.job) this.#ensure(this.#nextWaiter(job.pos));
@@ -168,6 +183,7 @@ export class FrameSource {
   }
 
   dispose() {
+    this.disposed = true;
     if (this.job) { this.job.cancelled = true; this.job.wake?.(); }
     for (const b of this.cache.values()) b.close?.();
     this.cache.clear();
