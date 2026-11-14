@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.9.2';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -809,7 +809,7 @@ function drawFreelapMini() {
   const today = freelapView.runs().filter(r => new Date(r.at).toDateString() === new Date().toDateString()).length;
   el.classList.toggle('hidden', !freelapView.listener || (kind !== 'sprint' && !on));
   el.innerHTML = `<div><b>Freelap</b> <span class="${s === 'on' ? 'fl-on' : 'fl-off'}">${s === 'on' ? '● počúva' : s === 'starting' ? 'zapína sa…' : 'vypnutý'}</span>
-    <small>${today ? `${today} ${today === 1 ? 'beh' : today < 5 ? 'behy' : 'behov'} dnes` : 'dnes zatiaľ žiadny beh'} · časy v Histórii</small></div>
+    <small>${today ? `${today} ${today === 1 ? 'beh' : today < 5 ? 'behy' : 'behov'} dnes` : 'dnes zatiaľ žiadny beh'} </small><button class="fl-all" data-fl-mini="list">Všetky časy ›</button></div>
     <button class="btn" data-fl-mini="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>
     ${on ? `<div class="fl-plan"><p class="sp-lb">Ďalšie behy</p>${freelapView.planHtml()}</div>` : ''}`;
 }
@@ -818,6 +818,7 @@ $('fl-mini').addEventListener('click', e => {
   if (freelapView.planEvent(e)) return drawFreelapMini();
   const b = e.target.closest('[data-fl-mini]');
   if (!b) return;
+  if (b.dataset.flMini === 'list') { showTab('history'); return document.querySelector('#hist-filter [data-f="freelap"]').click(); }
   if (b.dataset.flMini === 'start') freelapView.listener.start(); else freelapView.listener.stop();
   setTimeout(drawFreelapMini, 300); setTimeout(drawFreelapMini, 1500);
 });
@@ -977,6 +978,8 @@ window.__analyzePose = (file, opts) => analyzePose(file, () => true, opts);
 // Test hook: runs the cloud flow against a fake job ({ signal, onResult, onProgress }) => Promise.
 window.__followCloud = start => followCloud(runId, start);
 if (TABS.includes(window.__bootTab)) { tab = null; showTab(window.__bootTab); } // tapped before the app had loaded
+// The app starts in a few hundred ms from the phone's own files, which made the splash a flicker.
+// Keep it about a second from launch so it reads as a loading screen.
 const splash = $('splash');
-if (splash) { splash.classList.add('gone'); setTimeout(() => splash.remove(), 300); }
+if (splash) setTimeout(() => { splash.classList.add('gone'); setTimeout(() => splash.remove(), 300); }, Math.max(0, 1000 - performance.now()));
 window.__appReady = true; // index.html shows a red bar if this line is never reached

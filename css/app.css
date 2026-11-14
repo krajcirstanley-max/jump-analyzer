@@ -499,3 +499,6 @@ div.att-open { cursor: default; }
 .splash-in { display: flex; flex-direction: column; align-items: center; gap: 14px; font-size: 28px; }
 .splash-dot { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 0.9.2: way from Tréning to the Freelap list */
+.fl-all { display: block; margin-top: 6px; padding: 6px 0; background: none; border: 0; color: var(--accent); font: inherit; font-size: 15px; font-weight: 600; }
