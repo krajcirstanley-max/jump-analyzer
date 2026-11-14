@@ -9,7 +9,7 @@ import { scoreMetric } from './metrics.js';
 
 // Phases and the measurements that score them (weights: how much each phase counts).
 export const PHASES = [
-  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee', 'stepChange'] },
+  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee', 'stepChange', 'speedKeep'] },
   { id: 'plant', label: 'Plant', weight: 0.35, keys: ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin', 'kneeVel', 'touchdownDist', 'speedLossTO'] },
   { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'freeDrop', 'trunkTO', 'trunkRotBoard', 'toHeight'] },
   { id: 'flight', label: 'Let', weight: 0.05, keys: ['flight', 'peakHeight', 'trunkStability'] },
@@ -214,9 +214,18 @@ const FAULTS = [
     why: 'Skoré zloženie tela do sedu ho rýchlejšie pretočí dopredu a päty spadnú do piesku skôr.',
   },
   {
+    id: 'keepSpeed', tier: 'approach', phase: 'pen', cue: 'zrýchľuj každým krokom do dosky',
+    img: 'Doska sa k tebe blíži s každým krokom rýchlejšie, posledné kroky sú najrýchlejšie z celého rozbehu.',
+    keys: [['speedKeep', 'low', 0.5]],
+    title: 'Udrž rýchlosť až do dosky',
+    take: 'keď rýchlosť z rozbehu udržíš až do dosky, odrazíš sa z vyššej',
+    body: m => `Do dosky prídeš o ${COMMA(Math.abs(m.value).toFixed(0))} % pomalšie, než bežíš úsek 1–11 m. Finalisti rýchlosť do dosky držia.`,
+    why: 'Rýchlosť stratená v posledných krokoch chýba v odraze. Často ju zje hlboké sadnutie v predposlednom kroku.',
+  },
+  {
     id: 'speedLow', tier: 'rest', phase: 'pen', cue: 'zrýchľuj každým krokom do dosky',
     img: 'Doska sa k tebe blíži s každým krokom rýchlejšie, posledné kroky sú najrýchlejšie z celého rozbehu.',
-    keys: [['speedLast', 'low', 0.1], ['speedTD', 'low', 0.1]],
+    keys: [['speedApproach', 'low', 0.1], ['speedLast', 'low', 0.1], ['speedTD', 'low', 0.1]], firstPresent: true,
     title: 'Rýchlejšie do dosky',
     take: 'rýchlejší príchod do dosky ti pridá dĺžku',
     body: m => `Rýchlosť na konci rozbehu ${val(m)}, cieľ je ${norm(m)}. Je to odhad z videa.`,
@@ -277,7 +286,10 @@ function offending(fault, by) {
   // a fault that only counts together with another measurement out of its norm
   if (fault.requires && !fault.requires.every(([k, side]) => by[k] && by[k].status === side)) return [];
   const hits = [];
-  for (const [key, side, margin] of fault.keys) {
+  // firstPresent: judge only by the first of the keys that was measured (approach speed over 1-11 m
+  // when known, the last step otherwise), never by whichever looks worst
+  const keys = fault.firstPresent ? fault.keys.filter(([k]) => by[k] && by[k].status !== 'hidden' && Number.isFinite(by[k].value)).slice(0, 1) : fault.keys;
+  for (const [key, side, margin] of keys) {
     const m = by[key];
     if (!m || m.status !== side || !m.norm || !Number.isFinite(m.value)) continue;
     const miss = side === 'high' ? m.value - m.norm[1] : m.norm[0] - m.value;

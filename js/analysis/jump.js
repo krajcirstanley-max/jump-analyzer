@@ -64,6 +64,7 @@ function withGround(f, g) {
   return {
     ...f, ground: g, scaleSource: 'board', scaleOk: true, scaleWhy: null,
     vxTO: g.vxTO, speedLast: g.speedLast, speedLoss: g.speedLoss, speedLossTO: g.speedLossPct,
+    approach: g.approach ?? NaN, speedKeep: g.approach > 0 ? (g.speedLast / g.approach - 1) * 100 : NaN,
     vxTD: NaN, velocityLoss: NaN,
     // the two lowerings on the leg as measured against the board, same instants as above
     ...lowerings(g, f),
@@ -167,7 +168,7 @@ const pct = k => `${k > 1 ? '+' : '−'}${Math.abs((k - 1) * 100).toFixed(1).rep
 function tapeNote(t) {
   if (!t) return '';
   const m = v => `${v.toFixed(2).replace('.', ',')} m`, where = t.from === 'toe' ? 'od špičky' : 'od dosky';
-  if (t.applied) return ` Mierku spresnilo pásmo: ${pct(t.k)} (video ${m(t.video)} ${where}, pásmo ${m(t.tape)}). Dĺžky krokov, rýchlosti aj výšky sú prepočítané.`;
+  if (t.applied) return ` Pásmo spresnilo rýchlosť v lete o ${pct(t.kFlight)} (video ${m(t.video)} ${where}, pásmo ${m(t.tape)}): nad pieskom nie sú čiary dráhy a video tam meria menej presne. Rozbeh a kroky ostávajú, tie sedia s kužeľmi.`;
   if (t.tooFar) return ` Pásmo sa od videa líši o ${pct(t.k)}, čo je viac, než môže byť chyba mierky. Skôr je zle prečítaná stopa v piesku alebo dopad, preto nič neprepočítavam.`;
   return '';
 }
@@ -229,7 +230,9 @@ export function tapeFix(g, tape, from) {
   const video = ref === 'toe' || !Number.isFinite(g.toeToLine) ? g.jump : g.jump - g.toeToLine;
   if (!(video > 0)) return null;
   const k = tape / video, off = Math.abs(k - 1);
-  return { tape, video: +video.toFixed(3), from: ref, k: +k.toFixed(4), applied: off >= 0.005 && off <= TAPE_MAX, tooFar: off > TAPE_MAX };
+  // the whole gap goes into the flight part (vx × flight time)
+  const flightPart = g.vxTO * g.flightTime, kFlight = flightPart > 0 ? 1 + (tape - video) / flightPart : NaN;
+  return { tape, video: +video.toFixed(3), from: ref, k: +k.toFixed(4), kFlight: +kFlight.toFixed(4), applied: off >= 0.005 && off <= TAPE_MAX && Number.isFinite(kFlight), tooFar: off > TAPE_MAX };
 }
 
 // ts: the clip's real frame timestamps, used when the result doesn't carry a frame rate.
@@ -260,30 +263,29 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const times = ts ?? Array.from({ length: clean.length }, (_, i) => i / fps);
   const air = flightAnalysis(smooth, ev, times, sex, dir, height);
   // Metres from the runway when the server found it; the gravity scale is only the fallback.
-  let ground = result.ground && !air.error ? groundAnalysis(result.ground, smooth, ev, times, sex, height) : null;
+  const ground = result.ground && !air.error ? groundAnalysis(result.ground, smooth, ev, times, sex, height) : null;
+  // Where the video's metres can be wrong (2026-11-14, IMG_4677): not on the runway, where the
+  // Freelap cones came out exactly 10.0 m apart on the board's scale, but in the air over the sand,
+  // where there are no lines and the camera's homography is extrapolated. So the tape corrects only
+  // the flight part (horizontal speed in the air), and the 1-11 m time never rescales anything.
   const fix = ground && !ground.error ? tapeFix(ground, tape, tapeFrom) : null;
-  if (fix?.applied) ground = groundAnalysis(result.ground, smooth, ev, times, sex, height, fix.k);
-  if (fix && ground && !ground.error) ground.tapeFix = fix;
-  // The athlete's typed Freelap time first, else the video's own 1-11 m time between the cones (a
-  // known 10 m, exact frame timing; it only exists when it agrees with the board within 6 %).
-  // IMG_4677: 1.075 s → 9.30 m/s against 8.83 from the board scale; corrected, the jump reads
-  // 6.87 m from the toe against 6.85 m on the tape.
-  const sUse = split ?? ground?.splits?.s1to11 ?? null;
-  const vFree = sUse > 0.8 && sUse < 2.5 ? 10 / sUse : null;
-  if (vFree && ground && !ground.error && !fix?.applied && Number.isFinite(ground.speedLast) && ground.speedLast > 0) {
-    const k = vFree / ground.speedLast;
-    if (Math.abs(k - 1) >= 0.005 && Math.abs(k - 1) <= TAPE_MAX) {
-      ground = groundAnalysis(result.ground, smooth, ev, times, sex, height, k);
-      ground.splitFix = { k: +k.toFixed(4), split: sUse, typed: split != null, video: +(vFree / k).toFixed(2) };
+  if (fix && ground && !ground.error) {
+    ground.tapeFix = fix;
+    if (fix.applied) {
+      const vx0 = ground.vxTO;
+      ground.vxTO = vx0 * fix.kFlight;
+      ground.jump = ground.takeoffDist + ground.vxTO * ground.flightTime + ground.landingReach;
+      ground.speedLoss = ground.vxTO - ground.speedLast;
+      ground.speedLossPct = ((ground.vxTO - ground.speedLast) / ground.speedLast) * 100;
+      const take = ground.steps?.find(st => st.id === 'take'); if (take) take.speed = ground.vxTO;
     }
   }
-  if (vFree && ground && !ground.error) {
-    ground.speedLast = vFree;
-    ground.speedLoss = ground.vxTO - vFree;
-    ground.speedLossPct = ((ground.vxTO - vFree) / vFree) * 100;
-    ground.speedFromFreelap = split ?? null;
-    ground.speedFromCones = split == null ? sUse : null;
-  }
+  // Approach speed over 1-11 m: the athlete's typed Freelap time, else the video's own time between
+  // the cones. It is its own measure, not the last step: IMG_4677 averaged 9.30 m/s over 1-11 m and
+  // then ran its last two steps at 8.47 and 8.83, a slowdown into the board (Berlin 2009 finalists:
+  // last stride / 11-1 m mean 0.998, so the speed is held).
+  const sUse = split > 0.8 && split < 2.5 ? split : ground && !ground.error ? ground.splits?.s1to11 ?? null : null;
+  if (sUse && ground && !ground.error) { ground.approach = 10 / sUse; ground.approachFrom = split ? 'freelap' : 'cones'; }
   const flight = ground && !ground.error ? withGround(air, ground) : air;
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.

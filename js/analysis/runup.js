@@ -59,7 +59,7 @@ export function runupNorm(key, band, n, { pb = null } = {}) {
     case 'kneeTD': return shift(band, at(T.knee, n));
     case 'speedLossTO': case 'velocityLoss': case 'speedLoss':
       return scale(band, at(T.loss, n) * (key === 'speedLossTO' ? 1 : speedFraction(n)));
-    case 'speedTD': case 'speedLast': case 'speedTO': return scale(band, speedFraction(n));
+    case 'speedTD': case 'speedLast': case 'speedTO': case 'speedApproach': return scale(band, speedFraction(n));
     case 'estDistance': {
       const e = expectedDistance(n, pb);
       return e ? [e.lo, e.hi] : scale(band, distanceFraction(n));

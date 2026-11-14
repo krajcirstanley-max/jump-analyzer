@@ -110,7 +110,7 @@ function lengthRowHtml(r) {
   const where = from === 'toe' ? 'od odrazovej špičky' : from === 'board' ? 'od čiary dosky' : 'odhad z videa';
   const tf = r?.tapeFix, pct = k => `${k > 1 ? '+' : '−'}${num(Math.abs((k - 1) * 100), 1)} %`;
   const fixLine = saved == null || !tf || same(saved, video) ? ''
-    : tf.applied ? ` Mierka videa spresnená o ${pct(tf.k)}: kroky, rýchlosti a výšky sú prepočítané.`
+    : tf.applied ? ` Rýchlosť v lete spresnená o ${pct(tf.kFlight ?? tf.k)}: nad pieskom nie sú čiary dráhy, rozbeh a kroky ostávajú.`
     : tf.tooFar ? ` Video ukázalo ${metres(tf.video)}, rozdiel ${pct(tf.k)} je priveľký na chybu mierky. Asi je zle prečítaná stopa v piesku, nič som neprepočítal.` : '';
   const note = saved != null ? (same(saved, video) ? `Potvrdené z videa, ${where}.` : `Zapísané z pásma, ${where}.${fixLine}`)
     : video != null ? `Z videa, ${where}. Potvrď, alebo prepíš dĺžkou z pásma.` : 'Video dĺžku neurčilo. Zapíš ju z pásma.';
@@ -283,7 +283,7 @@ export function whatIfHtml(w) {
   const row = (x, i) => `<div class="wi${i === 0 ? ' pick' : ''}">
       ${i === 0 ? '<span class="wi-tag">Teraz zlepšuj toto</span>' : ''}
       <div class="wi-head"><b>${esc(x.title)}</b><span class="wi-gain">${x.total ? cmText(x.total) : ''}</span></div>
-      <p class="wi-num">${x.freelap ? `Freelap 1–11 m: ${num(x.freelap.now, 2)} → ${num(x.freelap.target, 2)} s` : `${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}`}</p>
+      <p class="wi-num">${x.freelap ? `Freelap 1–11 m: ${num(x.freelap.now, 2)} → ${num(x.freelap.target, 2)} s` : x.numText ? esc(x.numText) : `${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}`}</p>
       ${x.cue ? `<p class="wi-cue">Cue: „${esc(x.cue)}“</p>` : ''}
       ${x.img ? `<p class="wi-img"><b>Predstav si</b>${esc(x.img)}</p>` : ''}
       ${x.effects.length ? `<div class="fx"><span class="fx-l">Z toho</span>${x.effects.map(eff).join('')}

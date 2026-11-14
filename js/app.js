@@ -19,7 +19,7 @@ import { whatIf } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.12.1';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));

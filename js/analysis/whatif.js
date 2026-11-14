@@ -82,6 +82,8 @@ export function whatIf(jump, sex = 'male', { height = null } = {}) {
       // else 10 / speed (Berlin 2009: last stride ≈ 11-1 m mean speed); the target scales with speed.
       // the speed into the board is 10 / the 1-11 m time (typed, cones or board), so the two agree
       it.freelap = { now: 10 / m.value, target: 10 / target };
+      // the norm is for a full run-up until the steps are confirmed (it scales with them, Béres 2014)
+      if (!(jump.runupJudged > 0)) it.note = 'Cieľ je pre plný rozbeh. Potvrď počet krokov a cieľ sa prispôsobí rozbehu.';
     }
     if (id === 'speedLow' && physics) {
       const dvx = band(t => t * miss, COEF.transfer);
@@ -92,6 +94,12 @@ export function whatIf(jump, sex = 'male', { height = null } = {}) {
       }
       E('Uhol odrazu', `${sgn(COEF.anglePerSpeed * miss, 1)}°`, null, 'same');
       E('Strata rýchlosti na doske', `${sgn(COEF.lossPerSpeed * miss, 0)} %`, null, 'same');
+      it.basis = 'fyzika';
+    } else if (id === 'keepSpeed' && physics && fl.approach > 0) {
+      // speed held to the board within the norm: the last step at (1 + edge) × the 1-11 m speed
+      const vTarget = fl.approach * (1 + target / 100), dv = vTarget - fl.speedLast;
+      it.numText = `Rýchlosť do dosky: ${fx(fl.speedLast, 2)} → ${fx(vTarget, 2)} m/s (1–11 m bežíš ${fx(fl.approach, 2)} m/s)`;
+      if (dv > 0) E('Rýchlosť pri odraze', `${sgn(mid(COEF.transfer) * dv, 2)} m/s`, COEF.transfer.map(t => t * dv * T));
       it.basis = 'fyzika';
     } else if (id === 'flat' && physics) {
       // His take-off speed moved along the measured speed-angle curve to the target angle.

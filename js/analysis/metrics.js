@@ -108,6 +108,10 @@ export const NORMS = {
   // 7.48 vs 7.26 m): degrees it has already fallen from its peak by toe-off when that peak came
   // more than 20 ms early.
   freeDrop: { label: 'Pokles švihového stehna pred odrazom', unit: '°', m: [0, 5], f: [0, 5] },
+  // 1-11 m approach speed (Freelap or the video's cones) and how much of it reaches the board.
+  // Berlin 2009: the 11-1 m photocell mean ≈ the last stride (ratio 0.998 ± 0.010, 0.98-1.01).
+  speedApproach: { label: 'Rýchlosť 1–11 m', unit: 'm/s', m: [10.17, 10.78], f: [9.07, 9.59], good: 'high' },
+  speedKeep: { label: 'Rýchlosť do dosky oproti 1–11 m', unit: '%', m: [-2, 2], f: [-2, 2] },
   speedLast: { label: 'Rýchlosť z predposledného do odrazu', unit: 'm/s', m: [10.17, 10.78], f: [9.07, 9.59], good: 'high' },
   // WA 2017 Table 7, horizontal CM velocity at take-off.
   speedTO: { label: 'Rýchlosť pri odraze', unit: 'm/s', m: [7.82, 9.56], f: [7.2, 8.98], good: 'high' },
@@ -226,6 +230,8 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('velocityLoss', f.velocityLoss, ev.takeoff.to),
     row('vyTO', f.vyTO, ev.takeoff.to),
     row('speedLast', f.speedLast, ev.pen?.td ?? null),
+    row('speedApproach', f.approach, ev.pen?.td ?? null),
+    row('speedKeep', f.speedKeep, ev.pen?.td ?? null),
     row('speedTO', f.vxTO, ev.takeoff.to),
     row('speedLoss', f.speedLoss, ev.takeoff.to),
     row('hipDrop', f.hipDrop, f.hipDropFrame),
