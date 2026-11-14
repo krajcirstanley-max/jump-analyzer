@@ -478,3 +478,24 @@ div.att-open { cursor: default; }
 .trend-spark polyline { fill: none; stroke-width: 2; stroke: #1d9e75; } .trend-spark circle { fill: #1d9e75; }
 .t-p .trend-spark polyline { stroke: #3c3489; } .t-p .trend-spark circle { fill: #3c3489; }
 .t-o .trend-spark polyline { stroke: #ba7517; } .t-o .trend-spark circle { fill: #ba7517; }
+
+/* 0.9.0: run types, run detail, sprint video, splash */
+.fl-rep[data-fl="open"] { cursor: pointer; }
+.fl-type { color: var(--text); font-weight: 600; }
+.fl-type.auto { color: var(--muted); font-weight: 400; }
+.fl-vid { color: var(--accent); font-weight: 600; }
+.fl-plan { margin-top: 10px; }
+.fl-plan .sp-lb { margin: 0 0 6px; }
+.fl-mini { flex-wrap: wrap; }
+.fl-mini .fl-plan { flex-basis: 100%; }
+.fl-steps { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin-top: 4px; }
+.fl-steps select { font: inherit; font-size: 16px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card, #fff); color: var(--text); }
+.fl-detail .filt { margin-top: 6px; }
+.fl-detail .note { margin-top: 10px; }
+.sp-vbox video { width: 100%; max-height: 70vh; border-radius: 12px; background: #000; display: block; }
+.sp-rate { margin: 8px 0 0; }
+#splash { position: fixed; inset: 0; z-index: 90; background: var(--bg); display: grid; place-items: center; transition: opacity .25s; }
+#splash.gone { opacity: 0; pointer-events: none; }
+.splash-in { display: flex; flex-direction: column; align-items: center; gap: 14px; font-size: 28px; }
+.splash-dot { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

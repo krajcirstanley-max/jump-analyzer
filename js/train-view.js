@@ -85,9 +85,14 @@ export function trendsHtml({ who, name, runs, attempts, rsi }) {
   const score = byDay(attempts.map(r => ({ at: Date.parse(r.recordedAt || r.analysedAt), v: r.score })), false);
   const rsiDays = byDay(rsi.filter(x => x.who === who).flatMap(({ rec }) => (rec.jumps ?? []).map(j => ({ at: Date.parse(rec.at), v: j.rsi }))), false);
   const vert = byDay(rsi.filter(x => x.who === who && !(x.rec.jumps ?? []).length).flatMap(({ rec }) => (rec.standing ?? []).map(j => ({ at: Date.parse(rec.at), v: j.heightCm }))), false);
+  // Run-ups: the last 10 m before the board, one card per number of steps.
+  const ups = runs.filter(r => r.who === who && modeOfRun(r) === 'rozbeh' && r.legs?.length);
+  const upCards = [...new Set(ups.map(r => r.steps ?? 0))].sort((a, b) => b - a).map(n =>
+    trendCard(`Rozbeh${n ? ` ${n} krokov` : ''} · posledných 10 m`, byDay(ups.filter(r => (r.steps ?? 0) === n).map(r => ({ at: r.at, v: r.legs.at(-1) })), true), { unit: 's', lowerBetter: true }));
   const cards = [
     trendCard('Letmá desiatka (najlepšia z dňa)', fly, { unit: 's', lowerBetter: true }),
     trendCard('0–10 m z rúk', acc, { unit: 's', lowerBetter: true }),
+    ...upCards,
     trendCard('Skóre techniky skoku', score, { dp: 0, color: 'p' }),
     trendCard('RSI (najlepšie z dňa)', rsiDays, { color: 'o' }),
     trendCard('Výskok z miesta', vert, { unit: 'cm', dp: 1, color: 'o' }),

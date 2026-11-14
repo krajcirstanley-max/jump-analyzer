@@ -236,6 +236,8 @@ async function removeMedia(id) {
 
 // A clip held for a server job the app may have to resume after being closed.
 export const storeClip = (id, clip) => putMedia(id, 'clip', clip);
+export const deleteMedia = id => removeMedia(id);
+export const loadClip = id => getMedia(id, 'clip');
 export async function dropIfOrphan(id) {
   if (!(await getAttempt(id))) await removeMedia(id);
 }

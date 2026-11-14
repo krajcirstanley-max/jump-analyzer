@@ -10,6 +10,7 @@
     d.style.cssText = 'position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top) + 8px);z-index:99;margin:0;padding:10px;border-radius:10px;background:#a32d2d;color:#fff;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;max-height:45vh;overflow:auto';
     d.textContent = (d.textContent ? d.textContent + '\n' : 'Chyba appky (pošli screenshot):\n') + m;
     (document.body || document.documentElement).appendChild(d);
+    document.getElementById('splash')?.remove();   // never leave the app hidden behind it
   };
   addEventListener('error', e => show(`${e.message} @ ${String(e.filename).split('/').pop()}:${e.lineno}:${e.colno}`));
   addEventListener('unhandledrejection', e => show(`promise: ${e.reason?.stack || e.reason?.message || e.reason}`));
@@ -37,6 +38,8 @@
   <button class="gear" id="gear" aria-label="Nastavenia"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
 </header>
 
+<!-- Covers the screen until the app has loaded (Stanley 2026-11-14), so nothing looks tappable before it works -->
+<div id="splash" aria-hidden="true"><div class="splash-in"><b>Skok</b><span class="splash-dot"></span></div></div>
 <main>
   <!-- Tréning: what you're doing, film or upload, Freelap, today's analyses -->
   <section class="view" id="view-train">
@@ -85,7 +88,7 @@
   </section>
 
   <!-- Detail of a sprint or an RSI analysis -->
-  <section class="view hidden" id="view-detail"><div class="stack" id="sprint"></div><div class="stack" id="rsi"></div></section>
+  <section class="view hidden" id="view-detail"><div class="stack hidden" id="fl-run"></div><div class="stack" id="sprint"></div><div class="stack" id="rsi"></div></section>
 
   <!-- Výsledok -->
   <section class="view hidden" id="view-result">

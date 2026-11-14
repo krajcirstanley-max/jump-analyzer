@@ -57,6 +57,9 @@ test('the Freelap run filmed is the one heard during the clip', () => {
   assert.equal(pairRun(runs, { recordedAt: null }), null);
   assert.equal(modeOfRun({ legs: [1.99, 1.30] }), 'accel');
   assert.equal(modeOfRun({ legs: [1.04, 1.01] }), 'fly');
+  assert.equal(modeOfRun({ legs: [1.04, 1.01], type: 'rozbeh' }), 'rozbeh');   // set by hand wins
+  assert.equal(modeOfRun({ legs: [1.99, 1.30], type: 'fly' }), 'fly');
+  assert.equal(analyzeSprint({ steps: [] }, { legs: [1.1, 1.0], type: 'rozbeh' }).kind, 'fly');   // run-up analysed like a fly
 });
 
 test('the speed curve goes through the split times', () => {

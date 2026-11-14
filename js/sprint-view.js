@@ -24,9 +24,10 @@ try { // keep the analyses made under the old key, drop whatever else was there
   if (Array.isArray(old) && !localStorage.getItem('jump.sprint.analyses')) localStorage.setItem('jump.sprint.analyses', JSON.stringify(old.filter(r => r?.id && Array.isArray(r.video?.steps))));
 } catch { /* storage blocked or not a list */ }
 const load = () => { try { const v = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(v) ? v.filter(r => r?.id && Array.isArray(r.video?.steps)) : []; } catch { return []; } };
-const store = v => { try { localStorage.setItem(KEY, JSON.stringify(v.slice(0, 60))); } catch { /* storage blocked */ } };
+const MAX = 60;
+const store = v => { try { localStorage.setItem(KEY, JSON.stringify(v.slice(0, MAX))); } catch { /* storage blocked */ } };
 const FOOT = { l: 'L', r: 'P' };
-const KIND = { accel: 'akcelerácia', fly: 'letmých' };
+const KIND = { accel: 'akcelerácia', fly: 'letmých', rozbeh: 'rozbeh' };
 const LATENCY = 0.2; // s from the chip crossing the last cone to the phone hearing it (SprintOverlay, a guess until measured)
 const CHIPS_BY_NAME = athletes => Object.fromEntries(Object.entries(athletes).map(([id, a]) => [a.name, id]));
 
@@ -102,7 +103,8 @@ function profileHtml(runs, athletes) {
 
 export function resultHtml(rec, a, run, runs, athletes) {
   const name = esc(athletes[a.who]?.name ?? '');
-  const title = `${name}${name ? ' · ' : ''}${KIND[a.kind]}${a.distance ? ` ${a.distance} m` : ''}`;
+  const what = run?.type === 'rozbeh' ? `rozbeh${run.steps ? ` ${run.steps} krokov` : ''}` : `${KIND[a.kind]}${a.distance ? ` ${a.distance} m` : ''}`;
+  const title = `${name}${name ? ' · ' : ''}${what}`;
   const best = a.kind === 'accel' && run ? Math.min(...runs.filter(r => r.who === a.who && r.legs?.length >= 2 && modeOfRun(r) === 'accel').map(r => r.legs[0])) : null;
   const legCards = (a.legStats ?? []).map((l, i) => `<div class="sp-cd"><p class="sp-lb">${a.kind === 'accel' ? `${i * 10}–${i * 10 + 10} m` : `${i + 1}. desiatka`}</p><p class="sp-big">${n2(l.time)}</p>
     <p class="sp-lb">${a.kind === 'accel' ? `${n1(l.steps)} kroku · ${n2(l.stepLength)} m` : `${n1(l.speed)} m/s · krok ${n2(l.stepLength)} m`}</p></div>`).join('');
@@ -119,7 +121,7 @@ export function resultHtml(rec, a, run, runs, athletes) {
   const split = a.kind === 'fly' && a.contact && a.flight ? Math.round((100 * a.contact) / (a.contact + a.flight)) : null;
   const overview = `<section class="card sp-card"><p class="sp-bar-top"><span>Šprint</span><span>${rec.at ? esc(when(rec.at)) : ''}</span></p>
     <h2>${title}</h2>
-    <p class="sp-chips"><button class="sp-chip" data-sp-kind="${a.kind === 'accel' ? 'fly' : 'accel'}">${a.kind === 'accel' ? 'Akcel' : 'Fly'} ⇄</button>${a.legs.length ? `<span class="sp-chip">${a.legs.length} úseky × 10 m</span>` : ''}${a.kind === 'accel' && rec.video.start?.estimated ? '<span class="sp-note">štart z rúk</span>' : ''}</p>
+    <p class="sp-chips">${run ? '' : `<button class="sp-chip" data-sp-kind="${a.kind === 'accel' ? 'fly' : 'accel'}">${a.kind === 'accel' ? 'Akcel' : 'Fly'} ⇄</button>`}${a.legs.length ? `<span class="sp-chip">${a.legs.length} úseky × 10 m</span>` : ''}${a.kind === 'accel' && rec.video.start?.estimated ? '<span class="sp-note">štart z rúk</span>' : ''}</p>
     ${run ? `<div class="sp-g2">${legCards}</div>` : `<p class="banner warn">K videu sa nenašiel čas z Freelapu. Bez neho sú tu len kroky, kontakty a frekvencia.</p>`}
     <div class="sp-g3">${trio.map(([l, v, u]) => `<div class="sp-cd"><p class="sp-lb">${l}</p><p class="sp-mid">${v}</p><p class="sp-lb">${u}</p></div>`).join('')}</div>
     ${split != null ? `<div class="sp-cd"><p class="sp-lb">Jeden krok · ${n3(a.stepTime)} s</p><div class="sp-split"><span style="width:${split}%"></span></div><p class="sp-lb">na zemi ${split} % · vo vzduchu ${100 - split} %</p></div>` : ''}
@@ -133,14 +135,19 @@ export function resultHtml(rec, a, run, runs, athletes) {
   const steps = `<section class="card sp-card"><p class="sp-bar-top"><span>Kroky</span><span>${a.steps.length} krokov${a.distance ? ` do ${a.distance} m` : ''}</span></p><h2>Každý krok</h2>
     <p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let</p>${stepsHtml(a)}${shorter}${sidesHtml(a)}
     <p class="sp-lb">${a.kind === 'accel' && a.fit ? 'Dĺžky krokov 1–4 ±0,15 m, od 5. ±0,05 m. ' : ''}Zem a let ±0,01 s.</p></section>`;
-  return overview + curve + steps + profileHtml(runs, athletes);
+  const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox" data-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
+    <div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div></section>`
+    : '<section class="card sp-card"><p class="note">Video sa k rozboru ukladá od verzie 0.9. Pri starších rozboroch ostalo len vo Fotkách.</p></section>';
+  return video + overview + curve + steps + profileHtml(runs, athletes);
 }
 
 // ---------- Tab ----------
 // bare: the app's Tréning tab owns the buttons and the list; this root then shows only the open
 // analysis (the detail screen). onProgress(text) and onDone(rec) report back to it.
-export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera(), bare = false, onProgress = () => {}, onDone = () => {} }) {
+export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
+  saveClip = null, loadClip = null, dropClip = null }) {
   let unsub = null, last = '', busy = false, progress = '', current = null;
+  let clipUrl = null, clipId = null, clipP = null;   // the open analysis's video as an object URL
   const say = t => { progress = t; onProgress(t); };
 
   const name = r => (r.who ? athletes[r.who]?.name : null) ?? r.chip ?? '';
@@ -188,7 +195,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     const all = runs();
     const run = rec.runKey ? all.find(r => r.key === rec.runKey) ?? rec.run ?? null : null;
     const who = run?.who ?? rec.who ?? rec.video.who?.id ?? getAthlete()?.id ?? null;
-    const a = analyzeSprint(rec.video, run, { mode: rec.mode ?? null, who });
+    const a = analyzeSprint(rec.video, run, { mode: run ? null : rec.mode ?? null, who });
     return { a, run, html: resultHtml(rec, a, run, all, athletes) };
   }
 
@@ -213,7 +220,14 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         run = runs().find(r => r.key === t.key) ?? { key: t.key, lap: t.lap, legs: t.legs, who: CHIPS_BY_NAME(athletes)[t.name] ?? who ?? null, at: video.recordedAt + t.arrived * 1000 };
       } else run = pairRun(runs(), video, null);
       const rec = { id: `sp${Date.now()}`, at: video.recordedAt ?? Date.now(), video, runKey: run?.key ?? null, run: run ?? null, who: run?.who ?? result.who?.id ?? me.id ?? null, mode: null };
-      const list = load(); list.unshift(rec); store(list);
+      const list = load(); list.unshift(rec);
+      for (const old of list.slice(MAX)) if (old.hasClip) dropClip?.(old.id);
+      store(list);
+      // The clip stays with its analysis, to watch it next to the numbers (Stanley 2026-11-14).
+      if (saveClip) saveClip(rec.id, file).then(() => {
+        const l = load(), x = l.find(r => r.id === rec.id);
+        if (x) { x.hasClip = true; store(l); if (current === rec.id) draw(); }
+      }).catch(() => {});
       current = rec.id; say('');
       onDone(rec);
     } catch (err) {
@@ -225,7 +239,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   function draw() {
     const list = load(), rec = list.find(r => r.id === current);
-    if (bare) { root.innerHTML = rec ? view(rec).html : ''; return; }
+    if (bare) { root.innerHTML = rec ? view(rec).html : ''; attachClip(rec); return; }
     const head = `
       <div class="card sp-go">
         <div class="sp-btns">
@@ -243,10 +257,35 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       return `<li><button class="sp-item${r.id === current ? ' on' : ''}" data-sp-open="${esc(r.id)}"><b>${esc(who)} · ${KIND[k]}${r.run ? ` ${r.run.legs.length * 10} m · ${n2(r.run.lap)}` : ''}</b><small>${esc(when(r.at))}</small></button></li>`;
     }).join('')}</ul></div>` : '';
     root.innerHTML = head + body + past;
+    attachClip(rec);
+  }
+
+  async function attachClip(rec) {
+    const box = root.querySelector('[data-clip]');
+    if (!rec?.hasClip || !box || !loadClip) return;
+    if (clipId !== rec.id) {
+      if (clipUrl) URL.revokeObjectURL(clipUrl);
+      clipUrl = null; clipId = rec.id;
+      clipP = loadClip(rec.id).catch(() => null).then(blob => {
+        if (clipId === rec.id) clipUrl = blob ? URL.createObjectURL(blob) : null;
+      });
+    }
+    await clipP;
+    if (clipId !== rec.id) return;
+    const now = root.querySelector(`[data-clip="${CSS.escape(rec.id)}"]`);
+    if (!now) return;
+    now.innerHTML = clipUrl ? `<video src="${clipUrl}" controls playsinline muted preload="metadata"></video>` : '<p class="note">Video sa nenašlo v telefóne.</p>';
   }
 
   root.addEventListener('click', e => {
     if (e.target.closest('[data-sp="film"]')) return film();
+    const rt = e.target.closest('[data-rate]');
+    if (rt) {
+      const v = root.querySelector('.sp-vbox video');
+      if (v) { v.playbackRate = +rt.dataset.rate; v.defaultPlaybackRate = +rt.dataset.rate; }
+      root.querySelectorAll('[data-rate]').forEach(x => x.classList.toggle('on', x === rt));
+      return;
+    }
     const o = e.target.closest('[data-sp-open]');
     if (o) { current = o.dataset.spOpen === current ? null : o.dataset.spOpen; draw(); root.scrollIntoView?.({ behavior: 'smooth' }); return; }
     const k = e.target.closest('[data-sp-kind]');
@@ -272,7 +311,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const contact = steps.length ? steps.reduce((a, x) => a + (x.contact ?? 0), 0) / steps.length : null;
       return {
         kind: 'sprint', id: rec.id, at: rec.at, who,
-        title: `${athletes[who]?.name ?? ''}${who ? ' · ' : ''}${k === 'accel' ? 'akcel' : 'letmých'}${run ? ` ${run.legs.length * 10} m` : ''}`,
+        title: `${athletes[who]?.name ?? ''}${who ? ' · ' : ''}${k === 'rozbeh' ? `rozbeh${run?.steps ? ` ${run.steps} kr.` : ''}` : `${k === 'accel' ? 'akcel' : 'letmých'}${run ? ` ${run.legs.length * 10} m` : ''}`}`,
         sub: run ? run.legs.map(n2).join(' + ') : `zem ${contact != null ? n3(contact) : '–'} s · bez Freelapu`,
         value: run ? n2(run.lap) : `${steps.length}`, valueSub: run ? 's' : 'krokov',
       };

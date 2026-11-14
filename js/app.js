@@ -18,7 +18,7 @@ import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotific
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.9.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -73,14 +73,21 @@ const rsiView = initRsi({
 });
 
 // Freelap tab: Start listens for the chips, Stop takes nothing in.
-const freelapView = initFreelap({ root: document.getElementById('freelap'), athletes: ATHLETES });
+const freelapView = initFreelap({
+  root: document.getElementById('freelap'), athletes: ATHLETES, detailRoot: document.getElementById('fl-run'),
+  onOpen: key => openRun(key),
+  onChange: () => { sprintView.shown(); refreshFeeds(); drawFreelapMini(); },
+});
 // Sprint tab: film in the app; Freelap runs heard while filming go onto the video.
 const sprintView = initSprint({
   root: document.getElementById('sprint'), athletes: ATHLETES, freelap: freelapView, bare: true,
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
   onProgress: t => trainProgress(t),
   onDone: rec => { refreshFeeds(); openDetail('sprint', rec.id); },
+  saveClip: hist.storeClip, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
 });
+const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
+freelapView.setLinker(sprintOfRun);
 
 // Blank clears the field; anything outside a plausible jump is ignored.
 function parseMetres(s) {
@@ -803,9 +810,12 @@ function drawFreelapMini() {
   el.classList.toggle('hidden', !freelapView.listener || (kind !== 'sprint' && !on));
   el.innerHTML = `<div><b>Freelap</b> <span class="${s === 'on' ? 'fl-on' : 'fl-off'}">${s === 'on' ? '● počúva' : s === 'starting' ? 'zapína sa…' : 'vypnutý'}</span>
     <small>${today ? `${today} ${today === 1 ? 'beh' : today < 5 ? 'behy' : 'behov'} dnes` : 'dnes zatiaľ žiadny beh'} · časy v Histórii</small></div>
-    <button class="btn" data-fl-mini="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>`;
+    <button class="btn" data-fl-mini="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>
+    ${on ? `<div class="fl-plan"><p class="sp-lb">Ďalšie behy</p>${freelapView.planHtml()}</div>` : ''}`;
 }
+$('fl-mini').addEventListener('change', e => { if (freelapView.planEvent(e)) drawFreelapMini(); });
 $('fl-mini').addEventListener('click', e => {
+  if (freelapView.planEvent(e)) return drawFreelapMini();
   const b = e.target.closest('[data-fl-mini]');
   if (!b) return;
   if (b.dataset.flMini === 'start') freelapView.listener.start(); else freelapView.listener.stop();
@@ -836,9 +846,22 @@ $('hist-filter').addEventListener('click', e => {
 
 // A row opens its detail screen.
 function openDetail(k, id, who) {
+  const runKey = k === 'sprint' ? sprintView.records().find(r => r.id === id)?.runKey : null;
+  $('fl-run').classList.toggle('hidden', !(runKey && freelapView.openRun(runKey)));
   $('sprint').classList.toggle('hidden', k !== 'sprint');
   $('rsi').classList.toggle('hidden', k !== 'rsi');
   if (k === 'sprint') sprintView.open(id); else rsiView.open(id, who);
+  tabScroll.detail = 0;
+  showTab('detail');
+  scrollTo(0, 0);
+}
+// A Freelap time opens its run, with the video and the analysis when one goes with it.
+function openRun(key) {
+  const id = sprintOfRun(key);
+  if (id) return openDetail('sprint', id);
+  $('fl-run').classList.toggle('hidden', !freelapView.openRun(key));
+  $('sprint').classList.add('hidden');
+  $('rsi').classList.add('hidden');
   tabScroll.detail = 0;
   showTab('detail');
   scrollTo(0, 0);
@@ -954,4 +977,6 @@ window.__analyzePose = (file, opts) => analyzePose(file, () => true, opts);
 // Test hook: runs the cloud flow against a fake job ({ signal, onResult, onProgress }) => Promise.
 window.__followCloud = start => followCloud(runId, start);
 if (TABS.includes(window.__bootTab)) { tab = null; showTab(window.__bootTab); } // tapped before the app had loaded
+const splash = $('splash');
+if (splash) { splash.classList.add('gone'); setTimeout(() => splash.remove(), 300); }
 window.__appReady = true; // index.html shows a red bar if this line is never reached

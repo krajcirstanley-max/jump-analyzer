@@ -120,7 +120,10 @@ export function pairRun(runs, video, who = null) {
 }
 
 // A standing start makes the first 10 m far slower than the next; a fly keeps them close.
-export const modeOfRun = run => (run?.legs?.length >= 2 && run.legs[0] > 1.35 * run.legs[1] ? 'accel' : 'fly');
+// A type set by hand on the Freelap list wins (Stanley 2026-11-14): a long-jump run-up ('rozbeh')
+// looks like a fly from its splits alone, so only he can say it was one.
+export const modeOfRun = run => (['accel', 'fly', 'rozbeh'].includes(run?.type) ? run.type
+  : run?.legs?.length >= 2 && run.legs[0] > 1.35 * run.legs[1] ? 'accel' : 'fly');
 
 // Mono-exponential speed from a standing start: v = vmax (1 - e^(-t/tau)), the usual sprint
 // model. t counts from a virtual onset r seconds before the Touch Pro release; the chip starts d0
@@ -185,7 +188,8 @@ const sidesOf = steps => {
 // Everything the result screens show. video = the server's result, run = the Freelap run (or null).
 export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
   const all = video.steps.filter(s => s.contact != null);
-  const kind = mode ?? (run ? modeOfRun(run) : video.modeGuess);
+  const k0 = mode ?? (run ? modeOfRun(run) : video.modeGuess);
+  const kind = k0 === 'rozbeh' ? 'fly' : k0;   // a run-up is analysed like a fly: steady steps at the end
   const legs = run?.legs ?? [];
   const out = { kind, distance: legs.length ? legs.length * 10 : null, legs, who };
 
