@@ -11,7 +11,7 @@ import { CHIPS } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { legsFormHtml, readLegs } from './freelap-view.js';
 import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
-import { analyzeSprint, pairRun, modeOfRun, runMetres } from './analysis/sprint.js';
+import { analyzeSprint, pairRun, modeOfRun, runMetres, SPRINT_ALGO } from './analysis/sprint.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = x => (x == null ? '–' : Number(x).toFixed(2).replace('.', ','));
@@ -166,8 +166,12 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   // Filmed here: the clean clip (no ring over the feet) goes for analysis at once, paired with the
   // run the recorder heard when Freelap was on. One at a time; filming can go on meanwhile.
-  const queue = [];
+  // Uploads go one at a time, but the next one starts as soon as the last is on the server, not
+  // when its analysis ends (2026-11-15: a run waited up to 5 minutes behind the one before).
+  const queue = [], started = new Set();
   async function autoAnalyze(d) {
+    if (started.has(d.raw)) return;
+    started.add(d.raw);
     queue.push(d);
     if (queue.length > 1) return;
     while (queue.length) {
@@ -176,10 +180,26 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         const src = globalThis.Capacitor?.convertFileSrc?.(job.raw) ?? job.raw;
         const blob = await (await fetch(src)).blob();
         const file = new File([blob], 'sprint.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() });
-        await upload(file, job);
+        let onServer;
+        const sent = new Promise(res => { onServer = res; });
+        const done = upload(file, job, null, onServer);
+        await Promise.race([sent, done]);
       } catch (e) { say(`Rozbor natočeného videa zlyhal: ${e?.message ?? e}`); draw(); }
       queue.shift();
     }
+  }
+  // The times the camera heard, when they come after the upload began: onto the waiting record.
+  function timesHeard(d) {
+    const l = load(), x = l.find(r => r.filmed?.raw === d.raw);
+    if (!x || !d.times?.length) return;
+    x.filmed = { ...x.filmed, times: d.times, freelap: d.freelap !== false };
+    if (!x.run && d.freelap !== false) {
+      const t = d.times[0];
+      x.run = runs().find(r => r.key === t.key) ?? cleanLegs({ key: t.key, lap: t.lap, legs: t.legs ?? [], who: CHIPS_BY_NAME(athletes)[t.name] ?? null });
+      x.runKey = x.run.key; x.who = x.run.who ?? x.who;
+    }
+    store(l);
+    if (current === x.id) draw();
   }
 
   if (cam) {
@@ -190,8 +210,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       if (d.freelap !== false && d.times?.length && freelap?.addHeard) {
         for (const t of d.times) freelap.addHeard({ key: t.key, chip: String(t.key).split(':')[0], who: CHIPS_BY_NAME(athletes)[t.name] ?? null, lap: t.lap, legs: t.legs, raw: t.raw ?? null, at: (d.recordedAt ?? Date.now()) + (t.arrived ?? 0) * 1000 });
       }
-      if (d.raw && cloudReady()) autoAnalyze(d); // with or without Freelap: without it, steps and contacts only
+      if (d.raw && cloudReady()) { timesHeard(d); autoAnalyze(d); } // with or without Freelap: without it, steps and contacts only
     });
+    // Sprint: the clip as filmed, at Stop: the upload starts before the save to Photos.
+    cam.on('recorded', d => { if (d.mode === 'sprint' && d.raw && cloudReady()) autoAnalyze(d); });
     cam.on('closed', () => { unsub?.(); unsub = null; draw(); });
   }
 
@@ -216,7 +238,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   // The run's record exists from the start (pending), with its clip, so the video plays at once.
   const patch = (id, f) => { const l = load(), x = l.find(r => r.id === id); if (x) { f(x); store(l); } return x; };
-  async function upload(file, filmed = null, retryId = null) {
+  async function upload(file, filmed = null, retryId = null, onServer = null, fresh = false) {
     if (busy && !filmed && !retryId) return;
     if (!cloudReady()) { say('Najprv ulož prístupový kľúč v nastaveniach.'); draw(); return; }
     busy = true; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…');
@@ -227,7 +249,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const at = filmed?.recordedAt ?? file.lastModified ?? Date.now();
       // what the recorder heard stays on the record, so a retry pairs the run the same way
       const pend = { id: `sp${Date.now()}`, at, pending: true, stage: 'Nahrávam video', video: null, run: run0, runKey: run0?.key ?? null, who: run0?.who ?? getAthlete()?.id ?? null, mode: null,
-        filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null, freelap: filmed.freelap !== false } : null };
+        filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null, freelap: filmed.freelap !== false, raw: filmed.raw ?? null } : null };
       const l = load(); l.unshift(pend);
       for (const old of l.slice(MAX)) if (old.hasClip) dropClip?.(old.id);
       store(l.slice(0, MAX));
@@ -243,7 +265,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const me = getAthlete() ?? {};
       const { result } = await analyzeInCloud(file, {
         sex: me.sex, name: me.name, height: me.height, mode: 'sprint', athletes: await roster(),
-        clip: pid, onJob: jobId => patch(pid, x => { x.jobId = jobId; }),
+        clip: pid, fresh, onJob: jobId => { patch(pid, x => { x.jobId = jobId; }); onServer?.(); },
         onProgress: p => {
           const t = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`;
           if (t === lastStage) return;
@@ -256,8 +278,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         },
       });
       if (result?.error) throw new CloudError(result.error);
-      const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
+      const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, algo: result.algo ?? 1, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
       let run = null;
+      // the times may have come in after the upload began: the record has the latest
+      filmed = load().find(r => r.id === pid)?.filmed ?? filmed;
       if (filmed && filmed.freelap === false) run = null;   // Freelap was off: no times, none paired later
       else if (filmed?.times?.length) {
         // the run the recorder heard: the athlete's own when two ran, else the first
@@ -266,6 +290,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         video.finishAt = +(t.arrived - LATENCY).toFixed(3);
         run = runs().find(r => r.key === t.key) ?? cleanLegs({ key: t.key, lap: t.lap, legs: t.legs, who: CHIPS_BY_NAME(athletes)[t.name] ?? who ?? null, at: video.recordedAt + t.arrived * 1000 });
       } else run = pairRun(runs(), video, null);
+      // run again: the run already paired and the finish already heard stay as they were
+      const old = load().find(r => r.id === pid);
+      if (video.finishAt == null && old?.video?.finishAt != null) video.finishAt = old.video.finishAt;
+      if (retryId && old?.runKey && !(filmed?.times?.length)) run = runs().find(r => r.key === old.runKey) ?? old.run ?? run;
       // the pending record becomes the analysis; its clip is already stored under the same id
       const off = filmed?.freelap === false || x0?.filmed?.freelap === false;
       const rec = patch(pid, x => Object.assign(x, { at: video.recordedAt ?? x.at, video, runKey: off ? null : run?.key ?? x.runKey ?? null, run: off ? null : run ?? x.run ?? null, noFreelap: off || undefined, jobId: undefined, who: run?.who ?? x.run?.who ?? result.who?.id ?? me.id ?? null, pending: false, stage: null, error: null, filmed: null }));
@@ -396,7 +424,21 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       if (!(await retry(id))) patch(id, x => { x.error = 'Video sa v telefóne nenašlo.'; });
     }
   }
-  if (cloudReady()) setTimeout(resumeAll, 1500); else { const l = load(); let ch = false; for (const r of l) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila. Video je uložené, skús znova.'; ch = true; } if (ch) store(l); }
+  // Analyses made with an older contact rule, from the last three days and with their clip in the
+  // phone, go to the server once more (2026-11-15: the new rule finds the far steps the old one
+  // lost). The old numbers stay on screen until the new ones land.
+  async function rerunOld() {
+    const since = Date.now() - 3 * 86400_000;
+    const ids = load().filter(r => !r.pending && r.hasClip && r.video && (r.video.algo ?? 1) < SPRINT_ALGO && r.at >= since && !r.rerun).map(r => r.id);
+    for (const id of ids) {
+      patch(id, x => { x.rerun = SPRINT_ALGO; });
+      const r0 = load().find(r => r.id === id), blob = await loadClip?.(id).catch(() => null);
+      if (!blob) continue;
+      const file = new File([blob], 'sprint.mov', { type: blob.type || 'video/quicktime', lastModified: r0.at ?? Date.now() });
+      await upload(file, r0.filmed ?? (r0.run ? { times: null, recordedAt: r0.video.recordedAt ?? r0.at, freelap: true } : null), id, null, true).catch(() => {});
+    }
+  }
+  if (cloudReady()) setTimeout(() => resumeAll().then(rerunOld), 1500); else { const l = load(); let ch = false; for (const r of l) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila. Video je uložené, skús znova.'; ch = true; } if (ch) store(l); }
   draw();
   return {
     shown: draw, film, upload, records: load,

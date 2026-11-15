@@ -15,12 +15,14 @@ import { probe, openFrames } from './frames.mjs';
 // ---------- Pixels ----------
 // Grey image shrunk by an integer factor (box average), so the athlete is about 200 px tall
 // whatever the clip: the patch sizes below are fractions of the athlete, and the search stays cheap.
-export function shrink(rgba, W, H, d) {
-  const w = Math.floor(W / d), h = Math.floor(H / d), out = new Float32Array(w * h), n = d * d;
+// ox, oy, rw, rh: only that region (full-resolution px), so a frame costs the band around the
+// feet instead of the whole 1080x1920 (2026-11-15: the whole frame made this pass 20 s a clip).
+export function shrink(rgba, W, H, d, ox = 0, oy = 0, rw = W - ox, rh = H - oy) {
+  const w = Math.floor(rw / d), h = Math.floor(rh / d), out = new Float32Array(w * h), n = d * d;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     let s = 0;
     for (let j = 0; j < d; j++) {
-      let o = ((y * d + j) * W + x * d) * 4;
+      let o = ((oy + y * d + j) * W + ox + x * d) * 4;
       for (let i = 0; i < d; i++, o += 4) s += rgba[o] * 0.299 + rgba[o + 1] * 0.587 + rgba[o + 2] * 0.114;
     }
     out[y * w + x] = s / n;
@@ -84,27 +86,35 @@ export async function measureMotion({ getRGBA, W, H, track, from, to }) {
     const kp = track[f], kq = track[f + 1], box = kp && athleteBox(kp);
     if (!box || !kq || box.h < 20) { prev = null; out.push(null); continue; }
     const d = Math.max(1, Math.floor(box.h / 200));
-    const A = prev && prevD === d && prev.f === f ? prev.img : shrink(await getRGBA(f), W, H, d);
-    const B = shrink(await getRGBA(f + 1), W, H, d);
-    prev = { f: f + 1, img: B }; prevD = d;
+    const toes = ['l', 'r'].map(s => pt(kp, `${s}bigtoe`)).filter(Boolean);
+    const lowFull = toes.length ? Math.max(...toes.map(p => p[1])) : box.y1;
+    const fp = ['l', 'r'].flatMap(s => ['bigtoe', 'smalltoe', 'heel', 'ank'].map(n => pt(kp, s + n))).filter(Boolean);
+    const fx0 = fp.length ? Math.min(...fp.map(p => p[0])) : box.x0, fx1 = fp.length ? Math.max(...fp.map(p => p[0])) : box.x1;
+    // The band the strips and toe patches can reach, with their search room; whole multiples of d.
+    const snap = v => Math.floor(v / d) * d;
+    const top = Math.min(lowFull, ...fp.map(p => p[1])) - 0.3 * box.h;
+    const ox = Math.max(0, snap(fx0 - 1.1 * box.h)), oy = Math.max(0, snap(top));
+    const rw = snap(Math.min(W, fx1 + 1.1 * box.h) - ox), rh = snap(Math.min(H, lowFull + 0.45 * box.h) - oy);
+    const roi = [ox, oy, rw, rh].join();
+    const A = prev && prevD === d && prev.f === f && prev.roi === roi ? prev.img : shrink(await getRGBA(f), W, H, d, ox, oy, rw, rh);
+    const B = shrink(await getRGBA(f + 1), W, H, d, ox, oy, rw, rh);
+    prev = { f: f + 1, img: B, roi }; prevD = d;
     const hs = box.h / d, rec = { f, h: box.h };
     // The track at the feet: strips left and right of the athlete at the lower toe's height, and
     // one just under the feet. A close athlete fills the width, so each is cut to what is in frame.
-    const toes = ['l', 'r'].map(s => pt(kp, `${s}bigtoe`)).filter(Boolean);
-    const low = (toes.length ? Math.max(...toes.map(p => p[1])) : box.y1) / d;
+    const X = v => (v - ox) / d, Y = v => (v - oy) / d;   // full-resolution px -> region px
+    const low = Y(lowFull);
     const sh = Math.max(9, Math.round(0.12 * hs)), gap = 0.08 * hs, R = Math.max(6, Math.round(0.08 * hs)), edge = R + 2;
     const strips = [];
     // Beside the feet, not beside the whole body: filmed close from the front (RSI, IMG_3521) the
     // body and arms fill the width and no strip beside them fits, while the floor next to the
     // feet is in view.
-    const fp = ['l', 'r'].flatMap(s => ['bigtoe', 'smalltoe', 'heel', 'ank'].map(n => pt(kp, s + n))).filter(Boolean);
-    const fx0 = fp.length ? Math.min(...fp.map(p => p[0])) : box.x0, fx1 = fp.length ? Math.max(...fp.map(p => p[0])) : box.x1;
-    const lx0 = edge, lx1 = fx0 / d - gap, rx0 = fx1 / d + gap, rx1 = A.w - edge;
+    const lx0 = edge, lx1 = X(fx0) - gap, rx0 = X(fx1) + gap, rx1 = A.w - edge;
     const sw = x => Math.min(Math.round(0.6 * hs), Math.floor(x));
     if (lx1 - lx0 >= 0.25 * hs) { const w = sw(lx1 - lx0); strips.push([lx1 - w / 2, low + 0.03 * hs, w]); }
     if (rx1 - rx0 >= 0.25 * hs) { const w = sw(rx1 - rx0); strips.push([rx0 + w / 2, low + 0.03 * hs, w]); }
     const by = low + 0.06 * hs + sh / 2;
-    if (by + sh / 2 + edge < A.h) strips.push([(fx0 + fx1) / 2 / d, by, Math.min(Math.round(0.8 * hs), A.w - 2 * edge)]);
+    if (by + sh / 2 + edge < A.h) strips.push([X((fx0 + fx1) / 2), by, Math.min(Math.round(0.8 * hs), A.w - 2 * edge)]);
     const gs = [];
     for (const [cx, cy, w] of strips) {
       const m = match(A, B, cx, cy, w, sh, cx + g0[0] / d, cy + g0[1] / d, R, 2);
@@ -118,7 +128,7 @@ export async function measureMotion({ getRGBA, W, H, track, from, to }) {
       const p = pt(kp, `${s}bigtoe`), q = pt(kq, `${s}bigtoe`);
       if (!p || !q) continue;
       const pw = Math.max(9, Math.round(0.12 * hs)), ph = Math.max(7, Math.round(0.1 * hs));
-      const m = match(A, B, p[0] / d, p[1] / d, pw, ph, q[0] / d, q[1] / d, Math.max(4, Math.round(0.06 * hs)));
+      const m = match(A, B, X(p[0]), Y(p[1]), pw, ph, X(q[0]), Y(q[1]), Math.max(4, Math.round(0.06 * hs)));
       if (m) rec[s] = [m.dx * d, m.dy * d, +m.score.toFixed(2), +p[0].toFixed(1), +p[1].toFixed(1)];
     }
     out.push(rec);

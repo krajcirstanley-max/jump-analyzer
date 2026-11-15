@@ -117,8 +117,10 @@ claude_secret = modal.Secret.from_name("jump-claude")
     image=gpu_image,
     gpu=GPU,
     region="eu",
-    cpu=4.0,
-    memory=16384,
+    # 32 GB keeps a 120 fps sprint clip's frames in memory, decoded once instead of once per pass
+    # (16 GB streamed: four full decodes of 1080x1920; 2026-11-15). 8 CPUs for the decode.
+    cpu=8.0,
+    memory=32768,
     volumes={CLIPS: clips},
     secrets=[vapid_secret, claude_secret],
     scaledown_window=60,

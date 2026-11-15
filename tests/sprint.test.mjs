@@ -118,3 +118,19 @@ test('a fly never spans two separate runs of steps; each step gets its frequency
   assert.ok(a.freq > 4 && a.freq < 4.4, `freq ${a.freq}`);
   assert.ok(a.steps.every(x => x.freq > 3.8 && x.length > 1.9 && x.length < 2.4));
 });
+
+// 2026-11-15, hand-held pan in the tunnel, 120 fps: Stanley 20 m fly (13:15, Freelap 1.01/1.04) and
+// Miška 20 m fly (13:11, 1.11/1.08). Stances read off the foot's speed trough and the crops: the
+// fixed threshold found 3 and 9 of them, broken into pieces far away.
+test('far and near: every stance of a panned fly, alternating, a running stride apart', () => {
+  const m = load('1315');
+  const v = sprintFromMotion({ motion: m.motion, ts: m.ts, fps: m.fps });
+  const tds = v.steps.map(s => s.frames[0]);
+  for (const f of [574, 598, 626, 654, 678, 700, 730, 755, 782, 807, 833, 858, 886, 911, 943, 970]) assert.ok(tds.some(t => Math.abs(t - f) <= 2), `stance near ${f}`);
+  const run = v.steps.filter(s => s.frames[0] >= 570 && s.frames[0] <= 975);
+  assert.ok(run.every((s, i) => i === 0 || s.foot !== run[i - 1].foot), 'feet alternate');
+  assert.ok(run.every(s => s.contact >= 0.075 && s.contact <= 0.115), 'contacts 0.08-0.11 s');
+  const m2 = load('1311');
+  const t2 = sprintFromMotion({ motion: m2.motion, ts: m2.ts, fps: m2.fps }).steps.map(s => s.frames[0]);
+  for (const f of [414, 443, 472, 672, 702, 730, 759, 786, 815, 843, 872]) assert.ok(t2.some(t => Math.abs(t - f) <= 3), `Miška stance near ${f}`);
+});

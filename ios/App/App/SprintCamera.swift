@@ -635,7 +635,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         UIApplication.shared.isIdleTimerDisabled = false
         NotificationCenter.default.removeObserver(self)
         reveal?.invalidate(); reveal = nil
-        ear.stop()
+        if late == nil { ear.stop() }   // a run may still land in the 3 s after Stop
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
         queue.async { self.session.stopRunning() }
     }
@@ -867,22 +867,45 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
             var data: [String: Any] = ["id": id, "raw": url.path, "fps": actualFps, "mode": "rsi"]
             if let wall { data["recordedAt"] = Int(wall.timeIntervalSince1970 * 1000) }
             onEvent?("recorded", data)
+            autoClose()
             return
         }
         saving += 1
         closeButton.isHidden = false
         UIApplication.shared.isIdleTimerDisabled = false
         show(runs.isEmpty ? "Ukladám video…" : "Ukladám video s časmi…")
+        // The page starts the upload now, from the clip as filmed (2026-11-15: waiting for the
+        // ring to be burned in and the save to Photos cost 10-30 s per run); the times heard
+        // follow with "saved".
+        if mode == "sprint" {
+            var data: [String: Any] = ["raw": url.path, "fps": actualFps, "mode": "sprint", "freelap": freelapOn]
+            if let wall { data["recordedAt"] = Int(wall.timeIntervalSince1970 * 1000) }
+            data["times"] = runs.map { ["key": $0.key, "name": $0.name, "lap": $0.lap, "legs": $0.legs, "arrived": $0.arrived, "raw": ear.raws[$0.key] ?? []] }
+            onEvent?("recorded", data)
+        }
         if runs.isEmpty, freelapOn, let s = startedAt {
             late = (s, stoppedAt ?? CACurrentMediaTime(), [])
             DispatchQueue.main.asyncAfter(deadline: .now() + grace) {
                 let got = self.late?.runs ?? []
                 self.late = nil
+                if self.view.window == nil { self.ear.stop() }   // closed meanwhile
                 self.write(url, runs: got, wall: wall)
             }
+            autoClose()
             return
         }
         write(url, runs: runs, wall: wall)
+        autoClose()
+    }
+
+    /// Stop closes the camera (Stanley, 2026-11-15: "keď stopnem nahrávanie nech sa to samé
+    /// zavrie, nie že musím klikať na x"). The video is written and saved in the background, and
+    /// the app opens it at once.
+    private func autoClose() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, !self.output.isRecording, self.presentingViewController != nil else { return }
+            self.close()
+        }
     }
 
     private func write(_ url: URL, runs: [SprintRun], wall: Date?) {
@@ -978,7 +1001,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
 
     @objc private func close() {
         guard !output.isRecording else { return }
-        ear.stop()
+        if late == nil { ear.stop() }
         dismiss(animated: true) { self.onEvent?("closed", [:]) }
     }
 }

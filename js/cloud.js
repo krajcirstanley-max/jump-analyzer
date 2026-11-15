@@ -243,7 +243,7 @@ export async function cloudJobOfClip(clip, signal) {
 
 // clip: the app's id for this video, so a retry finds the job the first try made. onJob(jobId):
 // as soon as the server has it, so a record can follow it after the app reloads.
-export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, clip = null, onJob, onProgress, onResult, signal } = {}) {
+export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, clip = null, fresh = false, onJob, onProgress, onResult, signal } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
   if (file.size > MAX_UPLOAD) throw statusError(413);
   const t0 = Date.now();
@@ -262,7 +262,7 @@ export async function analyzeInCloud(file, { sex, name, height, history, athlete
     while (JSON.stringify(r).length > 6000 && r.some(a => a.history.length)) for (const a of r) a.history = a.history.slice(1);
     params.set('athletes', JSON.stringify(r));
   }
-  const known = await cloudJobOfClip(clip, signal);
+  const known = fresh ? null : await cloudJobOfClip(clip, signal);
   if (known) { onJob?.(known); return follow(known, { signal, onProgress, onResult, t0 }); }
   if (clip) params.set('clip', String(clip));
   const { jobId } = await upload(file, params, { signal, onProgress });

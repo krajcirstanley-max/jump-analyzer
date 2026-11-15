@@ -34,7 +34,9 @@ function planted(motion, foot, fps, o) {
     if (!m || !m.g || !m[foot]) { out.push(null); continue; }
     const vx = ((m[foot][0] - m.g[0]) / m.h) * 100 * k, vy = ((m[foot][1] - m.g[1]) / m.h) * 100 * k;
     const score = m[foot][2] ?? 1;
-    out.push({ f: m.f, vx, vy, score, down: Math.abs(vy) <= o.planted && Math.abs(vx) <= o.plantedX });
+    // under a pixel a frame is match noise: a far runner gets 0.8 px (2026-11-15)
+    const lim = o.floorPx ? Math.max(o.planted, (o.floorPx / m.h) * 100 * k) : o.planted;
+    out.push({ f: m.f, vx, vy, score, down: Math.abs(vy) <= lim && Math.abs(vx) <= o.plantedX });
   }
   return out;
 }
@@ -74,7 +76,15 @@ export function footContacts(motion, foot, ts, fps, o = SPRINT) {
 // set position moves, and it drops out at the instant of the start.
 export function startOf(contacts, o = SPRINT) {
   const list = [...contacts].sort((x, y) => x.td - y.td);
-  const long = list.filter(c => c.to - c.td >= o.longContact);
+  // a long contact counts only before running has begun: three alternating steps of a running
+  // stride before it mean it is a misread stance in the run, not the set position
+  let run = 0, ended = Infinity;
+  for (let i = 1; i < list.length; i++) {
+    const st = list[i].td - list[i - 1].td;
+    run = list[i].foot !== list[i - 1].foot && st >= 0.17 && st <= 0.35 && list[i - 1].to - list[i - 1].td < o.longContact ? run + 1 : 0;
+    if (run >= 3) { ended = list[i - 3].td; break; }
+  }
+  const long = list.filter(c => c.to - c.td >= o.longContact && c.td < ended);
   if (!long.length) return null;
   const last = long.at(-1);
   const first = list.find(c => c.td >= last.to - 0.05 && c !== last && c.to - c.td < o.longContact);
@@ -99,13 +109,91 @@ export function stepsOf(contacts, start) {
   });
 }
 
+// Contacts from the foot's speed against the track, with a threshold that holds near and far
+// (Stanley, 2026-11-15: "všetko je zreteľné, máme zlý algoritmus"). The fixed 0.55 %h per frame
+// above is under one pixel when the runner is 70-130 px tall, so far contacts fell apart into
+// pieces and most steps were lost; yet the foot's speed shows every stance as a clear trough
+// (13:15 clip: troughs every 24-28 frames from far away to the pass). A stance is a stretch where
+// the smoothed speed (median of 5) stays under T, its edges where the speed has climbed a share
+// `edge` of the way from the trough's floor to T.
+// Bumped when the contact rule changes, so the phone knows which analyses to run again.
+export const SPRINT_ALGO = 2;
+export const STANCE = { T: 2.0, edge: 0.45, minLen: 5, wide: 3.2 };
+function footSpeed(motion, foot, fps) {
+  const k = 120 / fps;
+  const raw = motion.map(m => (m && m.g && m[foot] && (m[foot][2] ?? 1) >= 0.6 && m.h ? Math.hypot(m[foot][0] - m.g[0], m[foot][1] - m.g[1]) / m.h * 100 * k : null));
+  const w = Math.max(2, Math.round((2 * fps) / 120));
+  return raw.map((_, i) => { const v = raw.slice(Math.max(0, i - w), i + w + 1).filter(x => x != null); return v.length >= 3 ? median(v) : null; });
+}
+export function footStances(motion, foot, ts, fps, { T = STANCE.T, edge = STANCE.edge, minLen = STANCE.minLen, from = 0, to = Infinity } = {}) {
+  const m = footSpeed(motion, foot, fps), out = [];
+  const precise = footContacts(motion, foot, ts, fps, { ...SPRINT, floorPx: 0.6 });
+  const minN = Math.max(3, Math.round((minLen * fps) / 120));
+  for (let i = Math.max(0, from); i < Math.min(m.length, to); i++) {
+    if (m[i] == null || m[i] > T) continue;
+    let a = i; while (i < m.length && m[i] != null && m[i] <= T) i++;
+    const b = i - 1;
+    let k = a; for (let j = a; j <= b; j++) if (m[j] < m[k]) k = j;
+    const E = m[k] + edge * (T - m[k]);
+    let x = k; while (x - 1 >= a && m[x - 1] <= E) x--;
+    let y = k; while (y + 1 <= b && m[y + 1] <= E) y++;
+    if (y - x + 1 < minN || !motion[x] || !motion[y]) continue;
+    // The edges, where the foot is big enough to read them: the hand-checked rule (vertical
+    // speed under 0.55 %h, or under 0.8 px where that is less than a pixel) inside the trough.
+    // only when it is the stance and not a piece of it (a far foot's rule breaks into bits)
+    let r = refineEdges(precise, motion, x, y);
+    if (r && r.b - r.a < 0.7 * (motion[y].f + 1 - motion[x].f)) r = null;
+    const fa = r ? r.a : motion[x].f, fb = r ? r.b : motion[y].f + 1, half = 0.5 / fps;
+    out.push({ foot, a: fa, b: fb, floor: m[k], td: ts[fa] - ts[0] - half, to: (ts[fb] ?? ts[fb - 1] + 1 / fps) - ts[0] + half });
+  }
+  return out;
+}
+
+// The edges of a stance found by its trough: the hand-checked rule's contact (vertical speed under
+// 0.55 %h, 0.8 px when that is less) that overlaps it most, else the trough's own edges.
+function refineEdges(precise, motion, x, y) {
+  const fx = motion[x].f, fy = motion[y].f + 1;
+  let best = null, ov = 0;
+  for (const c of precise) {
+    const o = Math.min(fy, c.b) - Math.max(fx, c.a);
+    if (o > ov) { ov = o; best = c; }
+  }
+  return best;
+}
+
+// A gap of two steps or more hides stances the first pass missed: look for them there with a
+// looser T, both feet, keeping the ones that fit the stride (alternating, at least 0.7 of a step
+// from their neighbours), the clearest first.
+function fillGaps(contacts, motion, ts, fps) {
+  let list = [...contacts].sort((x, y) => x.td - y.td);
+  const gaps = list.slice(1).map((c, i) => c.td - list[i].td).filter(g => g > 0.15 && g < 0.4);
+  const T0 = gaps.length >= 3 ? median(gaps) : null;
+  if (!T0) return list;
+  const idx = f => motion.findIndex(m => m && m.f >= f);
+  const add = [];
+  for (let i = 0; i + 1 < list.length; i++) {
+    const c = list[i], n = list[i + 1];
+    if (n.td - c.td < 1.6 * T0 || n.td - c.td > 6 * T0) continue;
+    const cand = ['l', 'r'].flatMap(f => footStances(motion, f, ts, fps, { T: STANCE.wide, from: idx(c.b), to: idx(n.a) }))
+      .filter(x => x.td > c.to && x.to < n.td).sort((x, y) => x.floor - y.floor);
+    const seq = [c, n];
+    for (const x of cand) {
+      const k = seq.findIndex(q => q.td > x.td), p = seq[k - 1], q = seq[k];
+      if (x.td - p.td < 0.7 * T0 || q.td - x.td < 0.7 * T0 || x.foot === p.foot || x.foot === q.foot && q !== n) continue;
+      seq.splice(k, 0, x);
+    }
+    add.push(...seq.slice(1, -1));
+  }
+  return [...list, ...add].sort((x, y) => x.td - y.td);
+}
+
 export function sprintFromMotion({ motion, ts, fps, o = SPRINT }) {
   if (!motion?.some(m => m?.g)) return { error: 'Vo videu sa nedala sledovať dráha vedľa bežca.' };
-  const contacts = ['l', 'r'].flatMap(s => footContacts(motion, s, ts, fps, o));
+  const contacts = fillGaps(['l', 'r'].flatMap(s => footStances(motion, s, ts, fps)), motion, ts, fps);
   const start = startOf(contacts, o);
   const steps = stepsOf(contacts, start);
   if (steps.length < 3) return { error: 'Vo videu som nenašiel dosť krokov. V zábere musia byť celé chodidlá aspoň počas štyroch krokov.' };
-  return { start, steps, modeGuess: start ? 'accel' : 'fly' };
+  return { start, steps, modeGuess: start ? 'accel' : 'fly', algo: SPRINT_ALGO };
 }
 
 // Steps a runner can make, and only those (2026-11-15, ten clips from a hand-held pan: the runner
