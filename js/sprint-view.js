@@ -158,6 +158,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   let clipUrl = null, clipId = null, clipP = null;   // the open analysis's video as an object URL
   let live = null;   // the app's own player on the open clip: { id, player, input }
   let slExtra = 0;   // extra empty 10 m fields in the "doplň časy" form
+  const inFlight = new Set();   // records uploading now: a second tap on "Skúsiť znova" does nothing
   const say = t => { progress = t; onProgress(t); };
 
   const name = r => (r.who ? athletes[r.who]?.name : null) ?? r.chip ?? '';
@@ -243,6 +244,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   const patch = (id, f) => { const l = load(), x = l.find(r => r.id === id); if (x) { f(x); store(l); } return x; };
   async function upload(file, filmed = null, retryId = null, onServer = null, fresh = false) {
     if (busy > 0 && !filmed && !retryId) return;
+    if (retryId && inFlight.has(retryId)) return;
     if (!cloudReady()) { say('Najprv ulož prístupový kľúč v nastaveniach.'); draw(); return; }
     busy++; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…');
     let pid = retryId;
@@ -262,6 +264,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       current = pid;
       onDone(pend);   // opens the run's screen now: the video first
     } else patch(pid, x => { x.error = null; x.stage = 'Nahrávam video'; });
+    inFlight.add(pid);
     draw();
     let lastStage = '', lastSave = 0;
     const x0 = load().find(r => r.id === pid);
@@ -310,7 +313,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const msg = err?.message || 'Analýza zlyhala. Skús to znova.';
       say(msg); patch(pid, x => { x.error = msg; });
     } finally {
-      busy = Math.max(0, busy - 1); draw();
+      busy = Math.max(0, busy - 1); inFlight.delete(pid); draw();
     }
   }
 
@@ -416,6 +419,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // finds a job it already made from it, so this only uploads what never arrived.
   function retry(id) {
     const r0 = load().find(r => r.id === id);
+    if (inFlight.has(id)) return Promise.resolve(true);
     if (!r0 || !loadClip) return Promise.resolve(false);
     return loadClip(id).then(blob => {
       if (!blob) return false;

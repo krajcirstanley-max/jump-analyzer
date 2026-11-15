@@ -95,7 +95,9 @@ export function legsFormHtml(legs, { extra = 0, orig = false, attr = 'data-leg',
 }
 // The typed splits, or null while a field is empty or not a 10 m time.
 export function readLegs(box, attr = 'data-leg') {
-  const v = [...box.querySelectorAll(`[${attr}]`)].filter(i => /^\d+$/.test(i.getAttribute(attr))).map(i => parseFloat(String(i.value).trim().replace(',', '.')));
+  // a whole number with at most one decimal comma or point; "1,2,3" or "1.05s" is not a time
+  const v = [...box.querySelectorAll(`[${attr}]`)].filter(i => /^\d+$/.test(i.getAttribute(attr)))
+    .map(i => String(i.value).trim()).map(x => (/^\d{1,2}([.,]\d{1,3})?$/.test(x) ? parseFloat(x.replace(',', '.')) : NaN));
   return v.length && v.every(x => x >= 0.7 && x <= 4) ? v.map(x => Math.round(x * 100) / 100) : null;
 }
 const sumLegs = l => Math.round(l.reduce((a, b) => a + b, 0) * 100) / 100;

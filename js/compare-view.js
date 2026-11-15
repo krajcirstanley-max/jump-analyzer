@@ -116,8 +116,10 @@ export function headline(jumpA, jumpB, { judge = true } = {}) {
 export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
   let state = null;   // { a, b, pairs, sel, panes }
   let pickFor = null, pickFilter = 'mine';
+  let gen = 0;        // bumped by close(): a load that finishes after it throws its players away
 
   function close() {
+    gen++;
     for (const p of state?.panes ?? []) { p.player?.dispose?.(); p.input?.dispose?.(); }
     state = null;
   }
@@ -125,8 +127,10 @@ export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
   // ----- picking the other jump -----
   async function pick(idB) {
     close();
+    const my = gen;
     pickFor = idB;
     const all = (await listAll()).filter(r => r?.jump && !r.jump.error);
+    if (my !== gen) return;
     const me = all.find(r => r.id === idB);
     if (!me) { root.innerHTML = '<div class="card"><p class="note">Tento pokus sa nenašiel.</p></div>'; return; }
     const others = all.filter(r => r.id !== idB && r.media?.clip && r.media?.pose);
@@ -148,8 +152,11 @@ export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
   // ----- the comparison -----
   async function compare(idA, idB) {
     close();
+    const my = gen;
+    const gone = () => my !== gen;   // left, or another comparison began meanwhile
     root.innerHTML = '<div class="card"><p class="note">Otváram oba skoky…</p></div>';
     const [a, b] = await Promise.all([loadOne(idA), loadOne(idB)]);
+    if (gone()) return;
     if (!a?.clip || !a?.pose || !b?.clip || !b?.pose) { root.innerHTML = '<div class="card"><p class="note">Pri jednom zo skokov už v telefóne nie je video.</p></div>'; return; }
     // the older on the left, the newer on the right
     const [L, R] = String(a.rec.recordedAt) <= String(b.rec.recordedAt) ? [a, b] : [b, a];
@@ -167,11 +174,15 @@ export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
     <section class="card" id="cmp-rows"></section>
     <section class="card hidden" id="cmp-head"></section>`;
     const panes = [];
+    const drop = () => { for (const p of panes) { p?.player?.dispose?.(); p?.input?.dispose?.(); } };
     try {
       panes[0] = await makePane(root.querySelector('[data-side="a"]'), L);
+      if (gone()) return drop();
       panes[1] = await makePane(root.querySelector('[data-side="b"]'), R);
+      if (gone()) return drop();
     } catch (e) {
-      for (const p of panes) { p?.player?.dispose?.(); p?.input?.dispose?.(); }
+      if (gone()) return drop();
+      drop();
       root.innerHTML = `<div class="card"><p class="note">Video sa nepodarilo otvoriť: ${esc(e?.message ?? e)}</p></div>`;
       return;
     }

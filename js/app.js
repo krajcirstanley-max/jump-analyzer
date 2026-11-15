@@ -119,6 +119,8 @@ compareView = initCompare({
     return { player: p, input: r.input };
   },
 });
+// The test phone (www/fake.html on a *.localhost dev origin) drives these directly.
+if (/\.localhost$/.test(location.hostname) && globalThis.__fake) globalThis.__app = { freelapView, sprintView, compareView, openDetail, showTab };
 $('res-compare').addEventListener('click', async () => {
   if (!resultId) return;
   await saved;   // a jump just analysed is written to the history first
