@@ -10,6 +10,7 @@ const HEAD_SCALE = 0.75;  // played in motion only; ~2 MB a frame instead of 3.7
 const GET_TIMEOUT = 8000; // a decode that never answers must not freeze the player
 const MAX_RETRIES = 3;
 const MAX_TICK = 100;     // ms; a background tab must not leap across the range
+const SLOW_ON = 4, SLOW_OFF = 20; // ticks, so one late frame doesn't flash the badge
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -274,6 +275,7 @@ export class Player {
     this.canvas.height = Math.round(cssH * dpr);
     this.fit = this.canvas.width / this.src.width;
     this.#clampView();
+    this.#placeVideo();
   }
 
   // Maps frame pixel coordinates to canvas pixels (for overlays).
@@ -303,25 +305,33 @@ export class Player {
   // ---------- playback ----------
   play() {
     if (this.index >= this.range.to && !this.loop) this.show(this.range.from);
+    if (this.videoOn) { this.video.playbackRate = this.speed; return; } // speed change while playing
     this.playing = true;
     this.playBtn.textContent = 'Pauza';
     this.playBtn.setAttribute('aria-label', 'Pauza');
-    // Media clock: runs on wall time × speed and never waits for the decoder. A frame that is
-    // not ready in time is skipped, so "Reálna" really is real time. Holding the clock until
-    // each frame decoded made real time play slowed down and jerky on the phone (2026-11-15).
+    if (this.#canUseVideo()) { this.#playVideo(); return; }
+    // Media clock: runs on wall time × speed but holds while a frame is still decoding,
+    // so playback settles at the speed the clip can really be decoded.
     this.#resumeDecoder();
-    this.src.playing = true;
     let clock = this.ts[this.target], last = performance.now();
+    let held = 0, smooth = 0;
     const run = this.playRun = (this.playRun || 0) + 1;
     const tick = now => {
       if (!this.playing || this.playRun !== run) return;
       const dt = (clamp(now - last, 0, MAX_TICK) / 1000) * this.speed;
       last = now;
+      if (this.pending != null) {
+        smooth = 0;
+        if (++held >= SLOW_ON) this.#badge(true);
+        requestAnimationFrame(tick);
+        return;
+      }
+      held = 0;
+      if (++smooth >= SLOW_OFF) this.#badge(false);
       const { from, to } = this.range;
       const st = advance(this.ts, clock, dt, from, to, this.loop);
       clock = st.t;
-      // While a frame is still decoding, show() only swaps which frame comes next.
-      if (st.i !== this.target) this.show(st.i);
+      if (st.i !== this.index) this.show(st.i);
       if (st.wrapped) this.#resumeDecoder();
       if (st.ended && this.index === to) { this.pause(); return; }
       requestAnimationFrame(tick);
@@ -337,11 +347,110 @@ export class Player {
   pause() {
     if (!this.playing) return;
     this.playing = false;
-    this.src.playing = false;
     this.playBtn.textContent = 'Prehrať';
     this.playBtn.setAttribute('aria-label', 'Prehrať');
     this.#badge(false);
+    if (this.videoOn) { this.#stopVideo(); return; }
     if (this.head.has(this.index)) this.show(this.target); // swap the head frame for a sharp one
+  }
+
+  // ---------- native playback ----------
+  // Stored RSI and sprint clips play through the phone's own video decoder: decoding every frame
+  // onto the canvas could not keep up on the phone, so "Reálna" played slowed down and jerky, and
+  // skipping late frames looked worse still (2026-11-15). The canvas stays for pause, frame steps,
+  // scrubbing and zoom; while the video plays, the frame index follows its clock so the labels
+  // and frameHooks (the RSI scoreboard) keep up.
+  attachVideo(blob) {
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+    v.style.cssText = 'position:absolute;object-fit:fill;pointer-events:none;visibility:hidden';
+    // OPFS hands a stored clip back with no type, and WebKit will not play an untyped blob
+    // (the struck-out play button of 0.16.3).
+    this.videoUrl = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: 'video/quicktime' }));
+    v.addEventListener('error', () => { console.warn('native video failed', v.error); this.#dropVideo(); }, { once: true });
+    v.src = this.videoUrl;
+    if (getComputedStyle(this.stage).position === 'static') this.stage.style.position = 'relative';
+    this.stage.prepend(v); // under anything the views put on the stage (the scoreboard)
+    this.canvas.style.position = 'relative';
+    this.video = v;
+    this.#placeVideo();
+  }
+
+  #placeVideo() {
+    const v = this.video, c = this.canvas;
+    if (!v) return;
+    Object.assign(v.style, { left: `${c.offsetLeft}px`, top: `${c.offsetTop}px`, width: c.style.width, height: c.style.height });
+  }
+
+  #canUseVideo() {
+    // Not gated on readyState: iOS may load nothing before the first play().
+    return !!this.video && !this.video.error && this.view.s <= 1.01 && !this.overlays.length;
+  }
+
+  async #playVideo() {
+    const v = this.video, ts = this.ts, t0 = ts[0];
+    const run = this.playRun = (this.playRun || 0) + 1;
+    this.#placeVideo();
+    v.playbackRate = this.speed;
+    v.currentTime = ts[this.target] - t0;
+    try { await v.play(); } catch (e) {
+      console.warn('native playback refused', e);
+      this.#dropVideo();
+      if (this.playing && this.playRun === run) { this.playing = false; this.play(); } // canvas instead
+      return;
+    }
+    if (!this.playing || this.playRun !== run) { v.pause(); return; }
+    this.videoOn = true;
+    v.style.visibility = 'visible';
+    this.canvas.style.visibility = 'hidden';
+    const tick = () => {
+      if (!this.videoOn || this.playRun !== run) return;
+      const { from, to } = this.range;
+      const t = v.currentTime + t0;
+      if (t >= ts[to] || v.ended) {
+        if (!this.loop) { this.#videoFrame(to); this.pause(); return; }
+        v.currentTime = ts[from] - t0;
+        if (v.paused) v.play().catch(() => {});
+      } else {
+        const i = clamp(nearestIndex(ts, t), from, to);
+        if (i !== this.index) this.#videoFrame(i);
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  #videoFrame(i) {
+    this.index = i;
+    this.#label(i);
+    this.onFrame?.(i);
+    for (const f of this.frameHooks) f(i);
+  }
+
+  // Back to the canvas on the frame the video stopped at, swapped in once it is drawn.
+  #stopVideo() {
+    const v = this.video;
+    this.videoOn = false;
+    v.pause();
+    const { from, to } = this.range;
+    const i = clamp(nearestIndex(this.ts, v.currentTime + this.ts[0]), from, to);
+    this.show(i).then(() => {
+      if (this.videoOn) return;
+      this.canvas.style.visibility = '';
+      v.style.visibility = 'hidden';
+    });
+  }
+
+  #dropVideo() {
+    const v = this.video;
+    if (!v) return;
+    this.video = null;
+    this.videoOn = false;
+    v.pause(); v.removeAttribute('src'); v.load(); v.remove();
+    this.canvas.style.visibility = '';
+    if (this.videoUrl) URL.revokeObjectURL(this.videoUrl);
+    this.videoUrl = null;
   }
 
   #badge(on) {
@@ -361,6 +470,7 @@ export class Player {
   }
 
   #zoomAt(cx, cy, factor) {
+    if (this.videoOn) this.pause();
     const v = this.view, s0 = v.s;
     const s1 = Math.max(1, Math.min(MAX_ZOOM, s0 * factor));
     v.tx = cx - (cx - v.tx) * (s1 / s0);
@@ -428,6 +538,7 @@ export class Player {
     this.pause();
     this.headRun++;
     this.#dropHead();
+    this.#dropVideo();
     this.ro.disconnect();
     removeEventListener('keydown', this.keyHandler);
     this.src.dispose();

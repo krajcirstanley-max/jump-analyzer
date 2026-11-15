@@ -20,7 +20,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.16.5';
+const APP_VERSION = '0.16.6';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -72,6 +72,7 @@ async function clipPlayer(root, blob) {
   const r = await inspectClip(blob, mb, { name: 'clip.mov' });
   const p = new Player(root, new FrameSource(mb, r.track, r.packetTimestamps, r.keyTimestamps));
   await p.show(0);
+  p.attachVideo(blob); // smooth playback; the canvas keeps steps and pause
   return { player: p, input: r.input };
 }
 

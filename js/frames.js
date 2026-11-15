@@ -106,10 +106,7 @@ export class FrameSource {
         const idx = nearestIndex(this.ts, wc.timestamp);
         job.pos = idx;
         this.stats.yielded = (this.stats.yielded || 0) + 1;
-        // During playback a frame the clock has already passed is never shown: decode it (the
-        // next ones depend on it) but skip the copy, so a decoder that runs late catches up.
-        const passed = this.playing && idx < this.focus && !this.waiters.has(idx);
-        if (idx >= job.keepFrom && !passed && !this.cache.has(idx)) {
+        if (idx >= job.keepFrom && !this.cache.has(idx)) {
           const bmp = await createImageBitmap(wc.canvas);
           this.#put(idx, bmp);
           this.stats.decoded++;
