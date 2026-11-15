@@ -13,6 +13,8 @@ import { renderResult, showCoach, runupHtml, firstCellHtml } from './analysis/vi
 import { initRsi } from './rsi-view.js';
 import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
+import { initCompare } from './compare-view.js';
+let compareView = null;   // two jumps side by side (compare-view.js), set up below
 import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud, askAboutJump } from './cloud.js';
@@ -20,7 +22,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.18.4';
+const APP_VERSION = '0.19.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -102,6 +104,28 @@ const sprintView = initSprint({
   makePlayer: clipPlayer,
 });
 const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
+// Two jumps side by side: each its own player with its skeleton and angles, lined up on the jump.
+compareView = initCompare({
+  root: document.getElementById('compare'), athletes: ATHLETES,
+  listAll: async () => (await Promise.all(Object.keys(ATHLETES).map(a => hist.listAttempts(a)))).flat(),
+  loadOne: async id => { const rec = await hist.getAttempt(id); if (!rec) return null; const m = await hist.loadMedia(id); return { rec, clip: m.clip, pose: m.pose }; },
+  makePane: async (el, x) => {
+    const r = await inspectClip(x.clip, mb, { name: x.rec.file });
+    const p = new Player(el, new FrameSource(mb, r.track, r.packetTimestamps, r.keyTimestamps));
+    const k = p.src.width / x.pose.W;
+    p.overlays.push(skeletonOverlay(x.pose, k));
+    if (!x.rec.jump.error) p.overlays.push(jointLabels(x.rec.jump, x.pose, k));
+    await p.show(0);
+    return { player: p, input: r.input };
+  },
+});
+$('res-compare').addEventListener('click', async () => {
+  if (!resultId) return;
+  await saved;   // a jump just analysed is written to the history first
+  player?.pause();
+  openDetail('compare');
+  compareView.pick(resultId);
+});
 freelapView.setLinker(sprintOfRun);
 
 // Blank clears the field; anything outside a plausible jump is ignored.
@@ -149,6 +173,7 @@ function showTab(name) {
   $('res-who').classList.toggle('hidden', name !== 'result' || !resultAthlete);
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === name || (DETAILS.includes(name) && b.dataset.tab === backTo)));
   if (name !== 'result') player?.pause();
+  if (name !== 'detail') compareView?.close();
   scrollTo(0, tabScroll[name] ?? 0);
 }
 function openResultTab() {
@@ -942,6 +967,13 @@ $('hist-filter').addEventListener('click', e => {
 
 // A row opens its detail screen.
 function openDetail(k, id, who) {
+  $('compare').classList.toggle('hidden', k !== 'compare');
+  if (k === 'compare') {
+    for (const el of ['fl-run', 'sprint', 'rsi']) $(el).classList.add('hidden');
+    tabScroll.detail = 0; showTab('detail'); scrollTo(0, 0);
+    return;
+  }
+  compareView?.close();
   const runKey = k === 'sprint' ? sprintView.records().find(r => r.id === id)?.runKey : null;
   $('fl-run').classList.toggle('hidden', !(runKey && freelapView.openRun(runKey)));
   $('sprint').classList.toggle('hidden', k !== 'sprint');
