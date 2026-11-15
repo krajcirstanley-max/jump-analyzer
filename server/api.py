@@ -185,6 +185,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         box: float = Query(0),
         athletes: str = Query(""),
         clip: str = Query(""),
+        who: str = Query(""),
         owner=Depends(user),
     ):
         if clip and not CLIP_ID.fullmatch(clip):
@@ -238,7 +239,9 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
             try:
                 start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {}),
                                           **({"mode": mode} if mode != "jump" else {}), **({"boxCm": box} if box else {}),
-                                          **({"athletes": roster} if roster else {})})
+                                          **({"athletes": roster} if roster else {}),
+                                          # the athlete the phone already knows (a Freelap chip heard): no need to look
+                                          **({"who": who} if who and any(a.get("id") == who for a in roster) else {})})
             except Exception as e:
                 print("job start failed:", e)
                 path.unlink(missing_ok=True)

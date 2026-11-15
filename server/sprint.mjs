@@ -5,6 +5,7 @@
 // 2026-11-13). No tripod, ever. The phone pairs the steps with the Freelap run and does the metres
 // (js/analysis/sprint.js), so Freelap data never leaves it.
 import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
@@ -79,11 +80,37 @@ export function athleteBox(kp) {
 // Per frame f (motion from f to f+1): the athlete's height h in px, the track's motion beside
 // the athlete at the feet (g), and each toe's motion (l, r), all in full-resolution px.
 // getRGBA(f) -> RGBA buffer, frames in increasing order. track: keypoints per frame.
-export async function measureMotion({ getRGBA, W, H, track, from, to }) {
+export async function measureMotion(args) { return smoothGround(await measureMotionRaw(args)); }
+
+// The same pass split over worker threads (2026-11-15: one core took 13-17 s of a 13 s clip while
+// seven idled). Each part starts a few frames early so the ground's predicted motion (g0) is warm
+// at its first frame as it would be in one pass; the early frames are dropped. Frames come from
+// the decoded file (frames.mjs 'disk'), which every worker reads on its own.
+export async function measureMotionParallel({ fd, W, H, track, from, to, parts = Math.max(1, Math.min(6, os.cpus().length - 1)), warm = 10 }) {
+  const n = to - from;
+  if (parts < 2 || n < 200) return null;
+  const { Worker } = await import('node:worker_threads');
+  const per = Math.ceil(n / parts);
+  const jobs = Array.from({ length: parts }, (_, k) => {
+    const a = from + k * per, b = Math.min(to, a + per);
+    if (a >= b) return Promise.resolve([]);
+    const s0 = Math.max(from, a - warm);
+    return new Promise((res, rej) => {
+      const w = new Worker(new URL('./motion-worker.mjs', import.meta.url), { workerData: { fd, W, H, from: s0, to: b, track: track.slice(s0, b + 1), base: s0 } });
+      w.once('message', m => (m.error ? rej(new Error(m.error)) : res(m.out.slice(a - s0))));
+      w.once('error', rej);
+    });
+  });
+  return smoothGround((await Promise.all(jobs)).flat());
+}
+
+// getRows(f, oy, rh): only the rows oy..oy+rh of frame f (a part reading the file needs the band
+// around the feet, about a sixth of the frame, not all 8 MB of it).
+export async function measureMotionRaw({ getRGBA, getRows = null, W, H, track, from, to, trackBase = 0 }) {
   const out = [];
   let prev = null, prevD = 0, g0 = [0, 0];
   for (let f = from; f < to; f++) {
-    const kp = track[f], kq = track[f + 1], box = kp && athleteBox(kp);
+    const kp = track[f - trackBase], kq = track[f + 1 - trackBase], box = kp && athleteBox(kp);
     if (!box || !kq || box.h < 20) { prev = null; out.push(null); continue; }
     const d = Math.max(1, Math.floor(box.h / 200));
     const toes = ['l', 'r'].map(s => pt(kp, `${s}bigtoe`)).filter(Boolean);
@@ -96,8 +123,9 @@ export async function measureMotion({ getRGBA, W, H, track, from, to }) {
     const ox = Math.max(0, snap(fx0 - 1.1 * box.h)), oy = Math.max(0, snap(top));
     const rw = snap(Math.min(W, fx1 + 1.1 * box.h) - ox), rh = snap(Math.min(H, lowFull + 0.45 * box.h) - oy);
     const roi = [ox, oy, rw, rh].join();
-    const A = prev && prevD === d && prev.f === f && prev.roi === roi ? prev.img : shrink(await getRGBA(f), W, H, d, ox, oy, rw, rh);
-    const B = shrink(await getRGBA(f + 1), W, H, d, ox, oy, rw, rh);
+    const img = async g => (getRows ? shrink(await getRows(g, oy, rh), W, rh, d, ox, 0, rw, rh) : shrink(await getRGBA(g), W, H, d, ox, oy, rw, rh));
+    const A = prev && prevD === d && prev.f === f && prev.roi === roi ? prev.img : await img(f);
+    const B = await img(f + 1);
     prev = { f: f + 1, img: B, roi }; prevD = d;
     const hs = box.h / d, rec = { f, h: box.h };
     // The track at the feet: strips left and right of the athlete at the lower toe's height, and
@@ -133,7 +161,7 @@ export async function measureMotion({ getRGBA, W, H, track, from, to }) {
     }
     out.push(rec);
   }
-  return smoothGround(out);
+  return out;
 }
 
 // The camera turns smoothly: a frame whose track match failed takes its neighbours' motion, and
@@ -176,12 +204,18 @@ export function recordedAt(clip) {
   } catch { return null; }
 }
 
-export async function analyzeSprintClip(engine, { clip, athletes = null, client, onProgress }) {
+export async function analyzeSprintClip(engine, { clip, athletes = null, who: known = null, client, onProgress }) {
   const t0 = performance.now();
   const meta = probe(clip);
   const frames = openFrames(clip, meta);
+  // where the seconds go, stage by stage (kept on the result: the speed work is measured, not guessed)
+  const timing = { probe: Math.round(performance.now() - t0), decode: frames.mode };
+  let stage = null, st0 = performance.now();
+  const tick = p => { if (p?.stage !== stage) { if (stage) timing[stage] = Math.round(performance.now() - st0); stage = p?.stage; st0 = performance.now(); } onProgress?.(p); };
   try {
-    const res = await runPipeline(frames, engine, { onProgress });
+    const res = await runPipeline(frames, engine, { onProgress: tick });
+    if (stage) timing[stage] = Math.round(performance.now() - st0);
+    stage = null;
     if (res.error) return { error: 'Vo videu som nenašiel bežca. Skontroluj, či sú v zábere celé nohy.' };
     const wire = toWire(res, meta.ts);
     const track = fromWire(wire).clean;
@@ -192,15 +226,24 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, client,
       while (at < f) { const r = await it.next(); if (r.done) throw new Error('clip ended'); at = r.value.i; cur = r.value.rgba; }
       return cur;
     };
-    let motion;
-    try { motion = await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); }
-    finally { await it.return?.(); }
-    let who = null;
-    if (client && athletes?.length > 1) {
-      try { who = await identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, athletes, client }); }
-      catch (e) { who = { id: null, error: String(e?.message || e).slice(0, 200) }; }
-      who = { id: athletes.find(x => x.id === who.id)?.id ?? null, said: who.said ?? null, ms: who.ms, error: who.error };
+    // who it is (a vision call, seconds) runs while the feet are measured, not after
+    const tId = performance.now();
+    const whoP = known && athletes?.some(a => a.id === known) ? Promise.resolve({ id: known, said: 'freelap', ms: 0 })
+      : client && athletes?.length > 1
+      ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, athletes, client })
+        .catch(e => ({ id: null, error: String(e?.message || e).slice(0, 200) }))
+        .then(w => { timing.identify = Math.round(performance.now() - tId); return { id: athletes.find(x => x.id === w.id)?.id ?? null, said: w.said ?? null, ms: w.ms, error: w.error }; })
+      : Promise.resolve(null);
+    const tM = performance.now();
+    let motion = null;
+    if (frames.fd) {
+      await frames.get(res.last);   // the file holds every frame the parts will read
+      motion = await measureMotionParallel({ fd: await frames.fd(), W: meta.W, H: meta.H, track, from: res.first, to: res.last }).catch(e => { console.error('parallel motion failed, one pass instead:', e); return null; });
     }
+    try { motion ??= await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); }
+    finally { await it.return?.(); }
+    timing.motion = Math.round(performance.now() - tM);
+    const who = await whoP;
     const sprint = sprintFromMotion({ motion, ts: meta.ts, fps: meta.fps });
     if (sprint.error) return { error: sprint.error };
     const result = {
@@ -210,7 +253,7 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, client,
       motion: motion.map(m => m && { f: m.f, h: +m.h.toFixed(1), g: m.g && m.g.map(v => +v.toFixed(2)), l: m.l && m.l.slice(0, 3).map(v => +v.toFixed(2)), r: m.r && m.r.slice(0, 3).map(v => +v.toFixed(2)) }),
       ts0: meta.ts[0],
       recordedAt: recordedAt(clip), duration: +(meta.ts[meta.N - 1] - meta.ts[0]).toFixed(3),
-      W: meta.W, H: meta.H, N: meta.N, fps: +meta.fps.toFixed(3), ms: Math.round(performance.now() - t0),
+      W: meta.W, H: meta.H, N: meta.N, fps: +meta.fps.toFixed(3), ms: Math.round(performance.now() - t0), timing,
     };
     return { result };
   } finally {

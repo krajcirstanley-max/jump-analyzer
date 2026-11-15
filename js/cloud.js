@@ -243,7 +243,7 @@ export async function cloudJobOfClip(clip, signal) {
 
 // clip: the app's id for this video, so a retry finds the job the first try made. onJob(jobId):
 // as soon as the server has it, so a record can follow it after the app reloads.
-export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, clip = null, fresh = false, onJob, onProgress, onResult, signal } = {}) {
+export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, clip = null, fresh = false, who = null, onJob, onProgress, onResult, signal } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
   if (file.size > MAX_UPLOAD) throw statusError(413);
   const t0 = Date.now();
@@ -252,6 +252,7 @@ export async function analyzeInCloud(file, { sex, name, height, history, athlete
   if (height) params.set('height', String(height));
   if (mode === 'rsi') { params.set('mode', 'rsi'); if (boxCm) params.set('box', String(boxCm)); }
   if (mode === 'sprint') params.set('mode', 'sprint');
+  if (who) params.set('who', String(who));   // known from a Freelap chip: the server need not look
   // The query string is bounded, and the newest attempts matter most.
   let h = (history || []).slice(-5);
   while (h.length && JSON.stringify(h).length > 6000) h = h.slice(1);

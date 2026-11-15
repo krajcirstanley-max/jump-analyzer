@@ -7,6 +7,9 @@ import { contactSheet } from './grid.mjs';
 import { ask } from './locate.mjs';
 
 export const IDENTIFY_MODEL = 'claude-sonnet-5-5';
+// Man or woman from eight crops is an easy look: the fast model first (2026-11-15, speed), the
+// careful one only when the fast one is unsure or names nobody on the roster.
+export const IDENTIFY_FAST = 'claude-haiku-5-5';
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['athlete'],
   properties: { athlete: { type: 'string', enum: ['man', 'woman', 'unsure'] } },
@@ -29,6 +32,7 @@ export async function identifyAthlete({ frames, boxes, first, last, fps, near = 
   const list = [];
   for (let k = 0; k < 8; k++) list.push(Math.round(a + ((b - a) * k) / 7));
   const sheet = await contactSheet(frames, [...new Set(list)], { boxes, cols: 4, tileW: 240 });
-  const ans = await ask(client, IDENTIFY_MODEL, PROMPT, [sheet], SCHEMA);
-  return { id: pickAthlete(ans?.athlete, athletes), said: ans?.athlete ?? null, ms: Date.now() - t0 };
+  let ans = await ask(client, IDENTIFY_FAST, PROMPT, [sheet], SCHEMA).catch(() => null), model = IDENTIFY_FAST;
+  if (!pickAthlete(ans?.athlete, athletes)) { ans = await ask(client, IDENTIFY_MODEL, PROMPT, [sheet], SCHEMA); model = IDENTIFY_MODEL; }
+  return { id: pickAthlete(ans?.athlete, athletes), said: ans?.athlete ?? null, ms: Date.now() - t0, model };
 }

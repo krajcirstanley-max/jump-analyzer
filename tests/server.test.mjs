@@ -60,10 +60,12 @@ test('wire format restores Float32Array and NaN, and rounds like the fixtures', 
   assert.equal(back.W, 1);
 });
 
-test('both decode paths give the same frames and need no ffmpeg per get', async () => {
+test('all three decode paths give the same frames and need no ffmpeg per get', async () => {
   const meta = probe(CLIP);
-  const mem = openFrames(CLIP, meta, { budget: Infinity });
-  const str = openFrames(CLIP, meta, { budget: 0 });
+  const mem = openFrames(CLIP, meta, { budget: Infinity, mode: 'memory' });
+  const str = openFrames(CLIP, meta, { budget: 0, mode: 'memory' });
+  const disk = openFrames(CLIP, meta);   // the default since 2026-11-15
+  assert.equal(disk.mode, 'disk');
   assert.equal(mem.mode, 'memory');
   assert.equal(str.mode, 'stream');
   try {
@@ -82,12 +84,18 @@ test('both decode paths give the same frames and need no ffmpeg per get', async 
     const picked = await str.pick([9, 3]);
     assert.ok(picked.get(3).equals(await mem.get(3)));
     assert.ok(picked.get(9).equals(await mem.get(9)));
-  } finally { mem.close(); str.close(); }
+    // the file-backed path: the same bytes, in order, and pick/get read them back whole
+    const d = await sample(disk, 0, meta.N - 1, 8);
+    assert.ok(d.length === m.length && d.every((x, k) => x[0] === m[k][0] && x[1] === m[k][1]), 'disk frames differ');
+    assert.ok((await disk.get(meta.N - 1)).equals(await mem.get(meta.N - 1)));
+    const dp = await disk.pick([9, 3]);
+    assert.ok(dp.get(3).equals(await mem.get(3)) && dp.get(9).equals(await mem.get(9)));
+  } finally { mem.close(); str.close(); disk.close(); }
 });
 
 test('frame index matches the plain single-frame ffmpeg path used for the local tests', async () => {
   const meta = probe(CLIP);
-  const fr = openFrames(CLIP, meta, { budget: Infinity });
+  const fr = openFrames(CLIP, meta, { budget: Infinity, mode: 'memory' });
   try {
     const single = execFileSync('ffmpeg', ['-v', 'error', '-i', CLIP, '-vf', 'select=eq(n\\,7)', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { maxBuffer: meta.W * meta.H * 4 + 1024 });
     assert.ok(single.equals(await fr.get(7)));

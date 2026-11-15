@@ -272,7 +272,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const me = getAthlete() ?? {};
       const { result } = await analyzeInCloud(file, {
         sex: me.sex, name: me.name, height: me.height, mode: 'sprint', athletes: await roster(),
-        clip: pid, fresh, onJob: jobId => { patch(pid, x => { x.jobId = jobId; }); onServer?.(); },
+        clip: pid, fresh, who: (() => { const f = load().find(r => r.id === pid)?.filmed ?? filmed; const n = f?.freelap !== false && f?.times?.length === 1 ? f.times[0].name : null; return n ? CHIPS_BY_NAME(athletes)[n] ?? null : null; })(),
+        onJob: jobId => { patch(pid, x => { x.jobId = jobId; }); onServer?.(); },
         onProgress: p => {
           const t = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`;
           if (t === lastStage) return;

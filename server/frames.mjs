@@ -2,6 +2,8 @@
 // re-decodes. Falls back to streaming when the whole clip would not fit the budget.
 import { spawn, execFileSync } from 'node:child_process';
 import os from 'node:os';
+import fs from 'node:fs';
+import { join } from 'node:path';
 
 // Same conversion the local tests ran through (tools/run_pipeline.mjs): ffmpeg's default
 // yuv420p10 -> rgba with autorotate on, no explicit tone mapping. Do not add filters here
@@ -70,10 +72,72 @@ async function* rawFrames(p, size, fresh) {
 }
 
 // { N, W, H, fps, ts, get(i), sequential(from, to, step), pick(list), close() }
-export function openFrames(clip, meta, { budget = defaultBudget() } = {}) {
+// mode 'disk' (default): ffmpeg writes the frames to a file and they are read back whole, frame
+// by frame, as it grows. Measured on the H100 container (2026-11-15, 13 s 120 fps HDR clip):
+// ffmpeg makes all RGBA frames in 2.3 s, but a pipe carries them at under 1 GB/s (Node reads
+// 64 KB at a time): 15.7 s through the pipe, 7.7-11.8 s through the file, same bytes. Nothing has
+// to fit in RAM either, so a long clip is decoded once instead of once per pass.
+export function openFrames(clip, meta, { budget = defaultBudget(), mode = process.env.JUMP_FRAMES || 'disk' } = {}) {
   const { N, W, H } = meta;
   const SIZE = W * H * 4;
+  if (mode === 'disk') return { ...meta, ...onDisk(clip, N, SIZE) };
   return { ...meta, ...(N * SIZE <= budget ? inMemory(clip, N, SIZE) : streaming(clip, N, SIZE)) };
+}
+
+function onDisk(clip, N, SIZE) {
+  const path = join(os.tmpdir(), `frames-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.raw`);
+  const p = spawn('ffmpeg', ['-v', 'error', '-nostdin', '-y', '-i', clip, ...OUT.slice(0, -1), path], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '', finished = false, failure = null, closed = false, fh = null, opening = null;
+  p.stderr.on('data', d => { err = (err + d).slice(-400); });
+  p.on('error', e => { failure = e; finished = true; });
+  p.on('close', code => { if (code && !p.killed) failure ??= new Error(`ffmpeg exited ${code}: ${err.trim()}`); finished = true; });
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+  const open = async () => {
+    while (!fh) {
+      if (closed) throw new Error('frames closed');
+      try {
+        fh = await (opening ??= fs.promises.open(path, 'r'));
+        // both ends hold the file open now: drop its name, so a crash or a kill leaves nothing on
+        // disk (2026-11-15: a crashed local test left 13 GB in the temp folder and filled the disk)
+        fs.promises.rm(path, { force: true }).catch(() => {});
+      } catch { opening = null; if (finished) throw failure ?? new Error('ffmpeg wrote no frames'); await pause(3); }
+    }
+    return fh;
+  };
+  // true once frame i is all on disk; false if the clip ended before it
+  const ready = async i => {
+    const f = await open();
+    for (;;) {
+      const done = finished, { size } = await f.stat();
+      if (size >= (i + 1) * SIZE) return true;
+      if (done) { if (failure) throw failure; return false; }
+      await pause(2);
+    }
+  };
+  const read = async i => { const b = Buffer.allocUnsafeSlow(SIZE); await fh.read(b, 0, SIZE, i * SIZE); return b; };
+  return {
+    mode: 'disk',
+    // the open file for worker threads (they share the process's descriptors); the name is gone
+    fd: async () => (await open()).fd,
+    async get(i) {
+      if (!(await ready(i))) throw new Error(`frame ${i} of ${N} was not decoded`);
+      return read(i);
+    },
+    async *sequential(from, to, step) {
+      for (let i = from; i <= to && await ready(i); i += step) yield { i, rgba: await read(i) };
+    },
+    async pick(list) {
+      const out = new Map();
+      for (const i of [...new Set(list)].sort((a, b) => a - b)) if (await ready(i)) out.set(i, await read(i));
+      return out;
+    },
+    close() {
+      closed = true;
+      if (!finished) p.kill('SIGKILL');
+      fh?.close().catch(() => {});
+      fs.promises.rm(path, { force: true }).catch(() => {});
+    },
+  };
 }
 
 // The decode runs ahead in the background, so pass 1 starts as soon as frame 0 exists.

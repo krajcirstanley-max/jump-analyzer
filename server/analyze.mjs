@@ -194,7 +194,7 @@ async function serve() {
       const out = job.mode === 'rsi'
         ? await analyzeRsiClip(engine, { clip: job.clip, sex: job.sex, height: job.height ?? null, boxCm: job.boxCm ?? null, athletes: job.athletes ?? null, client: coachClient({ token: claudeToken }), onProgress })
         : job.mode === 'sprint'
-        ? await analyzeSprintClip(engine, { clip: job.clip, athletes: job.athletes ?? null, client: coachClient({ token: claudeToken }), onProgress })
+        ? await analyzeSprintClip(engine, { clip: job.clip, athletes: job.athletes ?? null, who: job.who ?? null, client: coachClient({ token: claudeToken }), onProgress })
         : await analyzeClip(engine, {
           ...job,
           client: coachClient({ token: claudeToken }),
