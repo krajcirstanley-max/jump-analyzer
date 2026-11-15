@@ -50,7 +50,7 @@ function buildPhases(ev, metrics, score, last, runThrough = false) {
       id: p.id, label: p.label, weight: p.weight,
       score: score.phases.find(s => s.id === p.id)?.score ?? null,
       from, to, frame,
-      keyFrames: PHASE_KF[p.id].map(id => kf[id]).filter(Boolean).map(k => ({ id: k.id, label: k.label, frame: k.frame })),
+      keyFrames: PHASE_KF[p.id].map(id => kf[id]).filter(Boolean).map(k => ({ id: k.id, label: k.label, frame: k.frame, ...(k.hand ? { hand: true } : {}) })),
       metrics: p.keys.map(k => by[k]).filter(Boolean),
       ...(runThrough && p.id === 'landing' ? { note: 'Prebeh: dopad na nohu a beh cez piesok, dopad sa nehodnotí.' } : {}),
     };
@@ -256,7 +256,17 @@ export function tapeFix(g, tape, from) {
 // the same jumps): last-stride speed / 11-1 m mean speed = 0.998 ± 0.010 men, 0.998 ± 0.015 women,
 // so 10 / split is the speed into the board. Without a tape it corrects the video's metres like
 // the tape does; with a tape (which already set the metres) it replaces the last-step speed.
-export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null } = {}) {
+// edges: contact frames the athlete set by hand on the replay ("Dotyk je tu", 2026-11-15), any of
+// { penTD, penTO, TD, TO }. They win over the pose track and over the server's names, and are not
+// moved by the touchdown refinement: at 120 fps neither the detectors nor a zoomed look settle a
+// touchdown to one frame every time (16 edges checked by hand on four clips), so the person decides.
+export const EDGE_KEYS = ['penTD', 'penTO', 'TD', 'TO'];
+export function cleanEdges(e) {
+  const out = {};
+  for (const k of EDGE_KEYS) if (Number.isInteger(e?.[k])) out[k] = e[k];
+  return Object.keys(out).length ? out : null;
+}
+export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null, edges = null } = {}) {
   const clean = result.clean, smooth = result.smooth;
   if (!clean || !smooth) return { error: 'Chýba vyčistený záznam pohybu.' };
   const fps = result.fps ?? (ts ? (ts.length - 1) / (ts.at(-1) - ts[0]) : NaN);
@@ -266,10 +276,26 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const named0 = result.events?.TD != null && result.events?.TO != null ? result.events : null;
   const refined = named0 ? refineTouchdowns(result, named0, { height }) : null;
   const named = refined ? refined.events : null;
-  const contacts = withEvents(clean, detectContacts(clean, result.first, result.last, fps), named, fps);
-  const ev = keyFrames(clean, contacts, fps, sex, { events: named });
+  const detected = detectContacts(clean, result.first, result.last, fps);
+  let contacts = withEvents(clean, detected, named, fps);
+  let ev = keyFrames(clean, contacts, fps, sex, { events: named });
   if (ev.error) return { ...ev, error: 'V zázname sa nenašiel odraz.' };
-  ev.keyFrames = ev.keyFrames.map(k => ({ ...k, label: KF_LABELS[k.id] ?? k.label }));
+  // Frames set by hand: the jump's own key frames with those replaced, run through the same path
+  // as the server's names. Kept only when they stay in order (pen touchdown < pen toe-off < board
+  // touchdown < toe-off) and the jump is still found.
+  const hand = cleanEdges(edges);
+  let handUsed = null;
+  if (hand) {
+    const base = { td3: named?.td3 ?? ev.third?.td ?? null, penTD: named?.penTD ?? ev.pen?.td ?? null, penTO: named?.penTO ?? ev.pen?.to ?? null,
+      TD: named?.TD ?? ev.takeoff.td, TO: named?.TO ?? ev.takeoff.to, ...(named?.landing != null ? { landing: named.landing } : {}), ...(result.events?.kind ? { kind: result.events.kind } : {}) };
+    const e = { ...base, ...hand };
+    const order = [e.penTD, e.penTO, e.TD, e.TO].filter(v => v != null);
+    if (order.every((v, k) => k === 0 || v > order[k - 1]) && e.TO > e.TD) {
+      const c2 = withEvents(clean, detected, e, fps), ev2 = keyFrames(clean, c2, fps, sex, { events: e });
+      if (!ev2.error) { contacts = c2; ev = ev2; handUsed = hand; }
+    }
+  }
+  ev.keyFrames = ev.keyFrames.map(k => ({ ...k, label: KF_LABELS[k.id] ?? k.label, ...(handUsed?.[k.id] != null ? { hand: true } : {}) }));
   const dir = contacts[0]?.dir ?? 1;
   const times = ts ?? Array.from({ length: clean.length }, (_, i) => i / fps);
   const air = flightAnalysis(smooth, ev, times, sex, dir, height);
@@ -314,7 +340,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const by = Object.fromEntries(metrics.map(m => [m.key, m]));
   const last = result.last ?? clean.length - 1;
   return {
-    ...ev, dir, fps, flight, metrics, score, eventsSource: named ? 'claude' : 'pose', kind: runThrough ? 'runthrough' : 'jump',
+    ...ev, dir, fps, flight, metrics, score, eventsSource: handUsed ? 'hand' : named ? 'claude' : 'pose', edgesUsed: handUsed, kind: runThrough ? 'runthrough' : 'jump',
     coach: coaching(metrics, sex),
     phases: withPenFlex(buildPhases(ev, metrics, score, last, runThrough), by.penKnee),
     speed: speedCard(flight, by, ev, smooth),

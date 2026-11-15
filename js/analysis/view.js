@@ -331,14 +331,23 @@ export function timelineHtml(jump) {
 const takeHtml = c => (c?.take ? `<div class="take-card"><span>Hlavná vec</span><p>${esc(c.take)}</p></div>` : '');
 
 // els: slots from index.html. player: null when the clip is no longer on the phone.
-export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null, sex = 'male', name = '', height = null } = {}) {
+// Hand-set contact frames (2026-11-15, Stanley: an "Upraviť" button first, then "Dotyk je tu").
+// Editing stays on across the re-render that follows a change, off for a new attempt.
+const EDGE_SET = { penTD: 'Dotyk predposledného', penTO: 'Odlepenie predposledného', TD: 'Dotyk', TO: 'Odraz' };
+const EDGE_HINT = { penTD: 'prvú snímku, keď je chodidlo na zemi', penTO: 'poslednú snímku, keď je špička ešte na zemi', TD: 'prvú snímku, keď je chodidlo na doske', TO: 'poslednú snímku, keď je špička ešte na doske' };
+// '+1 snímka', '−2 snímky': the player counts frames from the start of its cut, so the bar speaks in steps
+const steps = n => `${n > 0 ? '+' : '−'}${Math.abs(n)} ${Math.abs(n) === 1 ? 'snímka' : Math.abs(n) < 5 ? 'snímky' : 'snímok'}`;
+const EDGE_REACH = 3;   // frames either side of the analysis' frame
+let editOn = false, editSel = null;   // the phase being edited stays selected after the numbers are read again
+export const stopEdit = () => { editOn = false; editSel = null; };
+export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null, sex = 'male', name = '', height = null, onEdge = null } = {}) {
   // The what-if pick is the one thing; "Hlavná vec" says the same (Stanley approved, 2026-11-14).
   const wi = whatIf(jump, sex, { height });
   const pickTake = wi?.items?.[0]?.take;
   els.pickTake = pickTake && name ? `${name}, ${pickTake}.` : null;
   const phases = jump.phases ?? [];
   const firstFix = jump.coach?.fixes?.[0]?.phase;
-  let sel = phases.find(p => p.id === firstFix)?.id ?? phases.find(p => p.id === 'plant')?.id ?? phases[0]?.id;
+  let sel = (editOn && phases.find(p => p.id === editSel)?.id) || (phases.find(p => p.id === firstFix)?.id ?? phases.find(p => p.id === 'plant')?.id ?? phases[0]?.id);
   let chipFrame = null;
 
   const s = scoreOf(jump);
@@ -358,13 +367,38 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
     player.setLoop(true);
   }
 
-  const markChip = () => els.chips.querySelectorAll('.kf').forEach(b => b.classList.toggle('on', +b.dataset.frame === chipFrame));
-  if (player) player.onFrame = f => { chipFrame = f; markChip(); };
+  const markChip = () => els.chips.querySelectorAll('.kf[data-frame]').forEach(b => b.classList.toggle('on', +b.dataset.frame === chipFrame));
+  if (player) player.onFrame = f => { chipFrame = f; markChip(); drawBar(); };
+  // "Upraviť" and its bar: one "… je tu · frame" button per contact edge of the phase, live only
+  // within EDGE_REACH frames of the analysis' frame, so a slip of the finger can't move it far.
+  const edgesOf = p => (p?.keyFrames ?? []).filter(k => k.frame != null && EDGE_SET[k.id]);
+  function editHtml(p) {
+    if (!onEdge || !player || !edgesOf(p).length) return '';
+    return `<button class="kf kf-edit" data-edit>${editOn ? 'Hotovo' : 'Upraviť'}</button>`;
+  }
+  // On the video: which frame the analysis has, and "… je tu · frame" for the one on screen.
+  function drawBar() {
+    const stage = player?.stage;
+    if (!stage) return;
+    let bar = stage.querySelector('.kf-bar');
+    const p = phases.find(x => x.id === sel), list = editOn ? edgesOf(p) : [];
+    if (!list.length) { bar?.remove(); return; }
+    if (!bar) { bar = document.createElement('div'); bar.className = 'kf-bar'; stage.appendChild(bar); }
+    const cur = player.index;
+    bar.innerHTML = list.map(k => {
+      const ok = cur !== k.frame && Math.abs(cur - k.frame) <= EDGE_REACH;
+      const off = cur - k.frame;
+      return `<div class="kf-edge"><p><b>${esc(EDGE_SET[k.id])}</b>${k.hand ? ' · upravené ručne' : ''} · ${off ? `teraz ${steps(off)}` : 'si na ňom'}</p>
+        ${ok ? '' : `<small>Šípkami ‹ › nájdi ${EDGE_HINT[k.id]} (do ${EDGE_REACH} snímok).</small>`}
+        <div class="kf-btns"><button class="kf-set" data-edge-set="${k.id}"${ok ? '' : ' disabled'}>${esc(EDGE_SET[k.id])} je tu${off && ok ? ` (${steps(off)})` : ''}</button>${k.hand ? `<button class="kf-undo" data-edge-reset="${k.id}">Vrátiť</button>` : ''}</div></div>`;
+    }).join('');
+  }
 
   function select(id, { metric = null, scroll = false } = {}) {
     const p = phases.find(x => x.id === id);
     if (!p) return;
     sel = id;
+    if (editOn) editSel = id;
     els.tiles.querySelectorAll('.tile').forEach(t => {
       const on = t.dataset.phase === id;
       t.classList.toggle('on', on);
@@ -374,8 +408,8 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
     els.chips.innerHTML = (p.keyFrames ?? []).filter(k => k.frame != null).map(k => {
       const ms = tdTime != null ? (player.ts[k.frame] - tdTime) * 1000 : null;
       const t = ms == null ? '' : `<small>${Math.abs(ms) < 0.5 ? '0 ms' : `${ms > 0 ? '+' : '−'}${Math.abs(ms).toFixed(0)} ms`}</small>`;
-      return `<button class="kf" data-frame="${k.frame}">${esc(k.label)}${t}</button>`;
-    }).join('');
+      return `<button class="kf${k.hand ? ' hand' : ''}" data-frame="${k.frame}">${esc(k.label)}${k.hand ? ' ✎' : ''}${t}</button>`;
+    }).join('') + editHtml(p);
     const rows = (p.metrics ?? []).map(m => metricRow(m, m.key === metric)).join('');
     els.detail.innerHTML = `<h2>${esc(p.label)}</h2>${rows || `<p class="met-why">${esc(p.note ?? (p.id === 'landing' ? 'Dopad nie je v zábere, táto fáza sa nedá zmerať.' : 'Táto fáza nie je na videu vidieť.'))}</p>`}${noReplayNote ? `<p class="note">${esc(noReplayNote)}</p>` : ''}`;
     if (player) {
@@ -383,10 +417,21 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
       player.setBands(phases.map(x => ({ from: x.from, to: x.to, id: x.id, on: x.id === id })));
     }
     markChip();
+    drawBar();
     if (scroll) els.tiles.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   els.after.onclick = e => {
+    if (e.target.closest('[data-edit]')) {
+      editOn = !editOn; editSel = editOn ? sel : null; select(sel);
+      // the video and its arrows in view, the frame on the analysis' contact
+      if (editOn && player) { const k = edgesOf(phases.find(x => x.id === sel))[0]; if (k) { player.pause(); player.show(k.frame); } requestAnimationFrame(() => els.playerCard.scrollIntoView({ block: 'end' })); }
+      return;
+    }
+    const set = e.target.closest('[data-edge-set]');
+    if (set && player && !set.disabled) return onEdge?.(set.dataset.edgeSet, player.index);
+    const reset = e.target.closest('[data-edge-reset]');
+    if (reset) return onEdge?.(reset.dataset.edgeReset, null);
     const tileBtn = e.target.closest('[data-phase]');
     if (tileBtn) return select(tileBtn.dataset.phase);
     const link = e.target.closest('[data-go-phase]');

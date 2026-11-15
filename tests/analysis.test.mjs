@@ -375,3 +375,29 @@ test('a late named landing is moved to where the heels stop in the sand', { skip
   const reach = j.metrics.find(m => m.key === 'landingReach');
   assert.ok(reach.value > 0.35, `reach ${reach.value}`);
 });
+
+// Contact frames set by hand on the replay ("Upraviť" → "Dotyk je tu", 2026-11-15): they replace the
+// detected ones, every number follows, an out-of-order frame is refused, and the flag marks them.
+import { cleanEdges } from '../js/analysis/jump.js';
+test('hand-set contact frames win, numbers follow, nonsense is refused', { skip: !hasReal('IMG_4390') }, () => {
+  const file = new URL('./fixtures/_real_IMG_4390_pose.json', import.meta.url);
+  const r = JSON.parse(readFileSync(file, 'utf8'));
+  const fix = a => a.map(k => (k ? Float64Array.from(k, v => (v == null ? NaN : v)) : null));
+  r.clean = fix(r.clean); r.smooth = fix(r.smooth);
+  const ts = r.fps ? undefined : r.clean.map((_, i) => i / 120);
+  const base = analyzeJump(r, 'female', ts), f0 = frames(base);
+  const td = f0.TD - 1;
+  const j = analyzeJump(r, 'female', ts, { edges: { TD: td } });
+  assert.equal(frames(j).TD, td);
+  assert.equal(j.eventsSource, 'hand');
+  assert.deepEqual(j.edgesUsed, { TD: td });
+  assert.equal(j.keyFrames.find(k => k.id === 'TD').hand, true);
+  assert.equal(j.phases.find(p => p.id === 'plant').keyFrames.find(k => k.id === 'TD').hand, true);
+  // one frame longer on the board: + 1/fps
+  assert.ok(Math.abs(by(j).contactTO.value - by(base).contactTO.value - 1000 / j.fps) < 0.5, `${by(j).contactTO.value} vs ${by(base).contactTO.value}`);
+  // a touchdown after the toe-off is no contact: the detected frames stand
+  const bad = analyzeJump(r, 'female', ts, { edges: { TD: f0.TO + 5 } });
+  assert.equal(frames(bad).TD, f0.TD); assert.equal(bad.edgesUsed, null);
+  assert.equal(cleanEdges({ TD: 4.5, TO: 'x', penTD: 12 }).penTD, 12);
+  assert.equal(cleanEdges({}), null); assert.equal(cleanEdges(null), null);
+});

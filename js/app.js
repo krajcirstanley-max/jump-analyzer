@@ -3,13 +3,13 @@ import { inspectClip, VERDICT } from './footage.js';
 import { FrameSource } from './frames.js';
 import { Player } from './player.js';
 import { skeletonOverlay } from './pose/overlay.js';
-import { analyzeJump } from './analysis/jump.js';
+import { analyzeJump, cleanEdges } from './analysis/jump.js';
 import { expectedDistance } from './analysis/runup.js';
 import { coaching } from './analysis/coach.js';
 import { jointLabels, idealOverlay, flightOverlay } from './analysis/labels.js';
 import { centreOfMass } from './analysis/kinematics.js';
 import { idealsFor } from './analysis/ideal.js';
-import { renderResult, showCoach, runupHtml, firstCellHtml } from './analysis/view.js';
+import { renderResult, showCoach, runupHtml, firstCellHtml, stopEdit } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
 import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
@@ -22,7 +22,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.20.0';
+const APP_VERSION = '0.21.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -256,9 +256,9 @@ async function swapAthlete() {
   if (!showJump()) return;
   await saved;
   const newId = resultId;
-  const corrected = old.measured != null || old.split != null;
-  if (old.feel != null || old.runup != null || corrected || old.tapeFrom != null) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null, measured: old.measured ?? null, split: old.split ?? null, tapeFrom: old.tapeFrom ?? null });
-  if (newId === oldId) { if (corrected) { Object.assign(jump, { measured: old.measured ?? null, split: old.split ?? null, tapeFrom: old.tapeFrom ?? null }); rejudge(newId, old.runup ?? null, true); } return; }
+  const corrected = old.measured != null || old.split != null || !!cleanEdges(old.edges);
+  if (old.feel != null || old.runup != null || corrected || old.tapeFrom != null || old.edges) await hist.patchAttempt(newId, { feel: old.feel ?? null, runup: old.runup ?? null, measured: old.measured ?? null, split: old.split ?? null, tapeFrom: old.tapeFrom ?? null, edges: cleanEdges(old.edges) });
+  if (newId === oldId) { if (corrected) { Object.assign(jump, { measured: old.measured ?? null, split: old.split ?? null, tapeFrom: old.tapeFrom ?? null, edges: cleanEdges(old.edges) }); rejudge(newId, old.runup ?? null, true); } return; }
   // The player still reads the old clip: let go of it, drop the old attempt, open the new one.
   runId++;
   clearResult();
@@ -276,6 +276,7 @@ function setBusy(on) {
 
 // One state at a time: idle, progress, message, or the result itself.
 function clearResult() {
+  stopEdit();
   abort?.abort(); abort = null;
   dropHeld();
   poseWorker?.terminate(); poseWorker = null;
@@ -736,9 +737,9 @@ const typedSplit = j => (j?.split != null && !(Math.abs(j.split - (j.speed?.spli
 async function rejudge(id, v, force = false) {
   if (!pose || !jump || jump.error || (!force && (jump.runupJudged ?? null) === v)) return;
   const a = resultAthlete, who = ATHLETES[a];
-  const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null, split: typedSplit(jump) });
+  const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null, split: typedSplit(jump), edges: jump.edges ?? null });
   if (next.error || id !== resultId) return;
-  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v });
+  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v, edges: jump.edges ?? null });
   if (player) { setOverlays(); player.refresh(); }
   await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump });
   if (id === resultId) present(jump.feel ?? null);
@@ -818,6 +819,19 @@ function present(feel, noReplayNote) {
       await hist.patchAttempt(id, { feel: n });
       renderLists();
     },
+    // a contact frame set by hand (frame) or given back to the analysis (null): saved on the
+    // attempt and every number read again with it
+    onEdge: async (key, frame) => {
+      const id = resultId;
+      if (!id || !jump || jump.error) return;
+      await saved;
+      const edges = { ...(jump.edges ?? {}) };
+      if (frame == null) delete edges[key]; else edges[key] = frame;
+      jump.edges = cleanEdges(edges);
+      await hist.patchAttempt(id, { edges: jump.edges });
+      await rejudge(id, jump.runup ?? null, true);
+      if (frame != null && jump.edgesUsed?.[key] !== frame) showMsg('warn', 'Túto snímku nejde použiť. ', 'Dotyk a odraz by išli mimo poradia.');
+    },
   });
   $('res-ask').classList.toggle('hidden', !cloudReady() || !jump || !!jump.error);
 }
@@ -840,6 +854,7 @@ async function openAttempt(id) {
   jump.measured = rec.measured ?? null;
   jump.split = rec.split ?? null;
   jump.tapeFrom = rec.tapeFrom ?? null;
+  jump.edges = cleanEdges(rec.edges);
   awaitingCoach = !!rec.coachPending;
   resultId = id;
   showPlace(id, rec.athlete);

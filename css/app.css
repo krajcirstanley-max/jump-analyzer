@@ -680,3 +680,15 @@ div.att-open { cursor: default; }
 .cmp-tag.flipped b::after { content: ' · zrkadlovo'; font-weight: 500; opacity: .8; }
 /* the sprint advice shows its line on the run (the jump's coach card hides its own: it sits above) */
 .coach.sp-advice .take { display: block; }
+/* hand-set contact frames: "Upraviť" then "Dotyk je tu" on the video (view.js) */
+.kf.kf-edit { margin-left: auto; font-weight: 700; color: var(--accent); border-color: var(--accent); }
+.kf.hand { border-style: dashed; }
+.kf-bar { position: absolute; left: 8px; right: 8px; top: 54px; display: grid; gap: 6px; z-index: 3; }   /* below "Ty / Ideál", clear of the feet */
+.kf-edge { background: rgba(10, 12, 16, 0.82); color: #fff; border-radius: 14px; padding: 8px 10px; }
+.kf-edge p { margin: 0 0 6px; font-size: 13.5px; }
+.kf-edge small { display: block; color: #d6d3cc; font-size: 12.5px; margin: -2px 0 6px; }
+.kf-btns { display: flex; gap: 8px; }
+.kf-btns button { appearance: none; border: 0; border-radius: 999px; min-height: 44px; font: 700 15px -apple-system, system-ui, sans-serif; padding: 0 16px; cursor: pointer; }
+.kf-btns .kf-set { flex: 1; background: #fff; color: #111; }
+.kf-btns .kf-set[disabled] { opacity: .35; }
+.kf-btns .kf-undo { background: transparent; color: #fff; border: 1px solid rgba(255, 255, 255, .6); }
