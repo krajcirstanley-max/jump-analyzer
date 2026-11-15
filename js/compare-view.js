@@ -159,7 +159,7 @@ export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
         <div class="cmp-pane"><div class="player cmp-player" data-side="a"></div>${tag(L, 'l')}<span class="cmp-ph" data-ph="a"></span></div>
         <div class="cmp-pane"><div class="player cmp-player" data-side="b"></div>${tag(R, 'r')}<span class="cmp-ph" data-ph="b"></span></div>
       </div>
-      <div class="cmp-scrub"><button class="cmp-play" data-cmp="play" aria-label="Prehrať">▶</button><input type="range" class="cmp-range" min="0" value="0" step="1" aria-label="Čas"><button class="chip cmp-speed" data-cmp="speed">½×</button></div>
+      <div class="cmp-scrub"><button class="cmp-play" data-cmp="play" aria-label="Prehrať">▶</button><input type="range" class="cmp-range" min="0" value="0" step="1" aria-label="Čas"><button class="chip cmp-speed" data-cmp="speed">½×</button><button class="chip cmp-flip" data-cmp="flip" aria-label="Zrkadliť ľavé video" aria-pressed="false">⇋</button></div>
       <div class="filt cmp-chips">${CHIPS.map(([id, label]) => `<button data-cmp-ph="${id}">${label}</button>`).join('')}</div>
       <p class="note">Obe videá idú spolu a každú chvíľu skoku prejdú naraz. Ťuk na fázu ich zastaví na jej snímke.</p>
     </section>
@@ -176,6 +176,10 @@ export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
       return;
     }
     const [pA, pB] = panes.map(p => p.player);
+    // run the other way (one to the left, one to the right): the older one is mirrored so both run
+    // the same way (Stanley, 2026-11-15); the button under the videos turns it over by hand
+    const dirA = L.rec.jump?.dir, dirB = R.rec.jump?.dir;
+    if (dirA && dirB && dirA !== dirB) setMirror(pA, true);
     const pairs = anchorPairs(L.rec.jump, pA.ts, R.rec.jump, pB.ts);
     state = { a: L, b: R, pairs, sel: 'toeoff', panes };
     pB.speed = 0.5;
@@ -196,6 +200,14 @@ export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
     await pB.show(Math.max(0, start - 10));
     follow(pB.index);
     drawNumbers();
+  }
+
+  function setMirror(p, on) {
+    p.mirror = on;
+    p.refresh?.();
+    const b = root.querySelector('[data-cmp="flip"]'), t = root.querySelector('.cmp-tag.l');
+    b?.classList.toggle('on', on); b?.setAttribute('aria-pressed', String(on));
+    t?.classList.toggle('flipped', on);
   }
 
   // Which phase each pane is in, under it.
@@ -239,6 +251,7 @@ export function initCompare({ root, athletes, listAll, loadOne, makePane }) {
       if (pB.playing) { pB.pause(); e.target.textContent = '▶'; } else { pA.pause(); pB.play(); e.target.textContent = '❚❚'; }
       return;
     }
+    if (e.target.closest('[data-cmp="flip"]')) { setMirror(pA, !pA.mirror); return; }
     if (e.target.closest('[data-cmp="speed"]')) {
       const s = { 0.5: 0.25, 0.25: 1, 1: 0.5 }[pB.speed] ?? 0.5;
       pB.speed = s; e.target.textContent = s === 1 ? '1×' : s === 0.5 ? '½×' : '¼×';

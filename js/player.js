@@ -62,6 +62,7 @@ export class Player {
     this.playing = false;
     this.view = { s: 1, tx: 0, ty: 0 };   // zoom/pan on top of the fit-to-stage scale
     this.overlays = [];                   // fn(ctx, toCanvas, index)
+    this.mirror = false;                  // drawn mirrored left-right (comparing a jump run the other way)
     this.frameHooks = [];                 // fn(index) after a frame is drawn, besides onFrame
     this.pending = null;                  // newest frame asked for and not drawn yet
     this.waiting = [];                    // show() promises to settle once it is drawn
@@ -279,7 +280,9 @@ export class Player {
   }
 
   // Maps frame pixel coordinates to canvas pixels (for overlays).
-  toCanvas = (x, y) => [x * this.fit * this.view.s + this.view.tx, y * this.fit * this.view.s + this.view.ty];
+  // Mirrored: the frame flips, and so do the points, so the skeleton stays on the athlete while
+  // every label is still drawn the right way round.
+  toCanvas = (x, y) => [(this.mirror ? this.src.width - x : x) * this.fit * this.view.s + this.view.tx, y * this.fit * this.view.s + this.view.ty];
 
   #redraw() {
     const { ctx, canvas } = this;
@@ -290,7 +293,8 @@ export class Player {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (!this.bmp) return;
     const k = this.fit * this.view.s;
-    ctx.setTransform(k, 0, 0, k, this.view.tx, this.view.ty);
+    if (this.mirror) ctx.setTransform(-k, 0, 0, k, this.view.tx + this.src.width * k, this.view.ty);
+    else ctx.setTransform(k, 0, 0, k, this.view.tx, this.view.ty);
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.bmp, 0, 0, this.src.width, this.src.height);
     ctx.setTransform(1, 0, 0, 1, 0, 0);

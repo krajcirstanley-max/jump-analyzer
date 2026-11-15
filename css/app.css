@@ -676,3 +676,5 @@ div.att-open { cursor: default; }
 .cmp-pick small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .cmp-go { color: var(--muted); font-size: 20px; }
 #res-compare { width: 100%; }
+.cmp-flip { flex: 0 0 auto; min-width: 44px; }
+.cmp-tag.flipped b::after { content: ' · zrkadlovo'; font-weight: 500; opacity: .8; }
