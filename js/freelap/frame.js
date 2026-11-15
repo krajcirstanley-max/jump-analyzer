@@ -98,14 +98,15 @@ export function rep(ad, laps = ad.laps ?? []) {
   // frames carry other numbers in those bytes (2026-11-15: legs 1867777 + -1868514 + 740 = 3,58
   // on four runs); then the run keeps its lap alone, and a later frame with real splits fills them.
   const real = laps.map(v => v & MASK).every((v, i, a) => v > (i ? a[i - 1] : from) && v < fin);
-  let prev = from;
-  for (const v of real ? laps : []) { legs.push((v & MASK) - prev); prev = v & MASK; }
-  legs.push(fin - prev);
+  // Each crossing rounded from the start, the legs their differences: they add up to the lap to
+  // the hundredth, as on MyFreelap (rounding each leg on its own gave 9,30 for a 9,29 lap).
+  const cum = [...(real ? laps : []).map(v => centiseconds((v & MASK) - from)), centiseconds(fin - from)];
+  cum.forEach((c, i) => legs.push(c - (i ? cum[i - 1] : 0)));
   return {
     chip: ad.chip, flag: ad.flag, ...(ad.cut && real ? { cut: true } : {}),
     lap: seconds((ad.block & MASK) - (ad.fromLap & MASK)),
     total: seconds((ad.block & MASK) - (ad.offset & MASK)),
-    legs: legs.map(seconds),
+    legs: legs.map(c => c / 100),
   };
 }
 

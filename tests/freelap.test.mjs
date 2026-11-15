@@ -76,3 +76,19 @@ test('a third crossing cut off by the end of the frame marks the run, so its dis
   assert.equal(runMetres(r), null);
   assert.equal(rep(decodeAdvertisement(buildAdvertisement({ prefix: 'BD', chipId: 4125, offset: from, fromLap: from, block: from + t(3.3), laps: [from + t(1.1), from + t(2.2)] }))).cut, undefined);
 });
+
+// Stanley's nRF Connect captures, 2026-11-15 15:46 and 15:49 (BA-8358), whole frames as iOS gives
+// them (49 and 51 bytes after the company ID): 3-byte crossings, three and four legs.
+test('real 30 m and 40 m frames: 3-byte crossings, legs that add up to the lap', () => {
+  const r3 = rep(decodeAdvertisement(hexBytes('5800 4241 A620 837F 2600 837F 2600 0AA6 2600 000D A1D2 3311 CB88 2658 9426 0000 0000 0000 0000 0000 0000 0000 0000 0000 00')));
+  assert.equal(r3.lap, 9.63);
+  assert.deepEqual(r3.legs, [2.32, 2.89, 4.42]);
+  const r4 = rep(decodeAdvertisement(hexBytes('5800 4241 A620 37C5 2900 37C5 2900 61EA 2900 000D A1D2 3111 47CB 2997 D629 65E1 2900 0000 0000 0000 0000 0000 0000 0000 0000 00')));
+  assert.equal(r4.lap, 9.29);
+  assert.deepEqual(r4.legs, [1.52, 2.82, 2.7, 2.25]);   // crossings 1,52 · 4,34 · 7,04 · 9,29
+  assert.equal(r4.cut, undefined);
+  assert.equal(Math.round(r4.legs.reduce((a, b) => a + b, 0) * 100) / 100, r4.lap);
+  // an empty frame (chip idle) is no run
+  const idle = decodeAdvertisement(hexBytes('5800 0000 0000 0000 0000 0000 0000 0000 0000 0000 A1D2 3111'));
+  assert.ok(!idle || !(rep(idle).lap > 0));
+});

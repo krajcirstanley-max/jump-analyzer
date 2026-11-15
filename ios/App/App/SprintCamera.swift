@@ -549,9 +549,10 @@ final class FreelapEar: NSObject, CBCentralManagerDelegate {
         let from = fromLap & mask, fin = block & mask
         var real = true, p0 = from
         for v in laps { let m = v & mask; if m <= p0 || m >= fin { real = false; break }; p0 = m }
-        var legs: [Double] = [], prev = from
-        for v in (real ? laps : []) { legs.append(sec((v & mask) - prev)); prev = v & mask }
-        legs.append(sec(fin - prev))
+        // crossings rounded from the start, legs their differences: they add up to the lap
+        let cum = (real ? laps : []).map { sec(($0 & mask) - from) } + [sec(fin - from)]
+        var legs: [Double] = []
+        for (i, c) in cum.enumerated() { legs.append(((c - (i > 0 ? cum[i - 1] : 0)) * 100).rounded() / 100) }
         let lap = sec((block & mask) - (fromLap & mask))
         guard lap > 0, lap < 600 else { return nil }
         return Frame(key: "\(chip):\(fromLap):\(block)", chip: chip, lap: lap, legs: legs)
