@@ -22,7 +22,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.19.2';
+const APP_VERSION = '0.20.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -102,6 +102,7 @@ const sprintView = initSprint({
   onDone: (rec, o) => { refreshFeeds(); if (!o?.quiet) openDetail('sprint', rec.id); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
   makePlayer: clipPlayer,
+  onAsk: id => openSprintChat(id),
 });
 const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
 // Two jumps side by side: each its own player with its skeleton and angles, lined up on the jump.
@@ -1002,7 +1003,7 @@ document.addEventListener('click', e => {
   if (it.dataset.item === 'skok') return void openAttempt(it.dataset.id);
   openDetail(it.dataset.item, it.dataset.id, it.dataset.who);
 });
-$('back').addEventListener('click', () => showTab(tab === 'chat' ? 'result' : backTo));
+$('back').addEventListener('click', () => showTab(tab === 'chat' ? chatBack : backTo));
 $('gear').addEventListener('click', () => showTab('settings'));
 
 // The athlete in the header: who Progres shows, and the guess for a clip until the server tells.
@@ -1100,7 +1101,7 @@ function summaryOf(r) {
 // ---------- Opýtaj sa: a chat about the jump on screen ----------
 // The server sees this jump (numbers against the norms, the O koľko ďalej card, the earlier jumps)
 // plus a digest of the athletes' own notes (server/chat.py). The conversation is kept on the attempt.
-let chat = { id: null, messages: [], busy: false };
+let chat = { id: null, kind: 'jump', messages: [], busy: false };
 const n2 = (v, d = 2) => (Number.isFinite(v) ? Number(v).toFixed(d).replace('.', ',') : null);
 async function chatContext() {
   const a = resultAthlete ?? athlete, who = ATHLETES[a];
@@ -1122,6 +1123,13 @@ async function chatContext() {
   };
 }
 function chatSuggestions() {
+  if (chat.kind === 'sprint') {
+    const c = sprintView.contextOf(chat.id)?.ctx, t = c?.tens ?? [], out = [];
+    if (t.length >= 2 && t[1].time > t[0].time + 0.015) out.push('Prečo bola druhá desiatka pomalšia?');
+    if (c?.sides?.l?.n >= 2 && c?.sides?.r?.n >= 2 && Math.abs(c.sides.r.flight - c.sides.l.flight) >= 0.015) out.push('Čo s rozdielom ľavá a pravá?');
+    if (c?.looks?.aheadCm != null) out.push('Ako vyzerá môj dopad?');
+    return [...out.slice(0, 2), 'Zlepšujem sa?'];
+  }
   const wi = whatIf(jump, ATHLETES[resultAthlete ?? athlete].sex, { height: ATHLETES[resultAthlete ?? athlete].height });
   const Q = { speedLow: 'Ako prísť do dosky rýchlejšie?', flat: 'Ako na strmší odraz?', steep: 'Ako na plochší odraz?', hipDropHigh: 'Čo s bokmi v predposlednom?',
     sitting: 'Ako prebehnúť predposledný?', longContact: 'Ako byť kratšie na doske?', overReach: 'Ako nenaťahovať posledný krok?', landing: 'Ako na lepší doskok?' };
@@ -1139,12 +1147,28 @@ function drawChat() {
   $('ch-input').disabled = chat.busy;
   list.lastElementChild?.scrollIntoView({ block: 'end' });
 }
+// The same chat about a sprint run: its 10s, steps, the foot from the side, left and right, the
+// advice and the athlete's earlier runs (sprint-view.js contextOf); kept on the run.
+function openSprintChat(id) {
+  const c = sprintView.contextOf(id);
+  if (!c) return;
+  if (!(chat?.id === id && chat.busy)) chat = { id, kind: 'sprint', messages: sprintView.chatOf(id), busy: false, error: null };
+  const d = new Date(c.rec.at);
+  $('ch-sub').textContent = `${c.ctx.athlete ?? ''} · šprint ${d.getDate()}. ${d.getMonth() + 1}. ${d.toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' })}`;
+  const bits = [c.ctx.freelap ? `Freelap ${n2(c.ctx.freelap.lap)} s` : null, c.ctx.run?.freq ? `${n2(c.ctx.run.freq)} kr/s` : null, c.ctx.run?.contact ? `zem ${n2(c.ctx.run.contact, 3)} s` : null].filter(Boolean);
+  $('ch-ctx').innerHTML = `Vidí tento beh${bits.length ? `: <b>${esc(bits.join(' · '))}</b>` : ''}, každý krok, tvoje predošlé behy a tvoje poznámky.`;
+  chatBack = 'detail';
+  showTab('chat');
+  drawChat();
+}
+let chatBack = 'result';
 async function openChat() {
   if (!jump || jump.error || !resultId) return;
   const rec = await hist.getAttempt(resultId);
   const who = ATHLETES[resultAthlete ?? athlete];
+  chatBack = 'result';
   // an answer still on its way for this jump: keep that chat, don't drop the pending reply
-  if (!(chat?.id === resultId && chat.busy)) chat = { id: resultId, messages: rec?.chat ?? [], busy: false, error: null };
+  if (!(chat?.id === resultId && chat.busy)) chat = { id: resultId, kind: 'jump', messages: rec?.chat ?? [], busy: false, error: null };
   const d = new Date(rec?.recordedAt || rec?.analysedAt || Date.now());
   $('ch-sub').textContent = `${who.name} · skok ${d.getDate()}. ${d.getMonth() + 1}.${rec?.file ? ` · ${rec.file.replace(/\.[^.]+$/, '')}` : ''}`;
   const by = Object.fromEntries((jump.metrics ?? []).map(m => [m.key, m]));
@@ -1162,7 +1186,10 @@ async function sendChat(text) {
   chat.busy = true; chat.error = null;
   drawChat();
   try {
-    const answer = await askAboutJump(await chatContext(), chat.messages.slice(-12));
+    const sprint = chat.kind === 'sprint';
+    const ctx = sprint ? sprintView.contextOf(id)?.ctx : await chatContext();
+    if (!ctx) throw new Error('Tento beh sa nenašiel.');
+    const answer = await askAboutJump(ctx, chat.messages.slice(-12), { kind: chat.kind });
     if (chat.id !== id) return;
     chat.messages.push({ role: 'assistant', text: answer });
   } catch (err) {
@@ -1173,7 +1200,8 @@ async function sendChat(text) {
   }
   chat.busy = false;
   drawChat();
-  await hist.patchAttempt(id, { chat: chat.messages.slice(-30) }).catch(() => {});
+  if (chat.kind === 'sprint') sprintView.saveChat(id, chat.messages);
+  else await hist.patchAttempt(id, { chat: chat.messages.slice(-30) }).catch(() => {});
 }
 $('res-ask').addEventListener('click', () => openChat());
 $('ch-form').addEventListener('submit', e => { e.preventDefault(); const v = $('ch-input').value; $('ch-input').value = ''; sendChat(v); });

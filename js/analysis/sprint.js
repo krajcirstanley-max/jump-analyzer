@@ -1,3 +1,5 @@
+import { P, has, mid, torsoLength } from './kinematics.js';
+
 // Sprint analysis, in two halves.
 //  - sprintFromMotion (server): what the video alone shows. Contacts, flights, step times, and
 //    for a standing start the moment the athlete moves. Contacts come from each toe's motion
@@ -238,6 +240,52 @@ export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
 // A run with splits cut off (cut) has a last leg longer than 10 m: its distance is not known.
 export const runMetres = run => (run?.cut ? null : run?.legs?.length > 1 || (run?.legs?.length === 1 && run.lap <= 2.2) ? run.legs.length * 10 : null);
 
+// ---------- How the run looks (server, from the pose) ----------
+// For the advice "how it looks" (Stanley, 2026-11-15): per step, where the foot lands against the
+// hips, the shin at touchdown, the trunk at mid-stance and the other knee at toe-off. Read only when
+// the camera sees the step from the side: the stance foot then sweeps from in front of the hips to
+// behind them by at least a torso length (13:15 and 13:11 clips: 1.0-1.8 torsos side on, 0.0-0.7
+// running at or away from the camera, where the hip-hip width test could not tell them apart).
+// aheadShare: the part of that sweep in front of the hips. Times the stance length (Freelap speed x
+// contact time) it gives the cm in front, and the camera's angle cancels out.
+const TORSO_SHARE = 0.288;
+const deg = r => (r * 180) / Math.PI;
+export function stepLooks(kp0, kp1, frameTD, frameTO, kpMid) {
+  const need = ['lhip', 'rhip', 'lsho', 'rsho', 'lknee', 'rknee', 'lank', 'rank'];
+  if (!has(kp0, ...need) || !has(kp1, ...need)) return null;
+  // the stance foot is the lower ankle at touchdown
+  const s = P(kp0, 'lank')[1] >= P(kp0, 'rank')[1] ? 'l' : 'r', o = s === 'l' ? 'r' : 'l';
+  const hip0 = mid(P(kp0, 'lhip'), P(kp0, 'rhip')), hip1 = mid(P(kp1, 'lhip'), P(kp1, 'rhip'));
+  const foot = kp => (has(kp, s + 'heel', s + 'bigtoe') ? mid(P(kp, s + 'heel'), P(kp, s + 'bigtoe')) : P(kp, s + 'ank'));
+  // running direction from the stance: the foot goes from in front of the hips to behind them
+  const d0 = foot(kp0)[0] - hip0[0], d1 = foot(kp1)[0] - hip1[0];
+  if (Math.abs(d0 - d1) < 2) return null;
+  const dir = Math.sign(d0 - d1);
+  const torso = torsoLength(kp0);
+  if (!(torso > 10) || Math.abs(d0 - d1) / torso < 1.0) return null;   // not seen from the side
+  const knee0 = P(kp0, s + 'knee'), ank0 = P(kp0, s + 'ank');
+  const km = kpMid && has(kpMid, 'lsho', 'rsho', 'lhip', 'rhip') ? kpMid : kp0;
+  const sh = mid(P(km, 'lsho'), P(km, 'rsho')), hp = mid(P(km, 'lhip'), P(km, 'rhip'));
+  const oh = P(kp1, o + 'hip'), ok = P(kp1, o + 'knee');
+  return {
+    aheadShare: +((d0 * dir) / Math.abs(d0 - d1)).toFixed(3),                               // of the stance sweep, in front of the hips
+    ahead: +((d0 * dir) / torso * TORSO_SHARE).toFixed(3),                                 // share of body height (camera angle not removed)
+    shin: +deg(Math.atan2((ank0[0] - knee0[0]) * dir, ank0[1] - knee0[1])).toFixed(1),     // + ankle in front of the knee
+    trunk: +deg(Math.atan2((sh[0] - hp[0]) * dir, hp[1] - sh[1])).toFixed(1),              // + leaning forward
+    thigh: +deg(Math.atan2((ok[0] - oh[0]) * dir, ok[1] - oh[1])).toFixed(1),              // other thigh at toe-off: 0 down, 90 level
+    frames: [frameTD, frameTO],
+  };
+}
+// The looks of every step whose frames have a pose.
+export function sprintLooks(track, steps) {
+  return steps.map(st => {
+    const [a, b] = st.frames ?? [];
+    if (!(a >= 0) || !(b >= 0)) return null;
+    const m = Math.round((a + b) / 2);
+    return stepLooks(track[a], track[b], a, b, track[m]);
+  });
+}
+
 // ---------- Freelap half (phone) ----------
 // The Freelap run filmed: heard during the clip (the phone gets it as the chip crosses the last
 // cone), nearest to the clip's end. Only the athlete's own runs when known.
@@ -316,6 +364,24 @@ const sidesOf = steps => {
 };
 
 // Everything the result screens show. video = the server's result, run = the Freelap run (or null).
+// How the run looks, per 10 m and for the whole zone, from the side-on steps (sprintLooks). The
+// foot in front of the hips in cm: its share of the stance times the stance length (the 10 m's speed
+// x the contact), where Freelap timed the step; else the torso-scaled length.
+function looksOf(video, out, { hM, windows }) {
+  const by = new Map((video.steps ?? []).map((s, i) => [s.frames?.[0], video.looks?.[i] ?? null]));
+  const rows = out.steps.map(s => {
+    const l = by.get(s.frames?.[0]);
+    if (!l) return null;
+    const v = s.leg != null && windows?.[s.leg] ? windows[s.leg].v : null;
+    const cm = v && s.contact ? l.aheadShare * v * s.contact * 100 : l.ahead * hM * 100;
+    return { leg: s.leg, aheadCm: cm, shin: l.shin, trunk: l.trunk, thigh: l.thigh, timed: !!v };
+  }).filter(Boolean);
+  if (!rows.length) return null;
+  const avg = (list, k) => (list.length ? +(list.reduce((a, r) => a + r[k], 0) / list.length).toFixed(k === 'aheadCm' ? 0 : 1) : null);
+  const sum = list => (list.length ? { n: list.length, aheadCm: avg(list, 'aheadCm'), shin: avg(list, 'shin'), trunk: avg(list, 'trunk'), thigh: avg(list, 'thigh'), timed: list.every(r => r.timed) } : null);
+  return { all: sum(rows), legs: (out.legs ?? []).map((_, k) => sum(rows.filter(r => r.leg === k))) };
+}
+
 export function analyzeSprint(video, run, { mode = null, who = null, height = null } = {}) {
   const hM = (height ?? SANE.height * 100) / 100;
   const saneLen = len => len >= SANE.length[0] * hM && len <= SANE.length[1] * hM;
@@ -367,6 +433,7 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
     // a step whose 10 m came out unreal is not shown with a length either
     for (const s of out.steps) if (s.length != null && (!saneStep(s.length) || (s.leg != null && out.legStats[s.leg]?.stepLength == null) || (s.leg == null && !out.legStats.some(x => x.stepLength != null)))) s.length = null;
     out.measured = out.steps.some(s => s.length != null);
+    out.looks = looksOf(video, out, { hM, windows });
     out.perLeg = windows.length > 0;   // each 10 m has its own steps (else one frequency for the run)
     return out;
   }
@@ -409,6 +476,9 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
   out.flightFrom = r3(median(st.slice(0, 3).filter(s => s.flight != null).map(s => s.flight)));
   out.flightTo = r3(median(st.filter(s => s.flight != null).slice(-3).map(s => s.flight)));
   out.sides = sidesOf(st.slice(1)); // the first step out of the start is no running step
+  // seen from the side: the shin at touchdown and the trunk, per 10 m (the advice reads the first
+  // steps out of the start and the rise); no timed window, so no foot-in-front in cm from speed
+  out.looks = looksOf(video, out, { hM, windows: null });
   return out;
 }
 

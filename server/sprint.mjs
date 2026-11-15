@@ -10,7 +10,7 @@ import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
 import { JI } from '../js/pose/models.js';
-import { sprintFromMotion } from '../js/analysis/sprint.js';
+import { sprintFromMotion, sprintLooks } from '../js/analysis/sprint.js';
 import { probe, openFrames } from './frames.mjs';
 
 // ---------- Pixels ----------
@@ -246,6 +246,9 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, who: kn
     const who = await whoP;
     const sprint = sprintFromMotion({ motion, ts: meta.ts, fps: meta.fps });
     if (sprint.error) return { error: sprint.error };
+    // how each step looks from the side (foot against the hips, shin, trunk, knee): the advice's
+    // "ako to vyzerá"; null where the camera did not see the step from the side
+    sprint.looks = sprintLooks(track, sprint.steps);
     const result = {
       kind: 'sprint', ...sprint, ...(who ? { who } : {}),
       // The raw toe/track motion, rounded: lets a better contact rule be re-run on the phone or

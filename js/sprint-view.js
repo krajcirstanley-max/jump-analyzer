@@ -10,6 +10,7 @@
 import { CHIPS } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { legsFormHtml, readLegs } from './freelap-view.js';
+import { sprintAdvice, runSummary } from './analysis/sprint-advice.js';
 import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
 import { analyzeSprint, pairRun, modeOfRun, runMetres, cleanSteps, SPRINT_ALGO } from './analysis/sprint.js';
 
@@ -72,11 +73,14 @@ function sidesHtml(a) {
     <div class="sp-cd"><p class="sp-lb">Pravá</p><p>zem <b>${n3(r.contact)}</b><br>let po nej <b>${n3(r.flight)}</b></p></div></div>${note}`;
 }
 
-export function resultHtml(rec, a, run, runs, athletes, { extra = 0 } = {}) {
+// the athlete's best Freelap 0-10 m from a standing start (the card and the chat use the same one)
+const bestFirst10Of = (a, run, runs) => (a.kind === 'accel' && run ? Math.min(...runs.filter(r => r.who === a.who && r.legs?.length >= 2 && modeOfRun(r) === 'accel').map(r => r.legs[0])) : null);
+
+export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = [], canAsk = false } = {}) {
   const name = esc(athletes[a.who]?.name ?? '');
   const what = run?.type === 'rozbeh' ? `rozbeh${run.steps ? ` ${run.steps} krokov` : ''}` : `${KIND[a.kind]}${a.distance ? ` ${a.distance} m` : ''}`;
   const title = `${name}${name ? ' · ' : ''}${what}`;
-  const best = a.kind === 'accel' && run ? Math.min(...runs.filter(r => r.who === a.who && r.legs?.length >= 2 && modeOfRun(r) === 'accel').map(r => r.legs[0])) : null;
+  const best = bestFirst10Of(a, run, runs);
   // Each 10 m: its Freelap time and speed, and its steps only where the video measured them.
   const legCards = (a.legStats ?? []).map((l, i) => `<div class="sp-cd"><p class="sp-lb">${a.kind === 'accel' ? `${i * 10}–${i * 10 + 10} m` : `${i + 1}. desiatka`}</p><p class="sp-big">${n2(l.time)}</p>
     <p class="sp-lb">${n1(l.speed)} m/s${l.stepLength != null ? ` · krok ${n2(l.stepLength)} m` : ''}${a.kind !== 'accel' && l.freq != null ? ` · ${n2(l.freq)} kr/s` : ''}${a.kind === 'accel' && l.steps && l.stepLength != null ? ` · ${n1(l.steps)} kroku` : ''}</p></div>`).join('');
@@ -94,6 +98,18 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0 } = {}) {
   } else if (best != null && Number.isFinite(best) && a.legs[0] - best >= 0.03) {
     insight = `<p class="banner warn">0–10 m o ${n2(a.legs[0] - best)} pomalšie ako najlepší čas (${n2(best)}).</p>`;
   }
+  // advice: how it looks, how it should look, one cue (sprint-advice.js); it says what the banner said
+  const adv = sprintAdvice(a, { others, bestFirst10: Number.isFinite(best) ? best : null });
+  if (adv?.fix) insight = '';
+  const adviceHtml = adv ? `<section class="card coach sp-advice">
+      <p class="take">${esc(adv.take)}</p>
+      ${adv.strength ? `<div class="strength"><span>Silná stránka</span><p>${esc(adv.strength)}</p></div>` : ''}
+      ${adv.fix ? `<article class="fix first"><div class="fix-tag">Na ďalší beh</div><p class="cue-say">„${esc(adv.fix.cue)}“</p><h3>${esc(adv.fix.title)}</h3>
+        <p class="sp-lb">Ako to vyzerá</p><p>${esc(adv.fix.looks)}</p><p class="sp-lb">Malo by to byť skôr tak</p><p>${esc(adv.fix.should)}</p>
+        <details><summary>Prečo</summary><p>${esc(adv.fix.why)}</p></details></article>` : '<p class="note">Rovnomerný beh. Na ďalší beh nič nemeň.</p>'}
+    </section>
+    ${adv.then.length ? `<section class="card coach"><h2>Potom</h2>${adv.then.map(t => `<article class="fix"><h3>${esc(t.title)}</h3><p>${esc(t.body)}</p></article>`).join('')}</section>` : ''}` : '';
+  const ask = canAsk ? `<button class="btn primary sp-ask" data-sp-ask="${esc(rec.id)}">Opýtaj sa na tento beh</button>` : '';
   const split = a.kind === 'fly' && a.contact && a.flight ? Math.round((100 * a.contact) / (a.contact + a.flight)) : null;
   const overview = `<section class="card sp-card"><p class="sp-bar-top"><span>Šprint</span><span>${rec.at ? esc(when(rec.at)) : ''}</span></p>
     <h2>${title}</h2>
@@ -118,7 +134,7 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0 } = {}) {
     : '<section class="card sp-card"><p class="note">Video sa k rozboru ukladá od verzie 0.9. Pri starších rozboroch ostalo len vo Fotkách.</p></section>';
   // Only what is measured (Stanley, 2026-11-15): the modelled speed curve and acceleration profile
   // are left out.
-  return video + overview + steps;
+  return video + overview + adviceHtml + ask + steps;
 }
 
 // The video first, the numbers when they come (Stanley, 2026-11-14: "video si viem pozrieť hneď po
@@ -153,7 +169,7 @@ function pendingSteps(rec) {
 // bare: the app's Tréning tab owns the buttons and the list; this root then shows only the open
 // analysis (the detail screen). onProgress(text) and onDone(rec) report back to it.
 export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
-  saveClip = null, loadClip = null, dropClip = null, makePlayer = null }) {
+  saveClip = null, loadClip = null, dropClip = null, makePlayer = null, onAsk = null }) {
   let unsub = null, last = '', busy = 0, progress = '', current = null;   // busy: uploads running
   let clipUrl = null, clipId = null, clipP = null;   // the open analysis's video as an object URL
   let live = null;   // the app's own player on the open clip: { id, player, input }
@@ -237,7 +253,39 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     const run = cleanLegs(rec.runKey ? all.find(r => r.key === rec.runKey) ?? rec.run ?? null : null);
     const who = run?.who ?? rec.who ?? rec.video.who?.id ?? getAthlete()?.id ?? null;
     const a = analyzeSprint(rec.video, run, { mode: run ? null : rec.mode ?? null, who, height: athletes[who]?.height ?? null });
-    return { a, run, html: resultHtml(rec, a, run, all, athletes, { extra: slExtra }) };
+    return { a, run, html: resultHtml(rec, a, run, all, athletes, { extra: slExtra, others: othersOf(rec, who), canAsk: !!onAsk && cloudReady() }) };
+  }
+
+  // The athlete's earlier runs, as the advice compares them (their own usual contact, foot, sides).
+  function othersOf(rec, who) {
+    const all = runs();
+    return load().filter(r => r.id !== rec.id && !r.pending && r.video?.steps && (r.who ?? r.run?.who) === who).slice(0, 12).map(r => {
+      const run = cleanLegs(r.runKey ? all.find(x => x.key === r.runKey) ?? r.run ?? null : null);
+      try { return runSummary(analyzeSprint(r.video, run, { who, height: athletes[who]?.height ?? null })); } catch { return null; }
+    }).filter(Boolean);
+  }
+  // for the chat: the analysis on screen, as numbers
+  function contextOf(id) {
+    const rec = load().find(r => r.id === id);
+    if (!rec || rec.pending) return null;
+    const { a, run } = view(rec), who = run?.who ?? rec.who ?? rec.video?.who?.id ?? null;
+    const best = bestFirst10Of(a, run, runs());
+    const adv = sprintAdvice(a, { others: othersOf(rec, who), bestFirst10: Number.isFinite(best) ? best : null });
+    return { rec, who, ctx: {
+      athlete: athletes[who]?.name ?? null, sex: athletes[who]?.sex ?? null, heightCm: athletes[who]?.height ?? null,
+      recordedAt: rec.at ? new Date(rec.at).toISOString() : null, kind: a.kind, distanceM: a.distance,
+      freelap: run ? { lap: run.lap, legs: run.legs } : null,
+      tens: (a.legStats ?? []).map((l, k) => ({ m: `${k * 10}-${k * 10 + 10}`, time: l.time, speed: l.speed, stepLength: l.stepLength, freq: l.freq, steps: l.steps,
+        footInFrontCm: a.kind === 'fly' && a.looks?.legs?.[k]?.timed ? a.looks.legs[k].aheadCm : null,
+        shinAtTouchdownDeg: a.looks?.legs?.[k]?.shin ?? null, trunkLeanDeg: a.looks?.legs?.[k]?.trunk ?? null })),
+      phase: a.kind === 'fly' ? 'maximálna rýchlosť' : 'akcelerácia z miesta a prechod',
+      bestFirst10: Number.isFinite(best) ? best : null,
+      run: { freq: a.freq ?? null, contact: a.contact ?? null, flight: a.flight ?? null, stepTime: a.stepTime ?? null, contactFromTo: a.contactFrom != null ? [a.contactFrom, a.contactTo] : null },
+      looks: a.looks?.all ?? null, sides: a.sides ?? null,
+      steps: (a.steps ?? []).map(s => ({ foot: s.foot, contact: s.contact, flight: s.flight, freq: s.freq ?? null, length: s.length ?? null })),
+      advice: adv ? { take: adv.take, strength: adv.strength, cue: adv.fix?.cue ?? null, looks: adv.fix?.looks ?? null, should: adv.fix?.should ?? null } : null,
+      earlierRuns: othersOf(rec, who).slice(0, 6),
+    } };
   }
 
   // The run's record exists from the start (pending), with its clip, so the video plays at once.
@@ -286,7 +334,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         },
       });
       if (result?.error) throw new CloudError(result.error);
-      const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, algo: result.algo ?? 1, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
+      const video = { steps: result.steps, looks: result.looks ?? null, start: result.start, modeGuess: result.modeGuess, algo: result.algo ?? 1, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
       let run = null;
       // the times may have come in after the upload began: the record has the latest
       filmed = load().find(r => r.id === pid)?.filmed ?? filmed;
@@ -396,6 +444,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       retry(rt2.dataset.spRetry).then(ok => { if (!ok) alert('Video sa v telefóne nenašlo.'); });
       return;
     }
+    const ak = e.target.closest('[data-sp-ask]');
+    if (ak && onAsk) { onAsk(ak.dataset.spAsk); return; }
     const k = e.target.closest('[data-sp-kind]');
     if (k && current) { const list = load(), r = list.find(x => x.id === current); if (r) { r.mode = k.dataset.spKind; store(list); draw(); } }
   });
@@ -461,7 +511,9 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   })();
   draw();
   return {
-    shown: draw, film, upload, records: load,
+    shown: draw, film, upload, records: load, contextOf,
+    chatOf: id => load().find(r => r.id === id)?.chat ?? [],
+    saveChat: (id, messages) => patch(id, x => { x.chat = messages.slice(-30); }),
     open(id) { current = id; slExtra = 0; draw(); if (cloudReady()) rerunOld(id); },
     busy: () => busy > 0,
     // One line for the Tréning and História lists.

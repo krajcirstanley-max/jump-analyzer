@@ -73,6 +73,36 @@ def test_an_error_result_is_not_an_answer():
             assert "Invalid" not in str(e)
 
 
+
+def test_a_sprint_run_gets_the_sprint_coach():
+    seen = {}
+    def run(args, input, **kw):
+        seen["system"] = args[args.index("--system-prompt") + 1]
+        seen["input"] = input
+        class P: returncode = 0; stdout = '{"result": "Ako to vyzerá…"}'; stderr = ""
+        return P()
+    out = C.answer({"sprint": {"tens": [{"m": "0-10", "time": 1.01}]}, "messages": [{"role": "user", "text": "Prečo?"}]}, "tok", run=run)
+    assert out == {"answer": "Ako to vyzerá…"}
+    assert "šprint" in seen["system"] and "tlač zem dozadu" in seen["system"] and "vysoké koleno" in seen["system"].lower()
+    assert seen["input"].startswith("Kontext behu")
+    ctx, msgs, kind = C.validate({"jump": {"a": 1}, "messages": [{"role": "user", "text": "x"}]})
+    assert kind == "jump"
+
+
+def test_the_chat_keeps_the_cue_under_the_run_and_knows_the_phases():
+    seen = {}
+    def run(args, input, **kw):
+        seen["system"] = args[args.index("--system-prompt") + 1]
+        seen["input"] = input
+        class P: returncode = 0; stdout = '{"result": "ok"}'; stderr = ""
+        return P()
+    C.answer({"sprint": {"advice": {"cue": "udri zem ako ťažké vrece"}}, "messages": [{"role": "user", "text": "Tlačiť alebo ťahať?"}]}, "tok", run=run)
+    assert "povel „udri zem ako ťažké vrece“" in seen["input"]
+    assert "NIE „tlač dozadu“" in seen["system"] and "Push a pull" in seen["system"] and "počas behu už nič nerieš" in seen["system"]
+    C.answer({"sprint": {"advice": None}, "messages": [{"role": "user", "text": "x"}]}, "tok", run=run)
+    assert "Pod behom" not in seen["input"]
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
