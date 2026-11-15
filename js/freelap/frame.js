@@ -47,15 +47,27 @@ export function decodeAdvertisement(bytes) {
   const prefix = String.fromCharCode(b[2], b[3]);
   if (!/^[A-Z]{2}$/.test(prefix)) return null;
   const chipId = u16(b, 4);
+  // Intermediates are 3-byte crossings from byte 24, on the start's clock (its top byte added
+  // back, one wrap allowed). Read as 4-byte values they only came out right with one
+  // intermediate, whose fourth byte is the zero after it; with two (30 m) they read
+  // 1867777 + -1868514 + 740 s, while as 3-byte fields the first gives 1,15-1,18 s on all three
+  // such runs of 2026-11-15 (vault: "Freelap FxChip BLE - format").
+  const from = u32(b, 10) & MASK;
   const laps = [];
-  for (let i = 0; i < MAX_LAPS && 24 + i * 4 + 4 <= b.length; i++) {
-    const v = u32(b, 24 + i * 4);
+  for (let i = 0; i < MAX_LAPS && 24 + i * 3 + 3 <= b.length; i++) {
+    const v = u24(b, 24 + i * 3);
     if (!v) break;
-    laps.push(v);
+    let full = from - (from % 0x1000000) + v;
+    if (full < from) full += 0x1000000;
+    laps.push(full);
   }
+  // A crossing cut short at the end of what the phone received (a 40 m run's third, when only
+  // 32 bytes arrive): the run has more splits than were read.
+  const end = 24 + laps.length * 3;
+  const cut = laps.length < MAX_LAPS && end < b.length && end + 3 > b.length && b.subarray(end).some(x => x);
   return {
     chip: `${prefix}-${String(chipId).padStart(4, '0')}`,   // as printed on the chip, e.g. BA-8358
-    flag: b[1], offset: u32(b, 6), fromLap: u32(b, 10), block: u32(b, 14), laps,
+    flag: b[1], offset: u32(b, 6), fromLap: u32(b, 10), block: u32(b, 14), laps, cut,
     raw: [...b.subarray(18, 24)],   // meaning not settled
   };
 }
@@ -90,7 +102,7 @@ export function rep(ad, laps = ad.laps ?? []) {
   for (const v of real ? laps : []) { legs.push((v & MASK) - prev); prev = v & MASK; }
   legs.push(fin - prev);
   return {
-    chip: ad.chip, flag: ad.flag,
+    chip: ad.chip, flag: ad.flag, ...(ad.cut && real ? { cut: true } : {}),
     lap: seconds((ad.block & MASK) - (ad.fromLap & MASK)),
     total: seconds((ad.block & MASK) - (ad.offset & MASK)),
     legs: legs.map(seconds),
@@ -111,7 +123,11 @@ export function buildAdvertisement({ prefix, chipId, flag = 0, offset, fromLap, 
   const u32le = v => out.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
   for (const v of [offset, fromLap, block]) u32le(v);
   out.push(0x00, 0x0d, 0xa1, 0xd2, 0x33, 0x11);
-  for (let i = 0; i < 2; i++) u32le(laps[i] ?? 0);
+  // 3-byte crossings, padded to the 8 bytes a real frame carries (two crossings and a zero end)
+  const tail = [];
+  for (const v of laps) tail.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff);
+  while (tail.length < 8) tail.push(0);
+  out.push(...tail);
   return Uint8Array.from(out);
 }
 export function buildScanResponse(laps) {

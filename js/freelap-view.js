@@ -117,7 +117,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     rep(r) {
       open = sessionFor(open, r.at);
       store(SESSION_KEY, open);
-      const run = { chip: r.chip, who: r.who, lap: r.lap, legs: r.legs, at: r.at, key: r.key, session: open.id };
+      const run = { chip: r.chip, who: r.who, lap: r.lap, legs: r.legs, at: r.at, key: r.key, session: open.id, ...(r.cut ? { cut: true } : {}) };
       if (pendingRaw.has(r.key)) { run.raw = pendingRaw.get(r.key); pendingRaw.delete(r.key); }
       if (open.plan?.type) { run.type = open.plan.type; if (open.plan.type === 'rozbeh') run.steps = open.plan.steps; }
       reps.unshift(run);
@@ -129,7 +129,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     update(r) {   // the same run, now with its intermediate
       const i = reps.findIndex(x => x.key === r.key);
       if (i < 0 || reps[i].edited) return;   // splits typed by hand win
-      reps[i] = { ...reps[i], lap: r.lap, legs: r.legs };
+      reps[i] = { ...reps[i], lap: r.lap, legs: r.legs, cut: r.cut || undefined };
       save();
       draw();
       for (const f of subs) f('update', reps[i]);
@@ -248,6 +248,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       <div class="fl-row"><div class="fl-who"><b>${esc(name(r))}</b><small>${esc(typeLabel(r))} · ${runMetres(r) ? `${runMetres(r)} m` : ''}</small></div>
         <div class="fl-time"><b>${sec(r.lap)}</b><span>s</span></div></div>
       ${legsHtml(r)}
+      ${r.cut && !r.edited ? '<p class="banner warn">Chip poslal viac medzičasov, ako sa zmestilo do signálu: posledný úsek je dlhší ako 10 m. Doplň ho z MyFreelap.</p>' : ''}
       ${legsFormHtml(r.legs?.length ? r.legs : [r.lap], { extra: draftExtra, orig: !!r.orig })}
       <p class="sp-lb">Čo to bol za beh</p>
       <div class="filt">${b('auto', `Rozpoznať (${TYPES[auto].toLowerCase()})`)}${Object.entries(TYPES).map(([v, l]) => b(v, l)).join('')}</div>
@@ -267,7 +268,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     const r = reps.find(x => x.key === key);
     if (!r) return;
     draftExtra = 0;
-    editRun(key, { legs, lap: sumLegs(legs), edited: true, orig: r.orig ?? { lap: r.lap, legs: r.legs } });
+    editRun(key, { legs, lap: sumLegs(legs), edited: true, cut: undefined, orig: r.orig ?? { lap: r.lap, legs: r.legs, ...(r.cut ? { cut: true } : {}) } });
   };
   detailRoot?.addEventListener('click', e => {
     const r = reps.find(x => x.key === detailKey);
@@ -276,7 +277,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       if (draftExtra) { draftExtra--; drawDetail(); } else if (r.legs?.length > 1) typed(r.key, r.legs.slice(0, -1));
       return;
     }
-    if (r?.orig && e.target.closest('[data-leg-reset]')) { draftExtra = 0; editRun(r.key, { lap: r.orig.lap, legs: r.orig.legs, orig: undefined, edited: undefined }); return; }
+    if (r?.orig && e.target.closest('[data-leg-reset]')) { draftExtra = 0; editRun(r.key, { lap: r.orig.lap, legs: r.orig.legs, cut: r.orig.cut, orig: undefined, edited: undefined }); return; }
     const b = e.target.closest('[data-run-type]');
     if (!b) return;
     const v = b.dataset.runType;

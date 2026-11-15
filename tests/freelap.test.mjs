@@ -47,3 +47,32 @@ test('numbers in the intermediate bytes that are not times give the lap alone (2
   assert.deepEqual(cleanLegs({ lap: 3.58, legs: [1867777.16, -1868514, 740.42] }).legs, [3.58]);
   assert.deepEqual(cleanLegs({ lap: 2.05, legs: [1.01, 1.04] }).legs, [1.01, 1.04]);
 });
+
+test('two intermediates (30 m): 3-byte crossings, the first 10 m as on the three runs of 2026-11-15', () => {
+  // Miška 13:23, lap 3,42: bytes 24-31 as received, its second crossing set where a 30 m run puts it
+  const t = s => Math.round(s * 1024);
+  const from = 3184245, fin = 3187742;
+  const ad = decodeAdvertisement(buildAdvertisement({ prefix: 'BD', chipId: 4125, offset: from, fromLap: from, block: fin, laps: [from + t(1.15), from + t(2.30)] }));
+  const r = rep(ad);
+  assert.deepEqual(r.legs, [1.15, 1.15, 1.12]);
+  assert.equal(r.lap, 3.42);
+  // the frame as it came in: 0f 9b 30 | 87 a3 30 | 00 00 -> first crossing 1,15 s
+  const raw = hexBytes('58 00 4244 1D10 75963000 75963000 1EA43000 000DA1D23311 0F9B30 87A330 0000');
+  const a2 = decodeAdvertisement(raw);
+  assert.equal(Math.round((a2.laps[0] - a2.fromLap) / 10.24) / 100, 1.15);
+  // a crossing on the far side of a 24-bit wrap of the chip's clock
+  const w = 0x1000000 - t(0.5);
+  const ad3 = decodeAdvertisement(buildAdvertisement({ prefix: 'BA', chipId: 8358, offset: w, fromLap: w, block: w + t(2.1), laps: [w + t(1.0)] }));
+  assert.deepEqual(rep(ad3).legs, [1, 1.1]);
+});
+
+test('a third crossing cut off by the end of the frame marks the run, so its distance is not guessed', async () => {
+  const { runMetres } = await import('../js/analysis/sprint.js');
+  const t = s => Math.round(s * 1024), from = 500000;
+  const fr = buildAdvertisement({ prefix: 'BD', chipId: 4125, offset: from, fromLap: from, block: from + t(4.4), laps: [from + t(1.1), from + t(2.2), from + t(3.3)] });
+  const r = rep(decodeAdvertisement(fr.subarray(0, 34)));   // 32 bytes after the company ID, as received
+  assert.equal(r.cut, true);
+  assert.deepEqual(r.legs, [1.1, 1.1, 2.2]);
+  assert.equal(runMetres(r), null);
+  assert.equal(rep(decodeAdvertisement(buildAdvertisement({ prefix: 'BD', chipId: 4125, offset: from, fromLap: from, block: from + t(3.3), laps: [from + t(1.1), from + t(2.2)] }))).cut, undefined);
+});

@@ -235,7 +235,8 @@ export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
 
 // Metres a Freelap run covered: 10 per leg. A run that kept its lap alone (its splits were not
 // real) is 10 m only when the lap could be one; else the distance is not known.
-export const runMetres = run => (run?.legs?.length > 1 || (run?.legs?.length === 1 && run.lap <= 2.2) ? run.legs.length * 10 : null);
+// A run with splits cut off (cut) has a last leg longer than 10 m: its distance is not known.
+export const runMetres = run => (run?.cut ? null : run?.legs?.length > 1 || (run?.legs?.length === 1 && run.lap <= 2.2) ? run.legs.length * 10 : null);
 
 // ---------- Freelap half (phone) ----------
 // The Freelap run filmed: heard during the clip (the phone gets it as the chip crosses the last

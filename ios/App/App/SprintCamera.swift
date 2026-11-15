@@ -530,9 +530,18 @@ final class FreelapEar: NSObject, CBCentralManagerDelegate {
         let chip = String(UnicodeScalar(b[2])) + String(UnicodeScalar(b[3])) + "-" + String(format: "%04d", id)
         let mask: Int64 = 0x7fffffff
         let fromLap = u32(10), block = u32(14)
+        // 3-byte crossings from byte 24 on the start's clock (js/freelap/frame.js): read as 4-byte
+        // values they were right only with one intermediate (2026-11-15, 30 m runs).
+        func u24(_ i: Int) -> Int64 { Int64(b[i]) | Int64(b[i + 1]) << 8 | Int64(b[i + 2]) << 16 }
+        let start = fromLap & mask
         var laps: [Int64] = []
         var i = 24
-        while i + 4 <= b.count, laps.count < 10 { let v = u32(i); if v == 0 { break }; laps.append(v); i += 4 }
+        while i + 3 <= b.count, laps.count < 10 {
+            let v = u24(i); if v == 0 { break }
+            var full = start - (start % 0x1000000) + v
+            if full < start { full += 0x1000000 }
+            laps.append(full); i += 3
+        }
         let sec: (Int64) -> Double = { (Double($0) / 10.24).rounded() / 100 }   // 1/1024 s ticks, to the hundredth
         // Intermediates only when each lies between the start and the finish, in order; some frames
         // carry other numbers there (2026-11-15: legs 1867777 + -1868514 + 740 = 3,58). Same rule
