@@ -11,7 +11,7 @@ import { CHIPS } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { legsFormHtml, readLegs } from './freelap-view.js';
 import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
-import { analyzeSprint, pairRun, modeOfRun, runMetres, SPRINT_ALGO } from './analysis/sprint.js';
+import { analyzeSprint, pairRun, modeOfRun, runMetres, cleanSteps, SPRINT_ALGO } from './analysis/sprint.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = x => (x == null ? '–' : Number(x).toFixed(2).replace('.', ','));
@@ -154,7 +154,7 @@ function pendingSteps(rec) {
 // analysis (the detail screen). onProgress(text) and onDone(rec) report back to it.
 export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
   saveClip = null, loadClip = null, dropClip = null, makePlayer = null }) {
-  let unsub = null, last = '', busy = false, progress = '', current = null;
+  let unsub = null, last = '', busy = 0, progress = '', current = null;   // busy: uploads running
   let clipUrl = null, clipId = null, clipP = null;   // the open analysis's video as an object URL
   let live = null;   // the app's own player on the open clip: { id, player, input }
   let slExtra = 0;   // extra empty 10 m fields in the "doplň časy" form
@@ -189,15 +189,18 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     }
   }
   // The times the camera heard, when they come after the upload began: onto the waiting record.
+  // Also when the analysis already finished (a long clip's save to Photos can outlast it): then the
+  // run and the finish go straight onto the analysis.
   function timesHeard(d) {
-    const l = load(), x = l.find(r => r.filmed?.raw === d.raw);
-    if (!x || !d.times?.length) return;
-    x.filmed = { ...x.filmed, times: d.times, freelap: d.freelap !== false };
-    if (!x.run && d.freelap !== false) {
-      const t = d.times[0];
+    const l = load(), x = l.find(r => d.raw && (r.raw === d.raw || r.filmed?.raw === d.raw));
+    if (!x || !d.times?.length || d.freelap === false) return;
+    const t = d.times.find(y => CHIPS_BY_NAME(athletes)[y.name] === (x.video?.who?.id ?? x.who)) ?? d.times[0];
+    if (x.pending || x.filmed) x.filmed = { ...(x.filmed ?? {}), times: d.times, freelap: true, raw: d.raw };
+    if (!x.run) {
       x.run = runs().find(r => r.key === t.key) ?? cleanLegs({ key: t.key, lap: t.lap, legs: t.legs ?? [], who: CHIPS_BY_NAME(athletes)[t.name] ?? null });
       x.runKey = x.run.key; x.who = x.run.who ?? x.who;
     }
+    if (!x.pending && x.video && x.video.finishAt == null && t.arrived != null) x.video.finishAt = +(t.arrived - LATENCY).toFixed(3);
     store(l);
     if (current === x.id) draw();
   }
@@ -239,9 +242,9 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // The run's record exists from the start (pending), with its clip, so the video plays at once.
   const patch = (id, f) => { const l = load(), x = l.find(r => r.id === id); if (x) { f(x); store(l); } return x; };
   async function upload(file, filmed = null, retryId = null, onServer = null, fresh = false) {
-    if (busy && !filmed && !retryId) return;
+    if (busy > 0 && !filmed && !retryId) return;
     if (!cloudReady()) { say('Najprv ulož prístupový kľúč v nastaveniach.'); draw(); return; }
-    busy = true; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…');
+    busy++; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…');
     let pid = retryId;
     if (!pid) {
       const heard = filmed?.freelap !== false ? filmed?.times?.[0] : null;
@@ -249,7 +252,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const at = filmed?.recordedAt ?? file.lastModified ?? Date.now();
       // what the recorder heard stays on the record, so a retry pairs the run the same way
       const pend = { id: `sp${Date.now()}`, at, pending: true, stage: 'Nahrávam video', video: null, run: run0, runKey: run0?.key ?? null, who: run0?.who ?? getAthlete()?.id ?? null, mode: null,
-        filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null, freelap: filmed.freelap !== false, raw: filmed.raw ?? null } : null };
+        filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null, freelap: filmed.freelap !== false, raw: filmed.raw ?? null } : null,
+        raw: filmed?.raw ?? null };   // the camera's path for this clip: late times find the record by it
       const l = load(); l.unshift(pend);
       for (const old of l.slice(MAX)) if (old.hasClip) dropClip?.(old.id);
       store(l.slice(0, MAX));
@@ -294,8 +298,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const old = load().find(r => r.id === pid);
       if (video.finishAt == null && old?.video?.finishAt != null) video.finishAt = old.video.finishAt;
       if (retryId && old?.runKey && !(filmed?.times?.length)) run = runs().find(r => r.key === old.runKey) ?? old.run ?? run;
+      // Freelap off stays off, also when run again later (filmed is gone by then): only splits typed
+      // by hand (a hand: run) are kept
+      const off = (filmed?.freelap === false || x0?.filmed?.freelap === false || old?.noFreelap) && !String(old?.runKey ?? '').startsWith('hand:');
       // the pending record becomes the analysis; its clip is already stored under the same id
-      const off = filmed?.freelap === false || x0?.filmed?.freelap === false;
       const rec = patch(pid, x => Object.assign(x, { at: video.recordedAt ?? x.at, video, runKey: off ? null : run?.key ?? x.runKey ?? null, run: off ? null : run ?? x.run ?? null, noFreelap: off || undefined, jobId: undefined, who: run?.who ?? x.run?.who ?? result.who?.id ?? me.id ?? null, pending: false, stage: null, error: null, filmed: null }));
       say('');
       // the screen was opened when the run was filmed: only refresh the lists now, no jump
@@ -304,7 +310,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const msg = err?.message || 'Analýza zlyhala. Skús to znova.';
       say(msg); patch(pid, x => { x.error = msg; });
     } finally {
-      busy = false; draw();
+      busy = Math.max(0, busy - 1); draw();
     }
   }
 
@@ -315,7 +321,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       <div class="card sp-go">
         <div class="sp-btns">
           ${cam ? '<button class="btn go primary" data-sp="film">Natáčať šprint</button>' : ''}
-          <label class="btn go${busy ? ' disabled' : ''}">Nahrať video<input type="file" accept="video/*" hidden data-sp="file"></label>
+          <label class="btn go${busy > 0 ? ' disabled' : ''}">Nahrať video<input type="file" accept="video/*" hidden data-sp="file"></label>
         </div>
         <p class="note">${cam ? '120 snímok za sekundu, uloží sa do Fotiek. Keď Freelap nižšie počúva, vo videu bežia stopky. ' : ''}Nahraté video rozoberiem po krokoch: kontakt, let, frekvencia, a s časom z Freelapu aj dĺžka kroku a rýchlosť.</p>
         ${progress ? `<p class="note" aria-live="polite">${esc(progress)}</p>` : ''}
@@ -380,7 +386,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     if (e.target.closest('[data-sl-add]')) { slExtra++; draw(); return; }
     if (e.target.closest('[data-sl-del]')) { slExtra = Math.max(0, slExtra - 1); draw(); return; }
     const o = e.target.closest('[data-sp-open]');
-    if (o) { current = o.dataset.spOpen === current ? null : o.dataset.spOpen; draw(); root.scrollIntoView?.({ behavior: 'smooth' }); return; }
+    if (o) { current = o.dataset.spOpen === current ? null : o.dataset.spOpen; draw(); if (current && cloudReady()) rerunOld(current); root.scrollIntoView?.({ behavior: 'smooth' }); return; }
     const rt2 = e.target.closest('[data-sp-retry]');
     if (rt2 && loadClip) {
       retry(rt2.dataset.spRetry).then(ok => { if (!ok) alert('Video sa v telefóne nenašlo.'); });
@@ -427,9 +433,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // Analyses made with an older contact rule, from the last three days and with their clip in the
   // phone, go to the server once more (2026-11-15: the new rule finds the far steps the old one
   // lost). The old numbers stay on screen until the new ones land.
-  async function rerunOld() {
+  // Only the analysis opened (2026-11-15 review: all of them at start meant ~250 MB on mobile data).
+  async function rerunOld(only) {
     const since = Date.now() - 3 * 86400_000;
-    const ids = load().filter(r => !r.pending && r.hasClip && r.video && (r.video.algo ?? 1) < SPRINT_ALGO && r.at >= since && !r.rerun).map(r => r.id);
+    const ids = load().filter(r => r.id === only && !r.pending && r.hasClip && r.video && (r.video.algo ?? 1) < SPRINT_ALGO && r.at >= since && !r.rerun).map(r => r.id);
     for (const id of ids) {
       patch(id, x => { x.rerun = SPRINT_ALGO; });
       const r0 = load().find(r => r.id === id), blob = await loadClip?.(id).catch(() => null);
@@ -438,12 +445,20 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       await upload(file, r0.filmed ?? (r0.run ? { times: null, recordedAt: r0.video.recordedAt ?? r0.at, freelap: true } : null), id, null, true).catch(() => {});
     }
   }
-  if (cloudReady()) setTimeout(() => resumeAll().then(rerunOld), 1500); else { const l = load(); let ch = false; for (const r of l) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila. Video je uložené, skús znova.'; ch = true; } if (ch) store(l); }
+  // The access code of a fresh install comes from build-config.json a moment after start: wait
+  // for it up to 10 s before calling the waiting runs failed.
+  (async () => {
+    for (let i = 0; i < 20 && !cloudReady(); i++) await new Promise(r => setTimeout(r, 500));
+    if (cloudReady()) return resumeAll();
+    const l = load(); let ch = false;
+    for (const r of l) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila. Video je uložené, skús znova.'; ch = true; }
+    if (ch) { store(l); draw(); }
+  })();
   draw();
   return {
     shown: draw, film, upload, records: load,
-    open(id) { current = id; slExtra = 0; draw(); },
-    busy: () => busy,
+    open(id) { current = id; slExtra = 0; draw(); if (cloudReady()) rerunOld(id); },
+    busy: () => busy > 0,
     // One line for the Tréning and História lists.
     summary(rec) {
       if (rec.pending) {
@@ -452,7 +467,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       }
       const run = cleanLegs(rec.runKey ? runs().find(r => r.key === rec.runKey) ?? rec.run ?? null : rec.run ?? null);
       const who = run?.who ?? rec.who ?? null, k = rec.mode ?? (run ? modeOfRun(run) : rec.video.modeGuess);
-      const steps = rec.video.steps ?? [];
+      // the steps the result screen shows (impossible ones dropped), so list and screen agree
+      const steps = cleanSteps((rec.video.steps ?? []).filter(x => x.contact != null), { accel: k === 'accel' && !!rec.video.start });
       const contact = steps.length ? steps.reduce((a, x) => a + (x.contact ?? 0), 0) / steps.length : null;
       return {
         kind: 'sprint', id: rec.id, at: rec.at, who,

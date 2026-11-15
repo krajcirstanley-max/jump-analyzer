@@ -115,7 +115,7 @@ export function createListener(ble, on = {}, seen = new Map()) {
     } else {
       if (bytes[0] === 0x58) return;   // a chip frame with no run in it (idle: all times zero)
       const last = lastRun.get(dev);
-      if (last && now - last.at < 5000) keepRaw(`${last.ad.chip}:${last.ad.fromLap}:${last.ad.block}`, hex);
+      if (last && now - last.at < 2000) keepRaw(`${last.ad.chip}:${last.ad.fromLap}:${last.ad.block}`, hex);
       // a frame whose own intermediates were not real takes them from a separate one
       const laps = last && now - last.at < 5000 && repOf(last.ad, last.ad.laps, now)?.legs.length === 1 ? lapsFromScanResponse(bytes, last.ad) : null;
       if (laps) r = repOf(last.ad, laps, now);
