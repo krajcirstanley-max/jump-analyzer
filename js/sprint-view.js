@@ -8,8 +8,9 @@
 // (js/analysis/sprint.js). Freelap times stay in the phone.
 
 import { CHIPS } from './freelap/listen.js';
+import { cleanLegs } from './freelap/frame.js';
 import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
-import { analyzeSprint, pairRun, profileFromRuns, modeOfRun } from './analysis/sprint.js';
+import { analyzeSprint, pairRun, profileFromRuns, modeOfRun, runMetres } from './analysis/sprint.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = x => (x == null ? '–' : Number(x).toFixed(2).replace('.', ','));
@@ -61,17 +62,20 @@ function speedSvg(a, fly) {
   </svg>`;
 }
 
+// Each step: contact and flight as a bar, then the numbers: time on the ground, in the air, the
+// step's frequency (steps per second) and its length (with Freelap only; Stanley, 2026-11-15).
 function stepsHtml(a) {
-  const scale = 640;
+  const scale = 520;
+  const metres = a.steps.some(s => s.length != null);
   let lastLeg = 0;
   const rows = a.steps.map((s, i) => {
     let sep = '';
     if (s.leg != null && s.leg > lastLeg) { sep = `<div class="sp-sep">${(lastLeg + 1) * 10} m · Freelap ${n2(a.legs.slice(0, lastLeg + 1).reduce((x, y) => x + y, 0))}</div>`; lastLeg = s.leg; }
     return `${sep}<div class="sp-row"><span class="sp-i">${i + 1}</span><span class="sp-f">${FOOT[s.foot]}</span>
       <span class="sp-bar"><span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>${s.flight != null ? `<span class="fl" style="width:${(s.flight * scale).toFixed(0)}px"></span>` : ''}</span>
-      ${a.kind === 'accel' ? `<span class="sp-n">${n2(s.length)}</span>` : ''}<span class="sp-n">${n3(s.contact).replace(/^0/, '')}</span><span class="sp-n">${s.flight != null ? n3(s.flight).replace(/^0/, '') : '–'}</span></div>`;
+      <span class="sp-n">${n3(s.contact).replace(/^0/, '')}</span><span class="sp-n">${s.flight != null ? n3(s.flight).replace(/^0/, '') : '–'}</span><span class="sp-n">${s.freq != null ? n2(s.freq) : '–'}</span>${metres ? `<span class="sp-n">${n2(s.length)}</span>` : ''}</div>`;
   }).join('');
-  return `<div class="sp-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span>${a.kind === 'accel' ? '<span class="sp-n">m</span>' : ''}<span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}`;
+  return `<div class="sp-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span><span class="sp-n">kr/s</span>${metres ? '<span class="sp-n">m</span>' : ''}</div>${rows}`;
 }
 
 function sidesHtml(a) {
@@ -133,9 +137,13 @@ export function resultHtml(rec, a, run, runs, athletes) {
     <div class="sp-g2"><div class="sp-cd"><p class="sp-lb">Na ${a.distance} m</p><p class="sp-big">${n1(a.curve.at(-1).v)}</p>${fly ? `<p class="sp-lb">${Math.round((100 * a.curve.at(-1).v) / fly)} % letmej</p>` : ''}</div>
     <div class="sp-cd"><p class="sp-lb">Prírastok</p><p class="sp-small">${(() => { const c5 = a.curve.filter(c => c.x % 5 === 0); return [`na ${c5[0].x} m ${n1(c5[0].v)}`, ...c5.slice(1).map((c, i) => `${c5[i].x}–${c.x} m +${n1(c.v - c5[i].v)}`)].join('<br>'); })()}</p></div></div></section>` : '';
   const shorter = a.kind === 'accel' && a.contactFrom && a.contactTo ? `<p class="banner ok">Na zemi čoraz kratšie (${n2(a.contactFrom)} → ${n2(a.contactTo)}), vo vzduchu dlhšie (${n2(a.flightFrom)} → ${n2(a.flightTo)}).</p>` : '';
+  // Only steps seen clearly are shown (a far runner from behind gives impossible ones); say so.
+  const clear = a.tooFew ? `<p class="banner warn">Vo videu nebolo dosť jasne viditeľných krokov za sebou. Kroky sa merajú najlepšie, keď beží k tebe alebo popri tebe zblízka.</p>`
+    : a.dropped > 0 ? `<p class="note">Ukazujem ${a.steps.length} krokov, ktoré bolo vo videu jasne vidieť. Kroky ďaleko a zozadu som vynechal.</p>` : '';
+  const few = !a.tooFew && a.steps.length < 5 ? ' Z mála krokov je frekvencia a dĺžka ±4 %.' : '';
   const steps = `<section class="card sp-card"><p class="sp-bar-top"><span>Kroky</span><span>${a.steps.length} krokov${a.distance ? ` do ${a.distance} m` : ''}</span></p><h2>Každý krok</h2>
-    <p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let</p>${stepsHtml(a)}${shorter}${sidesHtml(a)}
-    <p class="sp-lb">${a.kind === 'accel' && a.fit ? 'Dĺžky krokov 1–4 ±0,15 m, od 5. ±0,05 m. ' : ''}Zem a let ±0,01 s.</p></section>`;
+    ${clear}${a.steps.length ? `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let · kr/s frekvencia kroku${a.steps.some(s => s.length != null) ? ' · m dĺžka kroku' : ''}</p>${stepsHtml(a)}` : ''}${shorter}${sidesHtml(a)}
+    <p class="sp-lb">${a.kind === 'accel' && a.fit ? 'Dĺžky krokov 1–4 ±0,15 m, od 5. ±0,05 m. ' : ''}Zem a let ±0,01 s.${few}</p></section>`;
   const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox" data-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
     <div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div></section>`
     : '<section class="card sp-card"><p class="note">Video sa k rozboru ukladá od verzie 0.9. Pri starších rozboroch ostalo len vo Fotkách.</p></section>';
@@ -155,7 +163,7 @@ function pendingHtml(rec, athletes) {
       <div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div>
       <p class="note">Video si môžeš pozrieť hneď. Kroky, zem a vzduch a rýchlosť sa doplnia, keď analýza dobehne, a všetko sa uloží k behu.</p>
     </section>
-    ${rec.run ? `<section class="card"><div class="pd-fl"><div><span>Freelap</span><b>${n2(rec.run.lap)} s</b></div><span>${rec.run.legs.map(n2).join(' + ')}</span></div></section>` : ''}
+    ${rec.run ? `<section class="card"><div class="pd-fl"><div><span>Freelap</span><b>${n2(rec.run.lap)} s</b></div><span>${cleanLegs(rec.run).legs.map(n2).join(' + ')}</span></div></section>` : ''}
     <section class="card" data-pd-prog="${esc(rec.id)}">${pendingSteps(rec)}</section>`;
 }
 // The analysis steps alone, redrawn in place on every progress tick so the video keeps playing.
@@ -206,6 +214,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     cam.on('saved', d => {
       last = d.message ?? ''; draw();
       if (d.mode && d.mode !== 'sprint') return;   // RSI and jump clips have their own flow
+      // Runs the camera heard go into the Freelap history too, whether or not the page heard them.
+      if (d.freelap !== false && d.times?.length && freelap?.addHeard) {
+        for (const t of d.times) freelap.addHeard({ key: t.key, chip: String(t.key).split(':')[0], who: CHIPS_BY_NAME(athletes)[t.name] ?? null, lap: t.lap, legs: t.legs, at: (d.recordedAt ?? Date.now()) + (t.arrived ?? 0) * 1000 });
+      }
       if (d.raw && cloudReady()) autoAnalyze(d); // with or without Freelap: without it, steps and contacts only
     });
     cam.on('closed', () => { unsub?.(); unsub = null; draw(); });
@@ -224,7 +236,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   function view(rec) {
     if (rec.pending) return { a: null, run: rec.run ?? null, html: pendingHtml(rec, athletes) };
     const all = runs();
-    const run = rec.runKey ? all.find(r => r.key === rec.runKey) ?? rec.run ?? null : null;
+    const run = cleanLegs(rec.runKey ? all.find(r => r.key === rec.runKey) ?? rec.run ?? null : null);
     const who = run?.who ?? rec.who ?? rec.video.who?.id ?? getAthlete()?.id ?? null;
     const a = analyzeSprint(rec.video, run, { mode: run ? null : rec.mode ?? null, who });
     return { a, run, html: resultHtml(rec, a, run, all, athletes) };
@@ -238,12 +250,12 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     busy = true; say(filmed ? 'Rozoberám natočený šprint…' : 'Nahrávam video…');
     let pid = retryId;
     if (!pid) {
-      const heard = filmed?.times?.[0];
-      const run0 = heard ? runs().find(r => r.key === heard.key) ?? { key: heard.key, lap: heard.lap, legs: heard.legs ?? [], who: CHIPS_BY_NAME(athletes)[heard.name] ?? null } : null;
+      const heard = filmed?.freelap !== false ? filmed?.times?.[0] : null;
+      const run0 = heard ? runs().find(r => r.key === heard.key) ?? cleanLegs({ key: heard.key, lap: heard.lap, legs: heard.legs ?? [], who: CHIPS_BY_NAME(athletes)[heard.name] ?? null }) : null;
       const at = filmed?.recordedAt ?? file.lastModified ?? Date.now();
       // what the recorder heard stays on the record, so a retry pairs the run the same way
       const pend = { id: `sp${Date.now()}`, at, pending: true, stage: 'Nahrávam video', video: null, run: run0, runKey: run0?.key ?? null, who: run0?.who ?? getAthlete()?.id ?? null, mode: null,
-        filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null } : null };
+        filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null, freelap: filmed.freelap !== false } : null };
       const l = load(); l.unshift(pend);
       for (const old of l.slice(MAX)) if (old.hasClip) dropClip?.(old.id);
       store(l.slice(0, MAX));
@@ -254,10 +266,12 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     } else patch(pid, x => { x.error = null; x.stage = 'Nahrávam video'; });
     draw();
     let lastStage = '', lastSave = 0;
+    const x0 = load().find(r => r.id === pid);
     try {
       const me = getAthlete() ?? {};
       const { result } = await analyzeInCloud(file, {
         sex: me.sex, name: me.name, height: me.height, mode: 'sprint', athletes: await roster(),
+        clip: pid, onJob: jobId => patch(pid, x => { x.jobId = jobId; }),
         onProgress: p => {
           const t = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`;
           if (t === lastStage) return;
@@ -272,15 +286,17 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       if (result?.error) throw new CloudError(result.error);
       const video = { steps: result.steps, start: result.start, modeGuess: result.modeGuess, recordedAt: filmed?.recordedAt ?? result.recordedAt ?? file.lastModified ?? null, duration: result.duration, fps: result.fps, who: result.who ?? null };
       let run = null;
-      if (filmed?.times?.length) {
+      if (filmed && filmed.freelap === false) run = null;   // Freelap was off: no times, none paired later
+      else if (filmed?.times?.length) {
         // the run the recorder heard: the athlete's own when two ran, else the first
         const who = result.who?.id, heard = filmed.times;
         const t = heard.find(x => who && CHIPS_BY_NAME(athletes)[x.name] === who) ?? heard[0];
         video.finishAt = +(t.arrived - LATENCY).toFixed(3);
-        run = runs().find(r => r.key === t.key) ?? { key: t.key, lap: t.lap, legs: t.legs, who: CHIPS_BY_NAME(athletes)[t.name] ?? who ?? null, at: video.recordedAt + t.arrived * 1000 };
+        run = runs().find(r => r.key === t.key) ?? cleanLegs({ key: t.key, lap: t.lap, legs: t.legs, who: CHIPS_BY_NAME(athletes)[t.name] ?? who ?? null, at: video.recordedAt + t.arrived * 1000 });
       } else run = pairRun(runs(), video, null);
       // the pending record becomes the analysis; its clip is already stored under the same id
-      const rec = patch(pid, x => Object.assign(x, { at: video.recordedAt ?? x.at, video, runKey: run?.key ?? x.runKey ?? null, run: run ?? x.run ?? null, who: run?.who ?? x.run?.who ?? result.who?.id ?? me.id ?? null, pending: false, stage: null, error: null, filmed: null }));
+      const off = filmed?.freelap === false || x0?.filmed?.freelap === false;
+      const rec = patch(pid, x => Object.assign(x, { at: video.recordedAt ?? x.at, video, runKey: off ? null : run?.key ?? x.runKey ?? null, run: off ? null : run ?? x.run ?? null, noFreelap: off || undefined, jobId: undefined, who: run?.who ?? x.run?.who ?? result.who?.id ?? me.id ?? null, pending: false, stage: null, error: null, filmed: null }));
       say('');
       // the screen was opened when the run was filmed: only refresh the lists now, no jump
       if (rec) onDone(rec, { quiet: true });
@@ -310,7 +326,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const who = athletes[r.run?.who ?? r.who]?.name ?? '';
       const k = r.pending ? null : r.mode ?? (r.run ? modeOfRun(r.run) : r.video.modeGuess);
       if (r.pending) return `<li><button class="sp-item${r.id === current ? ' on' : ''}" data-sp-open="${esc(r.id)}"><b>${esc(who)} · šprint · ${r.error ? 'analýza zlyhala' : 'analýza beží…'}</b><small>${esc(when(r.at))}</small></button></li>`;
-      return `<li><button class="sp-item${r.id === current ? ' on' : ''}" data-sp-open="${esc(r.id)}"><b>${esc(who)} · ${KIND[k]}${r.run ? ` ${r.run.legs.length * 10} m · ${n2(r.run.lap)}` : ''}</b><small>${esc(when(r.at))}</small></button></li>`;
+      return `<li><button class="sp-item${r.id === current ? ' on' : ''}" data-sp-open="${esc(r.id)}"><b>${esc(who)} · ${KIND[k]}${r.run ? `${runMetres(cleanLegs(r.run)) ? ` ${runMetres(cleanLegs(r.run))} m` : ''} · ${n2(r.run.lap)}` : ''}</b><small>${esc(when(r.at))}</small></button></li>`;
     }).join('')}</ul></div>` : '';
     root.innerHTML = head + body + past;
     attachClip(rec);
@@ -364,9 +380,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     if (o) { current = o.dataset.spOpen === current ? null : o.dataset.spOpen; draw(); root.scrollIntoView?.({ behavior: 'smooth' }); return; }
     const rt2 = e.target.closest('[data-sp-retry]');
     if (rt2 && loadClip) {
-      const id = rt2.dataset.spRetry;
-      const r0 = load().find(r => r.id === id);
-      loadClip(id).then(blob => { if (blob) upload(new File([blob], 'sprint.mov', { type: blob.type || 'video/quicktime', lastModified: r0?.at ?? Date.now() }), r0?.filmed?.times ? r0.filmed : null, id); else alert('Video sa v telefóne nenašlo.'); });
+      retry(rt2.dataset.spRetry).then(ok => { if (!ok) alert('Video sa v telefóne nenašlo.'); });
       return;
     }
     const k = e.target.closest('[data-sp-kind]');
@@ -379,8 +393,26 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // localhost only: lets a developer render a stored result without a server run
   if (['localhost', '127.0.0.1'].includes(globalThis.location?.hostname)) globalThis.__sprintShow = rec => { const list = load(); list.unshift(rec); store(list); current = rec.id; draw(); };
 
-  // A run left pending by a closed app has no upload behind it any more: say so, keep its video, offer a retry.
-  { const l = load(); let ch = false; for (const r of l) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila (appka sa zavrela). Video je uložené, skús znova.'; ch = true; } if (ch) store(l); }
+  // A run left pending by a reloaded app picks up where it was (2026-11-15: three runs were left
+  // as "zlyhala" though the server had one of them done): the clip is in the phone and the server
+  // finds a job it already made from it, so this only uploads what never arrived.
+  function retry(id) {
+    const r0 = load().find(r => r.id === id);
+    if (!r0 || !loadClip) return Promise.resolve(false);
+    return loadClip(id).then(blob => {
+      if (!blob) return false;
+      return upload(new File([blob], 'sprint.mov', { type: blob.type || 'video/quicktime', lastModified: r0.at ?? Date.now() }), r0.filmed ?? null, id).then(() => true);
+    }).catch(() => false);
+  }
+  async function resumeAll() {
+    // twice at most by itself: a clip the server can't read must not go up on every start
+    const ids = load().filter(r => r.pending && r.hasClip && (r.tries ?? 0) < 2).map(r => r.id);
+    for (const id of ids) {
+      patch(id, x => { x.error = null; x.stage = 'Pokračujem v analýze'; x.tries = (x.tries ?? 0) + 1; });
+      if (!(await retry(id))) patch(id, x => { x.error = 'Video sa v telefóne nenašlo.'; });
+    }
+  }
+  if (cloudReady()) setTimeout(resumeAll, 1500); else { const l = load(); let ch = false; for (const r of l) if (r.pending && !r.error) { r.error = 'Analýza sa prerušila. Video je uložené, skús znova.'; ch = true; } if (ch) store(l); }
   draw();
   return {
     shown: draw, film, upload, records: load,
@@ -392,14 +424,14 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         const who = rec.run?.who ?? rec.who ?? null;
         return { kind: 'sprint', id: rec.id, at: rec.at, who, title: `${athletes[who]?.name ?? ''}${who ? ' · ' : ''}šprint`, sub: rec.error ? 'analýza zlyhala' : 'analýza beží…', value: rec.run ? n2(rec.run.lap) : '…', valueSub: rec.run ? 's' : '' };
       }
-      const run = rec.runKey ? runs().find(r => r.key === rec.runKey) ?? rec.run ?? null : rec.run ?? null;
+      const run = cleanLegs(rec.runKey ? runs().find(r => r.key === rec.runKey) ?? rec.run ?? null : rec.run ?? null);
       const who = run?.who ?? rec.who ?? null, k = rec.mode ?? (run ? modeOfRun(run) : rec.video.modeGuess);
       const steps = rec.video.steps ?? [];
       const contact = steps.length ? steps.reduce((a, x) => a + (x.contact ?? 0), 0) / steps.length : null;
       return {
         kind: 'sprint', id: rec.id, at: rec.at, who,
-        title: `${athletes[who]?.name ?? ''}${who ? ' · ' : ''}${k === 'rozbeh' ? `rozbeh${run?.steps ? ` ${run.steps} kr.` : ''}` : `${k === 'accel' ? 'akcel' : 'letmých'}${run ? ` ${run.legs.length * 10} m` : ''}`}`,
-        sub: run ? run.legs.map(n2).join(' + ') : `zem ${contact != null ? n3(contact) : '–'} s · bez Freelapu`,
+        title: `${athletes[who]?.name ?? ''}${who ? ' · ' : ''}${k === 'rozbeh' ? `rozbeh${run?.steps ? ` ${run.steps} kr.` : ''}` : `${k === 'accel' ? 'akcel' : 'letmých'}${runMetres(run) ? ` ${runMetres(run)} m` : ''}`}`,
+        sub: run ? (run.legs.length > 1 ? run.legs.map(n2).join(' + ') : 'Freelap') : `zem ${contact != null ? n3(contact) : '–'} s · bez Freelapu`,
         value: run ? n2(run.lap) : `${steps.length}`, valueSub: run ? 's' : 'krokov',
       };
     },

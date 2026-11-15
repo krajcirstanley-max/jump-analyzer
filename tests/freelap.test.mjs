@@ -34,3 +34,16 @@ test('freelap: strangers are ignored', () => {
   assert.equal(decodeAdvertisement(hexBytes('4c00 0215 aabb')), null);   // an Apple beacon
   assert.equal(decodeAdvertisement(hexBytes('6303 41 00')), null);       // Freelap, not a chip frame
 });
+
+test('numbers in the intermediate bytes that are not times give the lap alone (2026-11-15)', async () => {
+  const { rep, cleanLegs } = await import('../js/freelap/frame.js');
+  // BA-8358 on 2026-11-15: lap 3,58 read as 1867777,16 + -1868514 + 740,42
+  const ad = { chip: 'BA-8358', flag: 0, offset: 1, fromLap: 757495, block: 761161, laps: [0x720BC59B, 2971] };
+  const r = rep(ad);
+  assert.equal(r.lap, 3.58);
+  assert.deepEqual(r.legs, [3.58]);
+  // a real intermediate still splits the run
+  assert.deepEqual(rep({ ...ad, laps: [757495 + 1126] }).legs, [1.1, 2.48]);
+  assert.deepEqual(cleanLegs({ lap: 3.58, legs: [1867777.16, -1868514, 740.42] }).legs, [3.58]);
+  assert.deepEqual(cleanLegs({ lap: 2.05, legs: [1.01, 1.04] }).legs, [1.01, 1.04]);
+});

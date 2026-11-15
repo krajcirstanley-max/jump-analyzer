@@ -528,9 +528,15 @@ final class FreelapEar: NSObject, CBCentralManagerDelegate {
         var i = 24
         while i + 4 <= b.count, laps.count < 10 { let v = u32(i); if v == 0 { break }; laps.append(v); i += 4 }
         let sec: (Int64) -> Double = { (Double($0) / 10.24).rounded() / 100 }   // 1/1024 s ticks, to the hundredth
-        var legs: [Double] = [], prev = fromLap & mask
-        for v in laps { legs.append(sec(v - prev)); prev = v }
-        legs.append(sec((block & mask) - prev))
+        // Intermediates only when each lies between the start and the finish, in order; some frames
+        // carry other numbers there (2026-11-15: legs 1867777 + -1868514 + 740 = 3,58). Same rule
+        // as js/freelap/frame.js.
+        let from = fromLap & mask, fin = block & mask
+        var real = true, p0 = from
+        for v in laps { let m = v & mask; if m <= p0 || m >= fin { real = false; break }; p0 = m }
+        var legs: [Double] = [], prev = from
+        for v in (real ? laps : []) { legs.append(sec((v & mask) - prev)); prev = v & mask }
+        legs.append(sec(fin - prev))
         let lap = sec((block & mask) - (fromLap & mask))
         guard lap > 0, lap < 600 else { return nil }
         return Frame(key: "\(chip):\(fromLap):\(block)", chip: chip, lap: lap, legs: legs)
@@ -556,6 +562,12 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private var startedAt: CFTimeInterval?
     private var startedWall: Date?        // the same moment on the clock, for the page to pair the clip
     private var runs: [SprintRun] = []
+    private var stoppedAt: CFTimeInterval?
+    /// A clip just stopped with no run heard yet: its finish broadcast can land a moment after Stop
+    /// (2026-11-15: some videos reached Photos without the times). Runs heard up to `grace` after
+    /// Stop still go into it; the next sprint can be filmed meanwhile.
+    private var late: (start: CFTimeInterval, stop: CFTimeInterval, runs: [SprintRun])?
+    private let grace = 3.0
     private var ticker: Timer?
     private var held: UIDeviceOrientation = .portrait   // how the phone is held (the screen stays portrait)
 
@@ -597,7 +609,8 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         NotificationCenter.default.addObserver(self, selector: #selector(turned), name: UIDevice.orientationDidChangeNotification, object: nil)
         ear.onFrame = { [weak self] f, at in self?.note(key: f.key, name: self?.chips[f.chip] ?? f.chip, lap: f.lap, legs: f.legs, heard: at) }
-        ear.start()
+        // Freelap off means off (Stanley, 2026-11-15): no listening, no times, no ring in the video.
+        if freelapOn { ear.start() }
         AVCaptureDevice.requestAccess(for: .video) { ok in
             DispatchQueue.main.async {
                 if ok { self.configure() } else { self.show("Skok nemá povolenú kameru. Zapni ju v Nastavenia → Skok → Kamera.", hold: true) }
@@ -820,6 +833,8 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     }
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
+        let stop = CACurrentMediaTime()
+        DispatchQueue.main.async { self.stoppedAt = stop }
         let ok = error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? false)
         DispatchQueue.main.async {
             self.ticker?.invalidate()
@@ -852,6 +867,19 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         closeButton.isHidden = false
         UIApplication.shared.isIdleTimerDisabled = false
         show(runs.isEmpty ? "Ukladám video…" : "Ukladám video s časmi…")
+        if runs.isEmpty, freelapOn, let s = startedAt {
+            late = (s, stoppedAt ?? CACurrentMediaTime(), [])
+            DispatchQueue.main.asyncAfter(deadline: .now() + grace) {
+                let got = self.late?.runs ?? []
+                self.late = nil
+                self.write(url, runs: got, wall: wall)
+            }
+            return
+        }
+        write(url, runs: runs, wall: wall)
+    }
+
+    private func write(_ url: URL, runs: [SprintRun], wall: Date?) {
         guard !runs.isEmpty else { save(url, raw: url, wall: wall, runs: runs, burned: false); return }
         SprintBurner.burn(url, runs: runs, fps: actualFps) { out in
             DispatchQueue.main.async { self.save(out ?? url, raw: url, wall: wall, runs: runs, burned: out != nil) }
@@ -880,7 +908,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     private func done(_ message: String, runs: [SprintRun] = [], burned: Bool, path: URL? = nil, raw: URL? = nil, wall: Date? = nil) {
         saving = max(0, saving - 1)
         show(message)
-        var data: [String: Any] = ["message": message, "burned": burned, "runs": runs.count, "fps": actualFps, "mode": mode]
+        var data: [String: Any] = ["message": message, "burned": burned, "runs": runs.count, "fps": actualFps, "mode": mode, "freelap": freelapOn]
         if let path { data["path"] = path.path }
         if let raw { data["raw"] = raw.path }
         if let wall { data["recordedAt"] = Int(wall.timeIntervalSince1970 * 1000) }
@@ -898,6 +926,13 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     /// One run, heard by the recorder itself or passed on by the page. heard: when the chip's
     /// broadcast of it first landed. The same run again only adds its intermediate.
     private func note(key: String, name: String, lap: Double, legs: [Double], heard: CFTimeInterval) {
+        guard freelapOn else { return }
+        if var l = late, !output.isRecording, heard >= l.start, heard <= l.stop + grace {
+            if let i = l.runs.firstIndex(where: { $0.key == key }) {
+                if legs.count > l.runs[i].legs.count { l.runs[i].legs = legs; l.runs[i].lap = lap }
+            } else { l.runs.append(SprintRun(key: key, name: name, lap: lap, legs: legs, arrived: heard - l.start)) }
+            late = l
+        }
         if let i = runs.firstIndex(where: { $0.key == key }) {
             if legs.count <= runs[i].legs.count { return }
             runs[i].legs = legs

@@ -61,6 +61,20 @@ def test_create_job_writes_clip_and_starts():
     assert e.get(jid).json()["state"] == "queued"
 
 
+def test_clip_id_finds_its_job_again_only_for_its_owner():
+    e = Env()
+    jid = e.post(b"v", q="sex=male&mode=sprint&clip=sp1794744449246").json()["jobId"]
+    hdr = lambda tok: {"Authorization": f"Bearer {tok}"}
+    r = e.client.get("/jobs/clip/sp1794744449246", headers=hdr("tok-s"))
+    assert r.status_code == 200 and r.json() == {"jobId": jid, "state": "queued"}
+    assert e.client.get("/jobs/clip/sp1794744449246", headers=hdr("tok-m")).status_code == 404
+    assert e.client.get("/jobs/clip/other", headers=hdr("tok-s")).status_code == 404
+    e.post(b"v", q="sex=male&clip=bad%20id!")  # an odd id is ignored, the upload still runs
+    assert not [k for k in e.jobs if k.startswith("clip:") and "bad" in k]
+    e.t[0] += 8 * 24 * 3600
+    assert e.client.get("/jobs/clip/sp1794744449246", headers=hdr("tok-s")).status_code == 404
+
+
 def test_owner_is_private_and_owner_field_never_leaves():
     e = Env()
     jid = e.post().json()["jobId"]

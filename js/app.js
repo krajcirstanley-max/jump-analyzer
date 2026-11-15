@@ -20,7 +20,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.16.6';
+const APP_VERSION = '0.17.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -913,10 +913,11 @@ $('fl-mini').addEventListener('click', e => {
   const b = e.target.closest('[data-fl-mini]');
   if (!b) return;
   if (b.dataset.flMini === 'list') { showTab('history'); return document.querySelector('#hist-filter [data-f="freelap"]').click(); }
-  if (b.dataset.flMini === 'start') freelapView.listener.start(); else freelapView.listener.stop();
+  freelapView.turn(b.dataset.flMini === 'start');
   setTimeout(drawFreelapMini, 300); setTimeout(drawFreelapMini, 1500);
 });
 freelapView.onRun(() => { drawFreelapMini(); refreshFeeds(); });
+setTimeout(drawFreelapMini, 1500);   // a Start left on comes back on by itself
 
 async function feedItems() {
   const jumps = (await Promise.all(Object.keys(ATHLETES).map(a => hist.listAttempts(a)))).flat().map(r => jumpSummary(r, ATHLETES));

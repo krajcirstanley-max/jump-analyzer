@@ -1,6 +1,7 @@
 """The job API. No Modal imports: storage and job start are injected, so it runs under test."""
 import hmac
 import json
+import re
 import secrets as pysecrets
 import time
 from pathlib import Path
@@ -8,6 +9,8 @@ from pathlib import Path
 MAX_UPLOAD = 300 * 1024 * 1024
 STALE_S = 360  # no update for this long means the worker died without saying so
 MAX_DEVICES = 5
+CLIP_ID = re.compile(r"[A-Za-z0-9_-]{1,40}")  # the app's own id for a video (sp1794744449246)
+CLIP_KEEP_S = 7 * 24 * 3600  # a job is followed for a week at most
 
 SK = {
     "auth": "Prístupový kľúč nie je platný.",
@@ -27,6 +30,10 @@ SK = {
 
 def job_key(job_id):
     return f"job:{job_id}"
+
+
+def clip_key(owner, clip):
+    return f"clip:{owner}:{clip}"
 
 
 def poll_key(job_id):
@@ -177,8 +184,11 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         mode: str = Query("jump"),
         box: float = Query(0),
         athletes: str = Query(""),
+        clip: str = Query(""),
         owner=Depends(user),
     ):
+        if clip and not CLIP_ID.fullmatch(clip):
+            clip = ""  # the app's own id for the video; anything else is ignored
         if mode not in ("jump", "rsi", "sprint"):
             raise HTTPException(400, SK["mode"])
         if box and not 5 <= box <= 120:
@@ -223,6 +233,8 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
             commit_clips()
             t = now()
             jobs.put(job_key(job_id), {"state": "queued", "stage": "queued", "done": 0, "total": 1, "owner": owner, "createdAt": t, "updatedAt": t})
+            if clip:
+                jobs.put(clip_key(owner, clip), {"jobId": job_id, "at": t})
             try:
                 start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {}),
                                           **({"mode": mode} if mode != "jump" else {}), **({"boxCm": box} if box else {}),
@@ -236,6 +248,15 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
 
         await run_in_threadpool(start)
         return {"jobId": job_id}
+
+    @api.get("/jobs/clip/{clip}")
+    def job_of_clip(clip: str, owner=Depends(user)):
+        """The job made from this clip of the app's: a retry after a lost answer follows it."""
+        hit = jobs.get(clip_key(owner, clip)) if CLIP_ID.fullmatch(clip) else None
+        job = hit and jobs.get(job_key(hit["jobId"]))
+        if not job or job.get("owner") != owner or now() - hit.get("at", 0) > CLIP_KEEP_S:
+            raise HTTPException(404, SK["missing"])
+        return {"jobId": hit["jobId"], "state": job.get("state")}
 
     @api.get("/jobs/{job_id}")
     def get_job(job_id: str, omit: str = Query(""), owner=Depends(user)):

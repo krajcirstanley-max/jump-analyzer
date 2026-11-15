@@ -95,3 +95,26 @@ test('the same clip through the server (GPU pose): no contact split by a bad pan
   assert.ok(v.steps.every(s => s.contact >= 0.09), v.steps.map(s => s.contact).join(' '));
   near(v.steps[10].frames[0], 1497, 1.5, 'touchdown 11');
 });
+
+test('only steps a runner can make are kept, in unbroken runs (2026-11-15 pan clips)', async () => {
+  const { cleanSteps, runMetres } = await import('../js/analysis/sprint.js');
+  const st = (foot, contact, flight) => ({ foot, contact, flight, step: +(contact + flight).toFixed(3), td: 0 });
+  const steps = [st('r', 0.05, 0.35), st('r', 0.1, 0.59), st('r', 0.1, 0.1),   // far: impossible, and a foot twice
+    st('r', 0.1, 0.125), st('l', 0.1, 0.108), st('r', 0.1, 0.158), st('l', 0.05, 0.117), st('r', 0.1, 0.05)];
+  const kept = cleanSteps(steps);
+  assert.equal(kept.length, 3);
+  assert.deepEqual(kept.map(s => s.flight), [0.125, 0.108, 0.158]);
+  assert.ok(kept.every(s => s.seg === 0));
+  assert.equal(runMetres({ lap: 2.05, legs: [1.01, 1.04] }), 20);
+  assert.equal(runMetres({ lap: 3.84, legs: [3.84] }), null);   // splits lost: distance unknown
+  assert.equal(runMetres({ lap: 1.02, legs: [1.02] }), 10);
+});
+
+test('a fly never spans two separate runs of steps; each step gets its frequency and length', () => {
+  const s = (foot, td, contact, flight) => ({ foot, td, to: td + contact, contact, flight, step: +(contact + flight).toFixed(3) });
+  const steps = [s('l', 3.45, 0.1, 0.142), s('r', 3.69, 0.1, 0.142), s('l', 3.93, 0.1, 0.142), s('r', 4.17, 0.1, 1.1),
+    s('r', 5.6, 0.117, 0.133), s('l', 5.85, 0.108, 0.125), s('r', 6.08, 0.108, 0.133), s('l', 6.32, 0.1, 0.125), s('r', 6.55, 0.109, 0.133), s('l', 6.79, 0.1, null)];
+  const a = analyzeSprint({ steps }, { lap: 2.18, legs: [1.11, 1.08] }, { who: 'miska' });
+  assert.ok(a.freq > 4 && a.freq < 4.4, `freq ${a.freq}`);
+  assert.ok(a.steps.every(x => x.freq > 3.8 && x.length > 1.9 && x.length < 2.4));
+});

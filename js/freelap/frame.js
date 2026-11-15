@@ -81,15 +81,28 @@ export const seconds = ticks => centiseconds(ticks) / 100;
 // up to the lap, which is the cheapest check that a frame was read right.
 export function rep(ad, laps = ad.laps ?? []) {
   const legs = [];
-  let prev = ad.fromLap & MASK;
-  for (const v of laps) { legs.push(v - prev); prev = v; }
-  legs.push((ad.block & MASK) - prev);
+  const from = ad.fromLap & MASK, fin = ad.block & MASK;
+  // Intermediates count only when each lies between the start and the finish, in order. Some
+  // frames carry other numbers in those bytes (2026-11-15: legs 1867777 + -1868514 + 740 = 3,58
+  // on four runs); then the run keeps its lap alone, and a later frame with real splits fills them.
+  const real = laps.map(v => v & MASK).every((v, i, a) => v > (i ? a[i - 1] : from) && v < fin);
+  let prev = from;
+  for (const v of real ? laps : []) { legs.push((v & MASK) - prev); prev = v & MASK; }
+  legs.push(fin - prev);
   return {
     chip: ad.chip, flag: ad.flag,
     lap: seconds((ad.block & MASK) - (ad.fromLap & MASK)),
     total: seconds((ad.block & MASK) - (ad.offset & MASK)),
     legs: legs.map(seconds),
   };
+}
+
+// A stored run whose legs can't be (a leg at or below zero, or longer than the lap): its lap alone.
+// Cleans runs kept before the check above (2026-11-15).
+export function cleanLegs(run) {
+  if (!run || !Array.isArray(run.legs) || run.legs.length < 2) return run;
+  const bad = run.legs.some(l => !(l > 0) || l > run.lap + 0.01) || Math.abs(run.legs.reduce((a, b) => a + b, 0) - run.lap) > 0.03;
+  return bad ? { ...run, legs: [run.lap] } : run;
 }
 
 // For tests and the fake chip: a frame in the same layout.

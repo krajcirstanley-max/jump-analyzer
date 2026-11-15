@@ -108,6 +108,40 @@ export function sprintFromMotion({ motion, ts, fps, o = SPRINT }) {
   return { start, steps, modeGuess: start ? 'accel' : 'fly' };
 }
 
+// Steps a runner can make, and only those (2026-11-15, ten clips from a hand-held pan: the runner
+// small and from behind gave contacts of 0.04 s, flights of 0.008 s, the same foot twice and
+// missed steps with 0.5-1.1 s "flights"; coming towards the camera or close, the steps were clean).
+// A step counts when its contact, its flight to the next touchdown and the step time are all in a
+// sprinter's range and the next touchdown is the other foot. Kept: runs of at least three such
+// steps in a row, the step time changing by under a quarter from one to the next. The first steps
+// of a standing start are longer on the ground and shorter in the air.
+export const STEP_RANGE = { contact: [0.07, 0.25], flight: [0.05, 0.22], step: [0.17, 0.33], startContact: 0.32, startStep: 0.42, startFlight: 0.02, jump: 0.25, minRun: 3 };
+export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
+  const ok = (s, i) => {
+    const early = accel && i < 3, next = steps[i + 1];
+    if (!(s.contact >= o.contact[0] && s.contact <= (early ? o.startContact : o.contact[1]))) return false;
+    if (s.step == null) return false;
+    if (!(s.step >= o.step[0] && s.step <= (early ? o.startStep : o.step[1]))) return false;
+    if (!(s.flight >= (early ? o.startFlight : o.flight[0]) && s.flight <= o.flight[1])) return false;
+    return !next || next.foot !== s.foot;
+  };
+  const runs = [];
+  let cur = [];
+  steps.forEach((s, i) => {
+    const prev = cur.at(-1);
+    if (ok(s, i) && (!prev || Math.abs(s.step - prev.step) <= o.jump * prev.step)) { cur.push(s); return; }
+    if (cur.length) runs.push(cur);
+    cur = ok(s, i) ? [s] : [];
+  });
+  if (cur.length) runs.push(cur);
+  // seg: which unbroken run of steps a step belongs to; a gap between two is never one step
+  return runs.filter(r => r.length >= o.minRun).flatMap((r, seg) => r.map(x => ({ ...x, seg })));
+}
+
+// Metres a Freelap run covered: 10 per leg. A run that kept its lap alone (its splits were not
+// real) is 10 m only when the lap could be one; else the distance is not known.
+export const runMetres = run => (run?.legs?.length > 1 || (run?.legs?.length === 1 && run.lap <= 2.2) ? run.legs.length * 10 : null);
+
 // ---------- Freelap half (phone) ----------
 // The Freelap run filmed: heard during the clip (the phone gets it as the chip crosses the last
 // cone), nearest to the clip's end. Only the athlete's own runs when known.
@@ -187,22 +221,35 @@ const sidesOf = steps => {
 
 // Everything the result screens show. video = the server's result, run = the Freelap run (or null).
 export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
-  const all = video.steps.filter(s => s.contact != null);
   const k0 = mode ?? (run ? modeOfRun(run) : video.modeGuess);
   const kind = k0 === 'rozbeh' ? 'fly' : k0;   // a run-up is analysed like a fly: steady steps at the end
-  const legs = run?.legs ?? [];
-  const out = { kind, distance: legs.length ? legs.length * 10 : null, legs, who };
+  const raw = video.steps.filter(s => s.contact != null);
+  const all = cleanSteps(raw, { accel: kind === 'accel' && !!video.start });
+  const legs = runMetres(run) ? run.legs : [];
+  const out = { kind, distance: legs.length ? legs.length * 10 : null, legs, who, dropped: raw.length - all.length };
+  if (all.length < 3) return { ...out, steps: [], tooFew: true, legStats: legs.map(l => ({ time: l, speed: r3(10 / l), stepLength: null })), sides: sidesOf([]) };
 
   if (kind === 'fly') {
     // Top speed: the steps are even, so one frequency for the run, touchdown to touchdown.
     // Filmed in the app: the phone heard the run finish at a known second of the clip, so the timed
     // stretch is exactly the steps before it. Otherwise the steady steps before the slow-down.
-    const full = all.filter(s => s.step), fin = video.finishAt, lap = run?.lap ?? null;
-    const timed = fin != null && lap ? full.filter(s => s.td >= fin - lap - 0.05 && s.td + s.step <= fin + 0.12) : [];
-    const zone = timed.length >= 3 ? timed : flyZone(full, lap);
+    const full = all.filter(s => s.step), fin = video.finishAt, lap = legs.length ? run.lap : null;
+    const bySeg = list => Object.values(Object.groupBy(list, s => s.seg)).sort((x, y) => y.length - x.length)[0] ?? [];
+    const timed = bySeg(fin != null && lap ? full.filter(s => s.td >= fin - lap - 0.05 && s.td + s.step <= fin + 0.12) : []);
+    const zone = timed.length >= 3 ? timed : flyZone(bySeg(full), lap);
     out.zoneFrom = timed.length >= 3 ? 'freelap' : 'steps';
     const span = zone.length ? zone.at(-1).td + zone.at(-1).step - zone[0].td : NaN;
-    out.steps = zone.map(s => ({ ...s }));
+    // Each step's length: the speed of the 10 m it falls in (the phone heard the finish) or of the
+    // whole run, times the step's own time.
+    const lap0 = fin != null && lap ? fin - lap : null;
+    const vAt = t => {
+      if (!legs.length) return null;
+      if (lap0 == null) return (10 * legs.length) / lap;
+      let edge = lap0;
+      for (const l of legs) { if (t < edge + l) return 10 / l; edge += l; }
+      return 10 / legs.at(-1);
+    };
+    out.steps = zone.map(s => { const v = vAt(s.td + s.step / 2); return { ...s, freq: r3(1 / s.step), length: v ? r3(v * s.step) : null }; });
     out.freq = r3(zone.length / span);
     out.contact = r3(mean(zone.map(s => s.contact)));
     out.flight = r3(mean(zone.map(s => s.flight)));
@@ -231,7 +278,7 @@ export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
     out.steps = out.steps.map(s => {
       if (s.step == null) return s;
       const t1 = s.td - zero, t2 = s.td + s.step - zero, len = posAt(t2, fit) - posAt(t1, fit);
-      return { ...s, length: r3(len), speed: r3(len / s.step), at: r3(posAt((t1 + t2) / 2, fit)) };
+      return { ...s, length: r3(len), speed: r3(len / s.step), freq: r3(1 / s.step), at: r3(posAt((t1 + t2) / 2, fit)) };
     });
     // Only the steps inside the timed distance, up to the one that crosses its end.
     const endT = out.legStats.at(-1).end;
@@ -240,6 +287,7 @@ export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
     const tAtX = x => { let lo = 0, hi = 15; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (posAt(m, fit) < x) lo = m; else hi = m; } return lo; };
     out.curve = [2, 5, 10, 15, 20, 30, 40].filter(x => x <= out.distance).map(x => ({ x, v: r3(speedAt(tAtX(x), fit)) }));
   }
+  out.steps = out.steps.map(s => (s.freq == null && s.step ? { ...s, freq: r3(1 / s.step) } : s));
   const st = out.steps, withStep = st.filter(s => s.step);
   out.freqFrom = r3(1 / withStep[0]?.step); out.freqTo = r3(1 / median(withStep.slice(-3).map(s => s.step)));
   out.contactFrom = r3(median(st.slice(1, 3).map(s => s.contact))); out.contactTo = r3(median(st.slice(-3).map(s => s.contact)));

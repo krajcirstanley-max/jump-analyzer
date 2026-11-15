@@ -228,7 +228,22 @@ export async function askAboutJump(jump, messages, { signal } = {}) {
   return j.answer;
 }
 
-export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, onProgress, onResult, signal } = {}) {
+// The job the server already made from this clip, or null. clip: the app's own id for the video.
+// An upload whose answer was lost (2026-11-15: the phone said "Nepodarilo sa spojiť", the server
+// had the clip and analysed it) is picked up again here instead of being sent twice.
+export async function cloudJobOfClip(clip, signal) {
+  if (!clip || !cloudReady()) return null;
+  try {
+    const r = await fetch(`${base()}/jobs/clip/${encodeURIComponent(clip)}`, { headers: auth(), cache: 'no-store', signal });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.jobId && j.state !== 'error' ? j.jobId : null;
+  } catch { return null; }
+}
+
+// clip: the app's id for this video, so a retry finds the job the first try made. onJob(jobId):
+// as soon as the server has it, so a record can follow it after the app reloads.
+export async function analyzeInCloud(file, { sex, name, height, history, athletes = null, mode = 'jump', boxCm = null, clip = null, onJob, onProgress, onResult, signal } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
   if (file.size > MAX_UPLOAD) throw statusError(413);
   const t0 = Date.now();
@@ -247,7 +262,11 @@ export async function analyzeInCloud(file, { sex, name, height, history, athlete
     while (JSON.stringify(r).length > 6000 && r.some(a => a.history.length)) for (const a of r) a.history = a.history.slice(1);
     params.set('athletes', JSON.stringify(r));
   }
+  const known = await cloudJobOfClip(clip, signal);
+  if (known) { onJob?.(known); return follow(known, { signal, onProgress, onResult, t0 }); }
+  if (clip) params.set('clip', String(clip));
   const { jobId } = await upload(file, params, { signal, onProgress });
+  onJob?.(jobId);
   // RSI and sprint jobs take seconds and the jump screen would not know what to do with one on resume.
   if (mode === 'jump') rememberJob(jobId);
   return follow(jobId, { signal, onProgress, onResult, t0 });

@@ -3,7 +3,8 @@
 // "Ukončiť tréning" or the next day (Stanley, 2026-11-13: "koniec tréningu, vymazať všetko, a
 // jednotlivé časy nech sa dajú vymazať tiež"). Kept in this phone (times only).
 import { createListener, nativeBle } from './freelap/listen.js';
-import { modeOfRun } from './analysis/sprint.js';
+import { cleanLegs } from './freelap/frame.js';
+import { modeOfRun, runMetres } from './analysis/sprint.js';
 
 const KEY = 'jump.freelap';
 const SESSION_KEY = 'jump.freelap.session';
@@ -17,6 +18,9 @@ const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'nul
 const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked */ } };
 const behy = n => `${n} ${n === 1 ? 'beh' : n < 5 ? 'behy' : 'behov'}`;
 const FILTER_KEY = 'jump.freelap.filter';
+// On or off as he left it (2026-11-15: the app reloaded mid-training, the listener came back off,
+// and runs stopped reaching the history while the camera still timed them).
+const ON_KEY = 'jump.freelap.on';
 
 // What a run was (Stanley 2026-11-14: "filtrovať akcel, letmý úsek, rozbeh… koľko krokov rozbeh").
 // Akcel and letmý are told apart from the splits; a run-up only he can name, with its steps.
@@ -77,7 +81,7 @@ export function trainings(reps) {
 }
 
 export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = null, onOpen = () => {}, onChange = () => {} }) {
-  let reps = load(KEY, []), open = load(SESSION_KEY, null);
+  let reps = load(KEY, []).map(cleanLegs), open = load(SESSION_KEY, null);
   let filter = { type: 'all', steps: null, ...load(FILTER_KEY, {}) };
   let linker = () => null;             // run key → its sprint analysis (with the video), set by the app
   let detailKey = null;                // the run open on the detail screen
@@ -86,6 +90,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
   const subs = new Set();              // the Sprint tab listens for runs while it films
   const save = () => store(KEY, reps.slice(0, 500));
 
+  const seen = new Map(reps.map(r => [r.key, r.legs?.length ?? 0]));
   const listener = createListener(ble, {
     rep(r) {
       open = sessionFor(open, r.at);
@@ -113,7 +118,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       drawCount();
     },
     state(s, err) { error = err; if (s === 'on') { packets = 0; heard = null; } draw(); },
-  }, new Map(reps.map(r => [r.key, r.legs?.length ?? 0])));
+  }, seen);
 
   const name = r => (r.who ? athletes[r.who]?.name : null) ?? r.chip;
 
@@ -213,7 +218,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     const b = (v, l) => `<button data-run-type="${v}" class="${t === v ? 'on' : ''}">${l}</button>`;
     detailRoot.innerHTML = `<section class="card fl-detail">
       <p class="sp-bar-top"><span>Freelap</span><span>${esc(dayName(r.at))} · ${hms(r.at)}</span></p>
-      <div class="fl-row"><div class="fl-who"><b>${esc(name(r))}</b><small>${esc(typeLabel(r))} · ${r.legs?.length ? `${r.legs.length * 10} m` : ''}</small></div>
+      <div class="fl-row"><div class="fl-who"><b>${esc(name(r))}</b><small>${esc(typeLabel(r))} · ${runMetres(r) ? `${runMetres(r)} m` : ''}</small></div>
         <div class="fl-time"><b>${sec(r.lap)}</b><span>s</span></div></div>
       ${legsHtml(r)}
       <p class="sp-lb">Čo to bol za beh</p>
@@ -291,8 +296,8 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       store(FILTER_KEY, filter);
       return draw();
     }
-    if (act === 'start') listener.start();
-    else if (act === 'stop') listener.stop();
+    if (act === 'start') turn(true);
+    else if (act === 'stop') turn(false);
     else if (act === 'end') {
       if (open) { open = { ...open, ended: true }; store(SESSION_KEY, open); }
       draw();
@@ -308,9 +313,34 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     }
   });
 
+  // Start and Stop remember themselves; a Start left on comes back after the app reloads.
+  function turn(on) { store(ON_KEY, on); return on ? listener.start() : listener.stop(); }
+  if (load(ON_KEY, false)) listener.start();
+
+  // A run the camera heard while filming, when this page did not (its listener was off or
+  // asleep under the camera): it goes into the history all the same.
+  function addHeard(r) {
+    if (!r?.key || !(r.lap > 0)) return null;
+    const run0 = cleanLegs({ chip: r.chip ?? null, who: r.who ?? null, lap: r.lap, legs: r.legs?.length ? r.legs : [r.lap], at: r.at ?? Date.now(), key: r.key });
+    const i = reps.findIndex(x => x.key === run0.key);
+    if (i >= 0) {
+      if (run0.legs.length <= (reps[i].legs?.length ?? 0)) return reps[i];
+      reps[i] = { ...reps[i], lap: run0.lap, legs: run0.legs };
+    } else {
+      open = sessionFor(open, run0.at); store(SESSION_KEY, open);
+      const run = { ...run0, session: open.id };
+      if (open.plan?.type) { run.type = open.plan.type; if (open.plan.type === 'rozbeh') run.steps = open.plan.steps; }
+      reps.unshift(run); reps.sort((a, b) => b.at - a.at);
+    }
+    seen.set(run0.key, Math.max(seen.get(run0.key) ?? 0, run0.legs.length));
+    save(); draw();
+    return reps.find(x => x.key === run0.key);
+  }
+
   draw();
   return {
-    shown: draw, listener,
+    shown: draw, listener, addHeard,
+    turn,
     listening: () => listener.state === 'on',
     runs: () => reps.slice(),   // the Sprint tab pairs uploaded videos with these
     onRun(f) { subs.add(f); return () => subs.delete(f); },
