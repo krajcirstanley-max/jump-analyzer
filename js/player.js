@@ -10,7 +10,6 @@ const HEAD_SCALE = 0.75;  // played in motion only; ~2 MB a frame instead of 3.7
 const GET_TIMEOUT = 8000; // a decode that never answers must not freeze the player
 const MAX_RETRIES = 3;
 const MAX_TICK = 100;     // ms; a background tab must not leap across the range
-const SLOW_ON = 4, SLOW_OFF = 20; // ticks, so one late frame doesn't flash the badge
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -307,28 +306,22 @@ export class Player {
     this.playing = true;
     this.playBtn.textContent = 'Pauza';
     this.playBtn.setAttribute('aria-label', 'Pauza');
-    // Media clock: runs on wall time × speed but holds while a frame is still decoding,
-    // so playback settles at the speed the clip can really be decoded.
+    // Media clock: runs on wall time × speed and never waits for the decoder. A frame that is
+    // not ready in time is skipped, so "Reálna" really is real time. Holding the clock until
+    // each frame decoded made real time play slowed down and jerky on the phone (2026-11-15).
     this.#resumeDecoder();
+    this.src.playing = true;
     let clock = this.ts[this.target], last = performance.now();
-    let held = 0, smooth = 0;
     const run = this.playRun = (this.playRun || 0) + 1;
     const tick = now => {
       if (!this.playing || this.playRun !== run) return;
       const dt = (clamp(now - last, 0, MAX_TICK) / 1000) * this.speed;
       last = now;
-      if (this.pending != null) {
-        smooth = 0;
-        if (++held >= SLOW_ON) this.#badge(true);
-        requestAnimationFrame(tick);
-        return;
-      }
-      held = 0;
-      if (++smooth >= SLOW_OFF) this.#badge(false);
       const { from, to } = this.range;
       const st = advance(this.ts, clock, dt, from, to, this.loop);
       clock = st.t;
-      if (st.i !== this.index) this.show(st.i);
+      // While a frame is still decoding, show() only swaps which frame comes next.
+      if (st.i !== this.target) this.show(st.i);
       if (st.wrapped) this.#resumeDecoder();
       if (st.ended && this.index === to) { this.pause(); return; }
       requestAnimationFrame(tick);
@@ -344,6 +337,7 @@ export class Player {
   pause() {
     if (!this.playing) return;
     this.playing = false;
+    this.src.playing = false;
     this.playBtn.textContent = 'Prehrať';
     this.playBtn.setAttribute('aria-label', 'Prehrať');
     this.#badge(false);
