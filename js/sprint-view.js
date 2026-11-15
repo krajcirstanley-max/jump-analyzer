@@ -112,7 +112,7 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0 } = {}) {
     ? `<p class="note">Kroky vo videu nie sú z úseku, ktorý meral Freelap, preto bez dĺžky kroku.</p>` : '';
   const steps = `<section class="card sp-card"><p class="sp-bar-top"><span>Kroky</span><span>${a.steps.length} krokov${a.distance ? ` do ${a.distance} m` : ''}</span></p><h2>Každý krok</h2>
     ${clear}${outside}${a.steps.length ? `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let · kr/s frekvencia kroku${a.steps.some(s => s.length != null) ? ' · m dĺžka kroku' : ''}</p>${stepsHtml(a)}` : ''}${shorter}${sidesHtml(a)}
-    <p class="sp-lb">${a.kind === 'accel' && a.fit ? 'Dĺžky krokov 1–4 ±0,15 m, od 5. ±0,05 m. ' : ''}Zem a let ±0,01 s.${few}</p></section>`;
+    <p class="sp-lb">${a.kind === 'accel' && a.fit ? 'Dĺžky krokov 1–4 ±0,15 m, od 5. ±0,05 m. ' : ''}Zem a let ±0,01 s. Frekvencia a dĺžka jedného kroku ±5 %, za desiatku presnejšie.${few}</p></section>`;
   const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox" data-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
     <div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div></section>`
     : '<section class="card sp-card"><p class="note">Video sa k rozboru ukladá od verzie 0.9. Pri starších rozboroch ostalo len vo Fotkách.</p></section>';

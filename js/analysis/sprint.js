@@ -319,6 +319,8 @@ const sidesOf = steps => {
 export function analyzeSprint(video, run, { mode = null, who = null, height = null } = {}) {
   const hM = (height ?? SANE.height * 100) / 100;
   const saneLen = len => len >= SANE.length[0] * hM && len <= SANE.length[1] * hM;
+  // one step's time is good to a frame either end (about ±5 % at 120 fps): a single step gets room
+  const saneStep = len => len >= 0.8 * SANE.length[0] * hM && len <= 1.1 * SANE.length[1] * hM;
   const k0 = mode ?? (run ? modeOfRun(run) : video.modeGuess);
   const kind = k0 === 'rozbeh' ? 'fly' : k0;   // a run-up is analysed like a fly: steady steps at the end
   const raw = video.steps.filter(s => s.contact != null);
@@ -343,7 +345,8 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
     // outside the timed metres give frequency and contacts, never a length.
     const lap0 = fin != null && lap ? fin - lap : null;
     const windows = lap0 == null ? [] : legs.map((l, i) => { const a = lap0 + legs.slice(0, i).reduce((x, y) => x + y, 0); return { a, b: a + l, v: 10 / l }; });
-    const legOf = s => windows.findIndex(w => s.td >= w.a - 0.02 && s.td + s.step <= w.b + 0.02);
+    // a step belongs to the 10 m its middle falls in (one crossing the 10 m mark still has a speed)
+    const legOf = s => windows.findIndex(w => s.td + s.step / 2 >= w.a && s.td + s.step / 2 < w.b);
     // An uploaded clip (no finish heard): a fly's steps are even, so the run's own speed is used.
     const vRun = legs.length && !windows.length ? (10 * legs.length) / lap : null;
     out.steps = zone.map(s => { const k = legOf(s); const v = k >= 0 ? windows[k].v : vRun; return { ...s, freq: r3(1 / s.step), leg: k >= 0 ? k : null, length: v ? r3(v * s.step) : null }; });
@@ -362,7 +365,7 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
       return { time: l, speed: r3(10 / l), freq: real ? r3(f) : null, stepLength: real ? r3(len) : null, steps: mine.length };
     });
     // a step whose 10 m came out unreal is not shown with a length either
-    for (const s of out.steps) if (s.length != null && (!saneLen(s.length) || (s.leg != null && out.legStats[s.leg]?.stepLength == null) || (s.leg == null && !out.legStats.some(x => x.stepLength != null)))) s.length = null;
+    for (const s of out.steps) if (s.length != null && (!saneStep(s.length) || (s.leg != null && out.legStats[s.leg]?.stepLength == null) || (s.leg == null && !out.legStats.some(x => x.stepLength != null)))) s.length = null;
     out.measured = out.steps.some(s => s.length != null);
     out.perLeg = windows.length > 0;   // each 10 m has its own steps (else one frequency for the run)
     return out;
