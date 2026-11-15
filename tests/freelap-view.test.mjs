@@ -24,3 +24,14 @@ test('freelap trainings: grouped newest first with the best run per athlete', ()
   assert.equal(t[0].best['miska|letmý'].key, 'c');
   assert.equal(t[1].id, 'd2026-11-12');
 });
+
+test('splits typed by hand: one field per 10 m, read only when every field is a time', async () => {
+  const { legsFormHtml, readLegs } = await import('../js/freelap-view.js');
+  const html = legsFormHtml([1.16, 1.2], { extra: 1, orig: true });
+  assert.equal((html.match(/data-leg="\d"/g) ?? []).length, 3);
+  assert.ok(html.includes('data-leg-reset') && html.includes('20–30 m'));
+  const box = vals => ({ querySelectorAll: () => vals.map((v, i) => ({ value: v, getAttribute: () => String(i) })) });
+  assert.deepEqual(readLegs(box(['1,16', '1.20', ' 1,22 '])), [1.16, 1.2, 1.22]);
+  assert.equal(readLegs(box(['1,16', ''])), null);        // a field still empty
+  assert.equal(readLegs(box(['1,16', '12'])), null);      // not a 10 m time
+});

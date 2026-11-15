@@ -115,11 +115,18 @@ export function sprintFromMotion({ motion, ts, fps, o = SPRINT }) {
 // sprinter's range and the next touchdown is the other foot. Kept: runs of at least three such
 // steps in a row, the step time changing by under a quarter from one to the next. The first steps
 // of a standing start are longer on the ground and shorter in the air.
+// What a sprinter's step can be, for checking a result against reality: frequency per second, and
+// length as a share of body height at speed (Bolt 2.44 m at 1.95 m = 1.25; 1.32 leaves room). At
+// Stanley's 1.86 m a fly step tops out near 2.45 m, so 3.7 /s with 2.70 m is a misread.
+export const SANE = { freq: [3.6, 5.6], length: [0.85, 1.32], height: 1.8 };
 export const STEP_RANGE = { contact: [0.07, 0.25], flight: [0.05, 0.22], step: [0.17, 0.33], startContact: 0.32, startStep: 0.42, startFlight: 0.02, jump: 0.25, minRun: 3 };
 export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
+  const contactOk = (s, i) => s && s.contact >= o.contact[0] && s.contact <= (accel && i < 3 ? o.startContact : o.contact[1]);
   const ok = (s, i) => {
     const early = accel && i < 3, next = steps[i + 1];
-    if (!(s.contact >= o.contact[0] && s.contact <= (early ? o.startContact : o.contact[1]))) return false;
+    if (!contactOk(s, i)) return false;
+    // the step ends on the next touchdown: a glitch there (0.05 s "contact") makes the step wrong too
+    if (next && !contactOk(next, i + 1)) return false;
     if (s.step == null) return false;
     if (!(s.step >= o.step[0] && s.step <= (early ? o.startStep : o.step[1]))) return false;
     if (!(s.flight >= (early ? o.startFlight : o.flight[0]) && s.flight <= o.flight[1])) return false;
@@ -220,7 +227,9 @@ const sidesOf = steps => {
 };
 
 // Everything the result screens show. video = the server's result, run = the Freelap run (or null).
-export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
+export function analyzeSprint(video, run, { mode = null, who = null, height = null } = {}) {
+  const hM = (height ?? SANE.height * 100) / 100;
+  const saneLen = len => len >= SANE.length[0] * hM && len <= SANE.length[1] * hM;
   const k0 = mode ?? (run ? modeOfRun(run) : video.modeGuess);
   const kind = k0 === 'rozbeh' ? 'fly' : k0;   // a run-up is analysed like a fly: steady steps at the end
   const raw = video.steps.filter(s => s.contact != null);
@@ -239,23 +248,34 @@ export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
     const zone = timed.length >= 3 ? timed : flyZone(bySeg(full), lap);
     out.zoneFrom = timed.length >= 3 ? 'freelap' : 'steps';
     const span = zone.length ? zone.at(-1).td + zone.at(-1).step - zone[0].td : NaN;
-    // Each step's length: the speed of the 10 m it falls in (the phone heard the finish) or of the
-    // whole run, times the step's own time.
+    // Metres only where they are measured (Stanley, 2026-11-15: "nech to je reálne, nie 3,7 frekvencia
+    // a 2,70 krok"): a step's length is the speed of the Freelap 10 m it lies inside times its own
+    // time, and only when the phone heard the finish, so the steps in that 10 m are known. Steps seen
+    // outside the timed metres give frequency and contacts, never a length.
     const lap0 = fin != null && lap ? fin - lap : null;
-    const vAt = t => {
-      if (!legs.length) return null;
-      if (lap0 == null) return (10 * legs.length) / lap;
-      let edge = lap0;
-      for (const l of legs) { if (t < edge + l) return 10 / l; edge += l; }
-      return 10 / legs.at(-1);
-    };
-    out.steps = zone.map(s => { const v = vAt(s.td + s.step / 2); return { ...s, freq: r3(1 / s.step), length: v ? r3(v * s.step) : null }; });
+    const windows = lap0 == null ? [] : legs.map((l, i) => { const a = lap0 + legs.slice(0, i).reduce((x, y) => x + y, 0); return { a, b: a + l, v: 10 / l }; });
+    const legOf = s => windows.findIndex(w => s.td >= w.a - 0.02 && s.td + s.step <= w.b + 0.02);
+    // An uploaded clip (no finish heard): a fly's steps are even, so the run's own speed is used.
+    const vRun = legs.length && !windows.length ? (10 * legs.length) / lap : null;
+    out.steps = zone.map(s => { const k = legOf(s); const v = k >= 0 ? windows[k].v : vRun; return { ...s, freq: r3(1 / s.step), leg: k >= 0 ? k : null, length: v ? r3(v * s.step) : null }; });
     out.freq = r3(zone.length / span);
     out.contact = r3(mean(zone.map(s => s.contact)));
     out.flight = r3(mean(zone.map(s => s.flight)));
     out.stepTime = r3(span / zone.length);
     out.sides = sidesOf(zone);
-    out.legStats = legs.map(l => ({ time: l, speed: r3(10 / l), stepLength: out.freq ? r3(10 / l / out.freq) : null }));
+    // Per 10 m: its own steps' frequency, and the step length that speed and frequency give. A value
+    // outside what a sprinter can do means the steps were misread: shown as not measured.
+    out.legStats = legs.map((l, k) => {
+      const mine = windows.length ? out.steps.filter(s => s.leg === k) : out.steps;
+      const f = mine.length >= 2 ? mine.length / mine.reduce((x, s) => x + s.step, 0) : null;
+      const len = f ? 10 / l / f : null;
+      const real = f && f >= SANE.freq[0] && f <= SANE.freq[1] && saneLen(len);
+      return { time: l, speed: r3(10 / l), freq: real ? r3(f) : null, stepLength: real ? r3(len) : null, steps: mine.length };
+    });
+    // a step whose 10 m came out unreal is not shown with a length either
+    for (const s of out.steps) if (s.length != null && (!saneLen(s.length) || (s.leg != null && out.legStats[s.leg]?.stepLength == null) || (s.leg == null && !out.legStats.some(x => x.stepLength != null)))) s.length = null;
+    out.measured = out.steps.some(s => s.length != null);
+    out.perLeg = windows.length > 0;   // each 10 m has its own steps (else one frequency for the run)
     return out;
   }
 
@@ -273,12 +293,15 @@ export function analyzeSprint(video, run, { mode = null, who = null } = {}) {
     out.legStats = legs.map(l => {
       const a = edge, b = edge + l; edge = b;
       const n = stepsIn([{ td: zero, step: full[0].td - zero }, ...full], a, b);
-      return { time: l, speed: r3(10 / l), steps: +n.toFixed(1), stepLength: n ? r3(10 / n) : null, end: r3(b) };
+      // counted steps, and a length only when it is one a runner can make (a standing start's first
+      // 10 m has short steps: from 0.5 of body height)
+      const len = n ? 10 / n : null;
+      return { time: l, speed: r3(10 / l), steps: +n.toFixed(1), stepLength: len && len >= 0.5 * hM && len <= SANE.length[1] * hM ? r3(len) : null, end: r3(b) };
     });
     out.steps = out.steps.map(s => {
       if (s.step == null) return s;
       const t1 = s.td - zero, t2 = s.td + s.step - zero, len = posAt(t2, fit) - posAt(t1, fit);
-      return { ...s, length: r3(len), speed: r3(len / s.step), freq: r3(1 / s.step), at: r3(posAt((t1 + t2) / 2, fit)) };
+      return { ...s, modelLength: r3(len), modelSpeed: r3(len / s.step), freq: r3(1 / s.step), at: r3(posAt((t1 + t2) / 2, fit)) };
     });
     // Only the steps inside the timed distance, up to the one that crosses its end.
     const endT = out.legStats.at(-1).end;

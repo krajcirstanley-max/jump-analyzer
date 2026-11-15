@@ -490,6 +490,9 @@ final class FreelapEar: NSObject, CBCentralManagerDelegate {
 
     private var central: CBCentralManager?
     private var firstSeen: [String: CFTimeInterval] = [:]
+    /// Every distinct frame of a run as hex, company ID left off (as the page keeps them): runs
+    /// with two or more intermediates still read wrong, these let the layout be worked out.
+    private(set) var raws: [String: [String]] = [:]
     var onFrame: ((Frame, CFTimeInterval) -> Void)?   // the frame and when its run was first heard
 
     func start() {
@@ -510,6 +513,9 @@ final class FreelapEar: NSObject, CBCentralManagerDelegate {
         let now = CACurrentMediaTime()
         guard let data = ad[CBAdvertisementDataManufacturerDataKey] as? Data, let f = FreelapEar.frame(data) else { return }
         if firstSeen[f.key] == nil { firstSeen[f.key] = now }
+        let hex = data.dropFirst(2).map { String(format: "%02x", $0) }.joined()
+        var l = raws[f.key] ?? []
+        if !l.contains(hex), l.count < 8 { l.append(hex); raws[f.key] = l }
         onFrame?(f, firstSeen[f.key] ?? now)
     }
 
@@ -913,7 +919,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         if let raw { data["raw"] = raw.path }
         if let wall { data["recordedAt"] = Int(wall.timeIntervalSince1970 * 1000) }
         // arrived: seconds into the clip when the run reached the phone (the chip crossing the last cone + latency)
-        data["times"] = runs.map { ["key": $0.key, "name": $0.name, "lap": $0.lap, "legs": $0.legs, "arrived": $0.arrived] }
+        data["times"] = runs.map { ["key": $0.key, "name": $0.name, "lap": $0.lap, "legs": $0.legs, "arrived": $0.arrived, "raw": ear.raws[$0.key] ?? []] }
         onEvent?("saved", data)
     }
 

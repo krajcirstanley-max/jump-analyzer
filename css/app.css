@@ -630,3 +630,8 @@ div.att-open { cursor: default; }
 /* the RSI marks sit on the picture inside the player, above its buttons */
 .rsi-stage { position: relative; }
 .rsi-stage .rsi-ov.hud { bottom: 12px; }
+/* Splits typed by hand: one field per 10 m (2026-11-15) */
+.fl-edit { margin-top: 12px; }
+.fl-edit-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.fl-edit-row label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.fl-edit-row input { width: 72px; min-height: 40px; font-size: 16px; text-align: center; }

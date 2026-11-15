@@ -80,22 +80,45 @@ export function trainings(reps) {
   }).sort((a, b) => b.to - a.to);
 }
 
+// Splits typed by hand (Stanley, 2026-11-15: "viem upraviť splity po videu alebo doplniť"): one
+// field per 10 m, the lap is their sum. It saves once every field holds a time.
+export function legsFormHtml(legs, { extra = 0, orig = false, attr = 'data-leg', title = 'Úseky po 10 m · uprav alebo doplň' } = {}) {
+  const vals = [...legs.map(sec), ...Array(extra).fill('')];
+  if (!vals.length) vals.push('');
+  const sum = legs.reduce((a, b) => a + b, 0);
+  return `<div class="fl-edit">
+    <p class="sp-lb">${esc(title)}</p>
+    <div class="fl-edit-row">${vals.map((v, i) => `<label><small>${i * 10}–${i * 10 + 10} m</small><input ${attr}="${i}" type="text" inputmode="decimal" autocomplete="off" placeholder="1,05" value="${v}"></label>`).join('')}</div>
+    <div class="filt"><button ${attr}-add>+ 10 m</button>${vals.length > 1 ? `<button ${attr}-del>− 10 m</button>` : ''}${orig ? `<button ${attr}-reset>Časy z chipu</button>` : ''}</div>
+    ${legs.length > 1 ? `<p class="note">Spolu ${sec(sum)} s</p>` : ''}
+  </div>`;
+}
+// The typed splits, or null while a field is empty or not a 10 m time.
+export function readLegs(box, attr = 'data-leg') {
+  const v = [...box.querySelectorAll(`[${attr}]`)].filter(i => /^\d+$/.test(i.getAttribute(attr))).map(i => parseFloat(String(i.value).trim().replace(',', '.')));
+  return v.length && v.every(x => x >= 0.7 && x <= 4) ? v.map(x => Math.round(x * 100) / 100) : null;
+}
+const sumLegs = l => Math.round(l.reduce((a, b) => a + b, 0) * 100) / 100;
+
 export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = null, onOpen = () => {}, onChange = () => {} }) {
   let reps = load(KEY, []).map(cleanLegs), open = load(SESSION_KEY, null);
   let filter = { type: 'all', steps: null, ...load(FILTER_KEY, {}) };
   let linker = () => null;             // run key → its sprint analysis (with the video), set by the app
   let detailKey = null;                // the run open on the detail screen
+  let draftExtra = 0;                  // empty 10 m fields added on it, not saved until filled
   let error = null, packets = 0, lastHex = '', heard = null, lastChip = '';
   let armed = null, armTimer = null;   // the delete button waiting for its second tap
   const subs = new Set();              // the Sprint tab listens for runs while it films
   const save = () => store(KEY, reps.slice(0, 500));
 
   const seen = new Map(reps.map(r => [r.key, r.legs?.length ?? 0]));
+  const pendingRaw = new Map();   // frames of a run not stored yet (the frame came before the rep)
   const listener = createListener(ble, {
     rep(r) {
       open = sessionFor(open, r.at);
       store(SESSION_KEY, open);
       const run = { chip: r.chip, who: r.who, lap: r.lap, legs: r.legs, at: r.at, key: r.key, session: open.id };
+      if (pendingRaw.has(r.key)) { run.raw = pendingRaw.get(r.key); pendingRaw.delete(r.key); }
       if (open.plan?.type) { run.type = open.plan.type; if (open.plan.type === 'rozbeh') run.steps = open.plan.steps; }
       reps.unshift(run);
       save();
@@ -105,13 +128,17 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     },
     update(r) {   // the same run, now with its intermediate
       const i = reps.findIndex(x => x.key === r.key);
-      if (i < 0) return;
+      if (i < 0 || reps[i].edited) return;   // splits typed by hand win
       reps[i] = { ...reps[i], lap: r.lap, legs: r.legs };
       save();
       draw();
       for (const f of subs) f('update', reps[i]);
     },
     packet(n, hex) { packets = n; lastHex = hex; drawCount(); },
+    raw(key, list) {   // the run's frames as received, for working out the multi-split layout
+      const i = reps.findIndex(x => x.key === key);
+      if (i >= 0) { reps[i] = { ...reps[i], raw: list }; save(); } else pendingRaw.set(key, list);
+    },
     heard(h) {
       heard = h;
       if (h.md !== undefined) lastChip = JSON.stringify(h.md);
@@ -221,6 +248,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       <div class="fl-row"><div class="fl-who"><b>${esc(name(r))}</b><small>${esc(typeLabel(r))} · ${runMetres(r) ? `${runMetres(r)} m` : ''}</small></div>
         <div class="fl-time"><b>${sec(r.lap)}</b><span>s</span></div></div>
       ${legsHtml(r)}
+      ${legsFormHtml(r.legs?.length ? r.legs : [r.lap], { extra: draftExtra, orig: !!r.orig })}
       <p class="sp-lb">Čo to bol za beh</p>
       <div class="filt">${b('auto', `Rozpoznať (${TYPES[auto].toLowerCase()})`)}${Object.entries(TYPES).map(([v, l]) => b(v, l)).join('')}</div>
       ${modeOfRun(r) === 'rozbeh' ? `<label class="fl-steps">Krokov rozbehu <select data-run-steps>${STEP_CHOICES.map(n => `<option${n === r.steps ? ' selected' : ''}>${n}</option>`).join('')}</select></label>` : ''}
@@ -235,15 +263,29 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     reps[i] = r;
     save(); draw(); drawDetail(); onChange(r);
   }
+  const typed = (key, legs) => {
+    const r = reps.find(x => x.key === key);
+    if (!r) return;
+    draftExtra = 0;
+    editRun(key, { legs, lap: sumLegs(legs), edited: true, orig: r.orig ?? { lap: r.lap, legs: r.legs } });
+  };
   detailRoot?.addEventListener('click', e => {
+    const r = reps.find(x => x.key === detailKey);
+    if (r && e.target.closest('[data-leg-add]')) { draftExtra++; drawDetail(); return; }
+    if (r && e.target.closest('[data-leg-del]')) {
+      if (draftExtra) { draftExtra--; drawDetail(); } else if (r.legs?.length > 1) typed(r.key, r.legs.slice(0, -1));
+      return;
+    }
+    if (r?.orig && e.target.closest('[data-leg-reset]')) { draftExtra = 0; editRun(r.key, { lap: r.orig.lap, legs: r.orig.legs, orig: undefined, edited: undefined }); return; }
     const b = e.target.closest('[data-run-type]');
     if (!b) return;
-    const v = b.dataset.runType, r = reps.find(x => x.key === detailKey);
+    const v = b.dataset.runType;
     if (v === 'auto') editRun(detailKey, { type: undefined, steps: undefined });
     else editRun(detailKey, { type: v, steps: v === 'rozbeh' ? r?.steps ?? open?.plan?.steps ?? 12 : undefined });
   });
   detailRoot?.addEventListener('change', e => {
     if (e.target.matches('[data-run-steps]')) editRun(detailKey, { type: 'rozbeh', steps: +e.target.value });
+    if (e.target.matches('[data-leg]')) { const l = readLegs(detailRoot); if (l) typed(detailKey, l); }
   });
 
   function draw() {
@@ -322,10 +364,12 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
   function addHeard(r) {
     if (!r?.key || !(r.lap > 0)) return null;
     const run0 = cleanLegs({ chip: r.chip ?? null, who: r.who ?? null, lap: r.lap, legs: r.legs?.length ? r.legs : [r.lap], at: r.at ?? Date.now(), key: r.key });
+    if (r.raw?.length) run0.raw = r.raw;
+    if (r.edited) run0.edited = true;
     const i = reps.findIndex(x => x.key === run0.key);
     if (i >= 0) {
-      if (run0.legs.length <= (reps[i].legs?.length ?? 0)) return reps[i];
-      reps[i] = { ...reps[i], lap: run0.lap, legs: run0.legs };
+      if (run0.legs.length <= (reps[i].legs?.length ?? 0)) { if (run0.raw && !reps[i].raw) { reps[i] = { ...reps[i], raw: run0.raw }; save(); } return reps[i]; }
+      reps[i] = { ...reps[i], lap: run0.lap, legs: run0.legs, ...(run0.raw && !reps[i].raw ? { raw: run0.raw } : {}) };
     } else {
       open = sessionFor(open, run0.at); store(SESSION_KEY, open);
       const run = { ...run0, session: open.id };
@@ -345,7 +389,9 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
     runs: () => reps.slice(),   // the Sprint tab pairs uploaded videos with these
     onRun(f) { subs.add(f); return () => subs.delete(f); },
     setLinker(f) { linker = f; draw(); },
-    openRun(key) { detailKey = key; drawDetail(); return !!reps.find(x => x.key === key); },
+    // A run typed by hand for a video Freelap did not time.
+    addTyped({ who, at, legs }) { return addHeard({ key: `hand:${at}`, who, lap: sumLegs(legs), legs, at, edited: true }); },
+    openRun(key) { draftExtra = 0; detailKey = key; drawDetail(); return !!reps.find(x => x.key === key); },
     planHtml, planEvent,
   };
 }

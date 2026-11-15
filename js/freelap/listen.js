@@ -78,6 +78,16 @@ function readCrossings(bytes, ad, width) {
 export function createListener(ble, on = {}, seen = new Map()) {
   if (seen instanceof Set) seen = new Map([...seen].map(k => [k, 0]));
   const lastRun = new Map();   // device -> { ad, at }: the run a separate intermediate frame belongs to
+  // Every distinct frame of a run, as hex (2026-11-15: runs with two or more intermediates read
+  // wrong; the raw frames are kept on the run so the layout can be worked out from them).
+  const raws = new Map();
+  const keepRaw = (key, hex) => {
+    const l = raws.get(key) ?? [];
+    if (l.includes(hex) || l.length >= 8) return;
+    l.push(hex); raws.set(key, l);
+    if (raws.size > 50) raws.delete(raws.keys().next().value);
+    on.raw?.(key, l.slice());
+  };
   let state = ble ? 'off' : 'none', sub = null, packets = 0, ready = false;
   const set = (s, err = null) => { state = s; on.state?.(s, err); };
 
@@ -97,16 +107,20 @@ export function createListener(ble, on = {}, seen = new Map()) {
     const dev = result?.device?.deviceId ?? '';
     const now = Date.now();
     const ad = decodeAdvertisement(bytes);
+    const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
     let r = null;
     if (ad) {
       r = repOf(ad, ad.laps, now);
       if (r) lastRun.set(dev, { ad, at: now });
     } else {
       const last = lastRun.get(dev);
-      const laps = last && now - last.at < 5000 && last.ad.laps.length === 0 ? lapsFromScanResponse(bytes, last.ad) : null;
+      if (last && now - last.at < 5000) keepRaw(`${last.ad.chip}:${last.ad.fromLap}:${last.ad.block}`, hex);
+      // a frame whose own intermediates were not real takes them from a separate one
+      const laps = last && now - last.at < 5000 && repOf(last.ad, last.ad.laps, now)?.legs.length === 1 ? lapsFromScanResponse(bytes, last.ad) : null;
       if (laps) r = repOf(last.ad, laps, now);
     }
     if (!r) return;
+    if (ad) keepRaw(r.key, hex);
     if (!seen.has(r.key)) { seen.set(r.key, r.legs.length); on.rep?.(r); return; }
     if (r.legs.length > seen.get(r.key)) { seen.set(r.key, r.legs.length); on.update?.(r); }
   }

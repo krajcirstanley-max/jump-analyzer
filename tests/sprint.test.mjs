@@ -41,7 +41,7 @@ test('Miška accel: first step, timer zero, steps per 10 m, contacts shortening'
   assert.ok(a.contactFrom > a.contactTo + 0.03, 'contact shortens');
   assert.ok(a.flightTo > a.flightFrom + 0.02, 'flight lengthens');
   assert.equal(a.steps.length, 12);
-  assert.ok(a.steps.every((s, i) => i === 0 || s.length >= a.steps[i - 1].length - 0.15), 'steps lengthen');
+  assert.ok(a.steps.every((s, i) => i === 0 || s.modelLength >= a.steps[i - 1].modelLength - 0.15), 'steps lengthen (model, not shown)');
   near(a.curve.find(c => c.x === 20).v, 8.0, 0.25, 'speed at 20 m');
 });
 
@@ -100,10 +100,10 @@ test('only steps a runner can make are kept, in unbroken runs (2026-11-15 pan cl
   const { cleanSteps, runMetres } = await import('../js/analysis/sprint.js');
   const st = (foot, contact, flight) => ({ foot, contact, flight, step: +(contact + flight).toFixed(3), td: 0 });
   const steps = [st('r', 0.05, 0.35), st('r', 0.1, 0.59), st('r', 0.1, 0.1),   // far: impossible, and a foot twice
-    st('r', 0.1, 0.125), st('l', 0.1, 0.108), st('r', 0.1, 0.158), st('l', 0.05, 0.117), st('r', 0.1, 0.05)];
+    st('r', 0.1, 0.125), st('l', 0.1, 0.108), st('r', 0.1, 0.158), st('l', 0.11, 0.13), st('r', 0.1, 0.12), st('l', 0.05, 0.117), st('r', 0.1, 0.05)];
   const kept = cleanSteps(steps);
-  assert.equal(kept.length, 3);
-  assert.deepEqual(kept.map(s => s.flight), [0.125, 0.108, 0.158]);
+  // the step before the 0.05 s "contact" ends on a glitch: dropped with it
+  assert.deepEqual(kept.map(s => s.flight), [0.125, 0.108, 0.158, 0.13]);
   assert.ok(kept.every(s => s.seg === 0));
   assert.equal(runMetres({ lap: 2.05, legs: [1.01, 1.04] }), 20);
   assert.equal(runMetres({ lap: 3.84, legs: [3.84] }), null);   // splits lost: distance unknown
