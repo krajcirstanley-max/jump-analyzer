@@ -44,6 +44,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "run", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "finalize", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveVideo", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
 
@@ -76,6 +77,26 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         RsiHold.shared.notify = { [weak self] name, data in self?.notifyListeners(name, data: data) }
         RsiHold.shared.finalize(id: id, marks: marks)
         call.resolve()
+    }
+
+    /// "Video z tréningu": the finished video from the server (url, bearer auth) into Photos.
+    @objc func saveVideo(_ call: CAPPluginCall) {
+        guard let s = call.getString("url"), let url = URL(string: s) else { call.reject("No url"); return }
+        var req = URLRequest(url: url)
+        if let a = call.getString("auth"), !a.isEmpty { req.setValue("Bearer \(a)", forHTTPHeaderField: "Authorization") }
+        URLSession.shared.downloadTask(with: req) { tmp, resp, err in
+            guard let tmp = tmp, (resp as? HTTPURLResponse)?.statusCode == 200 else { call.reject(err?.localizedDescription ?? "Video sa nepodarilo stiahnuť"); return }
+            let dst = FileManager.default.temporaryDirectory.appendingPathComponent("trening-\(Int(Date().timeIntervalSince1970)).mp4")
+            try? FileManager.default.removeItem(at: dst)
+            do { try FileManager.default.moveItem(at: tmp, to: dst) } catch { call.reject("Video sa nepodarilo uložiť"); return }
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                guard status == .authorized || status == .limited else { try? FileManager.default.removeItem(at: dst); call.reject("Appka nemá prístup k Fotkám"); return }
+                PHPhotoLibrary.shared().performChanges({ PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: dst, options: nil) }) { ok, e in
+                    try? FileManager.default.removeItem(at: dst)
+                    if ok { call.resolve(["saved": true]) } else { call.reject(e?.localizedDescription ?? "Video sa nepodarilo uložiť") }
+                }
+            }
+        }.resume()
     }
 
     /// A Freelap run: a new one, or the same run again with its intermediate.

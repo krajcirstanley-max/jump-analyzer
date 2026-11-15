@@ -474,6 +474,56 @@ def test_bad_athletes_roster_is_refused():
         assert e.post(q="athletes=" + u.quote(bad)).status_code == 400
 
 
+
+def test_recap_upload_render_and_fetch():
+    import recap_job as R
+    e = Env()
+    rec = []
+    e.client.app.state  # noqa
+    api = A.create_api(jobs=e.jobs, clips_dir=e.path, commit_clips=lambda: None, start_job=lambda *a: None, warm=lambda: None,
+                       tokens={"stanley": "tok-s", "miska": "tok-m"}, now=lambda: e.t[0], start_recap=lambda rid, owner: rec.append((rid, owner)), reload_clips=lambda: None)
+    c = TestClient(api, raise_server_exceptions=False)
+    H = {"Authorization": "Bearer tok-s"}
+    assert c.post("/recap?clips=0", headers=H).status_code == 400
+    rid = c.post("/recap?clips=2", headers=H).json()["recapId"]
+    story = {"frames": [{"bg": 1}], "clips": [{"frames": [], "kp": {}}, {"frames": [], "kp": {}}], "out": {"W": 1080, "H": 1920, "fps": 30}}
+    # the story before all clips: refused
+    assert c.post(f"/recap/{rid}/clip/0", content=b"a", headers=H).status_code == 200
+    assert c.post(f"/recap/{rid}/render", content=json.dumps(story), headers=H).status_code == 400
+    assert c.post(f"/recap/{rid}/clip/5", content=b"b", headers=H).status_code == 400
+    assert c.post(f"/recap/{rid}/clip/1", content=b"b", headers=H).status_code == 200
+    # someone else's video looks like no video
+    assert c.get(f"/recap/{rid}", headers={"Authorization": "Bearer tok-m"}).status_code == 404
+    assert c.post(f"/recap/{rid}/render", content=b"{nope", headers=H).status_code == 400
+    assert c.post(f"/recap/{rid}/render", content=json.dumps(story), headers=H).status_code == 200
+    assert rec == [(rid, "stanley")] and c.get(f"/recap/{rid}", headers=H).json()["state"] == "queued"
+    assert c.get(f"/recap/{rid}/video", headers=H).status_code == 409
+    # the job: renders, keeps the video, drops the inputs
+    def fake_render(story_path, out, paths, music=None):
+        assert [Path(p).read_bytes() for p in paths] == [b"a", b"b"]
+        Path(out).write_bytes(b"MP4")
+        return {"seconds": 1.0}
+    R.process_recap(rid, "stanley", jobs=e.jobs, clips_dir=e.path, reload_clips=lambda: None, commit_clips=lambda: None, music_dir=e.path / "none", render=fake_render, now=lambda: e.t[0])
+    assert c.get(f"/recap/{rid}", headers=H).json()["state"] == "done"
+    r = c.get(f"/recap/{rid}/video", headers=H)
+    assert r.status_code == 200 and r.content == b"MP4"
+    assert not list(e.path.glob(f"recap-{rid}-c*")) and not (e.path / f"recap-{rid}.json").exists()
+
+
+def test_recap_music_pick():
+    import recap_job as R
+    d = Path(tempfile.mkdtemp())
+    assert R.pick_music(d, {}, "x" * 16) is None
+    (d / "solo.wav").write_bytes(b"w")
+    assert R.pick_music(d, {"music": 3}, "x" * 16).endswith("solo.wav")   # no index yet: the tracks there
+    (d / "solo.wav").unlink()
+    (d / "index.json").write_text(json.dumps(["a", "b", "c"]))
+    for n in "abc":
+        (d / f"{n}.wav").write_bytes(b"w")
+    assert R.pick_music(d, {"music": 4}, "x" * 16).endswith("b.wav")
+    (d / "b.wav").unlink()
+    assert R.pick_music(d, {"music": 1}, "x" * 16).endswith("c.wav")
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

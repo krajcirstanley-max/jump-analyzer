@@ -16,13 +16,14 @@ import { initSprint } from './sprint-view.js';
 import { initCompare } from './compare-view.js';
 let compareView = null;   // two jumps side by side (compare-view.js), set up below
 import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
+import { initRecap, recapButtons } from './recap-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud, askAboutJump } from './cloud.js';
 import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.21.0';
+const APP_VERSION = '0.22.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -106,6 +107,7 @@ const sprintView = initSprint({
 });
 const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
 // Two jumps side by side: each its own player with its skeleton and angles, lined up on the jump.
+initRecap({ hist, athletes: ATHLETES, profiles });
 compareView = initCompare({
   root: document.getElementById('compare'), athletes: ATHLETES,
   listAll: async () => (await Promise.all(Object.keys(ATHLETES).map(a => hist.listAttempts(a)))).flat(),
@@ -969,8 +971,10 @@ async function feedItems() {
 }
 async function refreshFeeds() {
   const items = await feedItems();
-  $('today').innerHTML = todayHtml(items);
-  if (histFilter !== 'freelap') $('hist-list').innerHTML = listHtml(items, histFilter);
+  // "Video z tréningu" for every athlete who jumped that day
+  const recapOf = day => recapButtons(items, day);
+  $('today').innerHTML = todayHtml(items, recapOf);
+  if (histFilter !== 'freelap') $('hist-list').innerHTML = listHtml(items, histFilter, recapOf);
 }
 $('hist-filter').addEventListener('click', e => {
   const b = e.target.closest('[data-f]');

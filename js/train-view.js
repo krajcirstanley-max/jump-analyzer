@@ -33,21 +33,21 @@ export function itemHtml(it, { showTime = true } = {}) {
 }
 
 // All analyses, newest first; filter: 'all' | 'skok' | 'sprint' | 'rsi'.
-export function listHtml(items, filter = 'all') {
+export function listHtml(items, filter = 'all', dayExtra = null) {
   const list = items.filter(it => filter === 'all' || it.kind === filter).sort((a, b) => b.at - a.at);
   if (!list.length) return '<p class="note">Zatiaľ tu nič nie je.</p>';
   let day = '', out = '';
   for (const it of list) {
     const d = dayKey(it.at);
-    if (d !== day) { day = d; out += `<p class="feed-day">${d === dayKey(Date.now()) ? 'Dnes' : esc(dayName(it.at))}</p>`; }
+    if (d !== day) { day = d; out += `<p class="feed-day">${d === dayKey(Date.now()) ? 'Dnes' : esc(dayName(it.at))}</p>${dayExtra && (filter === 'all' || filter === 'skok') ? dayExtra(d) : ''}`; }
     out += itemHtml(it);
   }
   return out;
 }
 
-export function todayHtml(items) {
+export function todayHtml(items, dayExtra = null) {
   const today = items.filter(it => dayKey(it.at) === dayKey(Date.now())).sort((a, b) => b.at - a.at);
-  return `<p class="feed-day">Dnes · najnovšie hore</p>${today.length ? today.map(it => itemHtml(it)).join('') : '<p class="note">Dnes ešte nič. Natoč alebo nahraj video.</p>'}`;
+  return `<p class="feed-day">Dnes · najnovšie hore</p>${dayExtra ? dayExtra(dayKey(Date.now())) : ''}${today.length ? today.map(it => itemHtml(it)).join('') : '<p class="note">Dnes ešte nič. Natoč alebo nahraj video.</p>'}`;
 }
 
 // ---------- Progres ----------

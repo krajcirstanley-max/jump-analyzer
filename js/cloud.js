@@ -315,3 +315,38 @@ export async function enableNotifications() {
     return false;
   }
 }
+
+// ---------- "Video z tréningu" ----------
+// The day's clips, then the story (js/recap.js), then the server draws it; returns the video as a
+// blob URL and the server URL the native side can fetch it from for Photos.
+export async function recapInCloud(clips, storyObj, { onStage, signal } = {}) {
+  const call = async (path, opts = {}) => {
+    let r;
+    try { r = await fetch(`${base()}${path}`, { ...opts, headers: { ...auth(), ...(opts.headers ?? {}) }, cache: 'no-store', signal }); }
+    catch (e) { if (signal?.aborted) throw aborted(); throw new CloudError(NET, true); }
+    if (!r.ok) { let d = ''; try { d = (await r.json()).detail ?? ''; } catch { /* no json */ } throw d ? new CloudError(d) : statusError(r.status); }
+    return r;
+  };
+  onStage?.('Pripravujem video');
+  const { recapId } = await (await call(`/recap?clips=${clips.length}`, { method: 'POST' })).json();
+  for (let k = 0; k < clips.length; k++) {
+    onStage?.(`Nahrávam klip ${k + 1} z ${clips.length}`);
+    await call(`/recap/${recapId}/clip/${k}`, { method: 'POST', body: clips[k], headers: { 'Content-Type': 'application/octet-stream' } });
+  }
+  onStage?.('Strihám video');
+  await call(`/recap/${recapId}/render`, { method: 'POST', body: JSON.stringify(storyObj), headers: { 'Content-Type': 'application/json' } });
+  const t0 = Date.now();
+  for (;;) {
+    await new Promise(r => setTimeout(r, 3000));
+    if (signal?.aborted) throw aborted();
+    const st = await (await call(`/recap/${recapId}`)).json();
+    if (st.state === 'done') break;
+    if (st.state === 'error') throw new CloudError(st.error || 'Video sa nepodarilo vyrobiť.');
+    onStage?.(`Strihám video · ${Math.round((Date.now() - t0) / 1000)} s`);
+    if (Date.now() - t0 > 15 * 60 * 1000) throw new CloudError('Video trvá príliš dlho. Skús to znova.');
+  }
+  onStage?.('Sťahujem video');
+  const url = `${base()}/recap/${recapId}/video`;
+  const blob = await (await call(`/recap/${recapId}/video`)).blob();
+  return { url, blob, token: getCloudToken() };
+}

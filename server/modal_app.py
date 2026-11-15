@@ -104,9 +104,24 @@ chat_image = (
 if (ROOT / "server/knowledge.md").exists():
     chat_image = chat_image.add_local_file(ROOT / "server/knowledge.md", "/app/server/knowledge.md")
 
+# "Video z tréningu": a CPU container draws the story the app wrote (server/recap_render.py), with
+# open fonts (OFL, server/fonts) and one track from the music library (server/make_music.py).
+recap_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("curl", "xz-utils", "ca-certificates")
+    .run_commands(f"curl -fsSL {FFMPEG_URL} | tar xJ --strip-components=2 -C /usr/local/bin --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'")
+    .pip_install("pillow==11.3.0", "numpy==2.3.4")
+    .env({"PYTHONPATH": "/app/server", "RECAP_FONTS": "/app/server/fonts"})
+    .add_local_dir(ROOT / "server/fonts", "/app/server/fonts")
+    .add_local_file(ROOT / "server/recap_render.py", "/app/server/recap_render.py")
+    .add_local_file(ROOT / "server/recap_job.py", "/app/server/recap_job.py")
+)
+MUSIC = "/music"
+
 app = modal.App("jump-analyzer")
 jobs = modal.Dict.from_name("jump-jobs", create_if_missing=True)
 clips = modal.Volume.from_name("jump-clips", create_if_missing=True)
+music = modal.Volume.from_name("jump-music", create_if_missing=True)
 tokens_secret = modal.Secret.from_name("jump-tokens")
 vapid_secret = modal.Secret.from_name("jump-vapid")
 # JUMP_CLAUDE_TOKENS maps app user to that person's own token; ANTHROPIC_API_KEY is optional.
@@ -195,6 +210,14 @@ class Analyzer:
         self.daemon.stop()
 
 
+@app.function(image=recap_image, region="eu", cpu=8.0, memory=16384, volumes={CLIPS: clips, MUSIC: music}, timeout=900, scaledown_window=60)
+def render_recap(rid, owner):
+    from recap_job import process_recap
+
+    music.reload()   # the library may have grown since this container mounted it
+    process_recap(rid, owner, jobs=jobs, clips_dir=CLIPS, reload_clips=clips.reload, commit_clips=clips.commit, music_dir=MUSIC)
+
+
 @app.function(image=chat_image, region="eu", cpu=1.0, memory=2048, secrets=[claude_secret], timeout=150, scaledown_window=600)
 def ask(owner, payload):
     from chat import answer
@@ -233,6 +256,8 @@ def web():
         warm=lambda: Analyzer().warm.spawn(),
         hold=lambda: Analyzer().hold.spawn(),
         chat=chat_call,
+        start_recap=lambda rid, owner: render_recap.spawn(rid, owner),
+        reload_clips=clips.reload,
         tokens=load_tokens(os.environ.get("JUMP_TOKENS")),
         push_key=os.environ.get("VAPID_PUBLIC", ""),
     )

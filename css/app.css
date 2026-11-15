@@ -692,3 +692,17 @@ div.att-open { cursor: default; }
 .kf-btns .kf-set { flex: 1; background: #fff; color: #111; }
 .kf-btns .kf-set[disabled] { opacity: .35; }
 .kf-btns .kf-undo { background: transparent; color: #fff; border: 1px solid rgba(255, 255, 255, .6); }
+/* "Video z tréningu" (recap-view.js) */
+.recap-btn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; margin: 4px 0 8px; padding: 12px 14px; border-radius: 14px; border: 0; background: #121212; color: #fff; font: 700 16px -apple-system, system-ui, sans-serif; text-align: left; cursor: pointer; }
+.recap-btn span { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #c8f25a; color: #111; font-size: 13px; }
+.recap-btn small { flex-basis: 100%; margin-left: 40px; color: #cfcabe; font-weight: 500; font-size: 13px; }
+.recap-sheet { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .55); display: flex; align-items: flex-end; justify-content: center; }
+.recap-sheet.hidden { display: none; }
+.recap-card { width: 100%; max-width: 520px; max-height: 94vh; overflow: auto; background: var(--card); border-radius: 20px 20px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.recap-card h2 { margin: 0 0 10px; font-size: 18px; }
+.recap-stage { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 6px 0; }
+.recap-stage .spin { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: recap-spin 0.9s linear infinite; }
+@keyframes recap-spin { to { transform: rotate(360deg); } }
+.recap-video { width: 100%; max-height: 66vh; border-radius: 14px; background: #000; display: block; margin-bottom: 10px; }
+.recap-actions { display: flex; gap: 8px; }
+.recap-actions .btn { flex: 1; }

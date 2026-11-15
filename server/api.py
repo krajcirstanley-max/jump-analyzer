@@ -25,7 +25,18 @@ SK = {
     "start": "Analýzu sa nepodarilo spustiť. Skús to znova.",
     "stale": "Analýza sa na serveri prerušila. Skús to znova.",
     "sub": "Neplatné prihlásenie na upozornenia.",
+    "recap_story": "Scenár videa má zlý formát.",
+    "recap_clips": "Chýbajú klipy k videu.",
+    "recap_start": "Video sa nepodarilo spustiť. Skús to znova.",
+    "recap_missing": "Toto video neexistuje alebo už bolo zmazané.",
+    "recap_wait": "Video ešte nie je hotové.",
 }
+MAX_RECAP_CLIPS = 12
+MAX_STORY = 8 * 1024 * 1024
+
+
+def recap_key(rid):
+    return f"recap:{rid}"
 
 
 def job_key(job_id):
@@ -101,8 +112,9 @@ HOLD_STALE_S = 45   # no heartbeat for this long: the hold is gone, start a new 
 HOLD_BOOT_S = 240   # a new hold's claim covers the GPU's cold start (~3 min) before its first beat
 
 
-def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time, hold=None, chat=None):
+def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key="", now=time.time, hold=None, chat=None, start_recap=None, reload_clips=None):
     from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+    from fastapi.responses import FileResponse
     from fastapi.concurrency import run_in_threadpool
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.middleware.gzip import GZipMiddleware
@@ -276,6 +288,104 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         # omit=result: a client that already has the ~1 MB result stops downloading it each poll.
         fields = ("state", "stage", "done", "total", "coach", "error") if omit == "result" else ("state", "stage", "done", "total", "result", "coach", "error")
         return {k: v for k, v in job.items() if k in fields}
+
+    # ---------- "Video z tréningu": clips, then the story the app wrote, then the rendered video ----------
+    RID = re.compile(r"[A-Za-z0-9_-]{16,40}")
+
+    def recap_of(rid, owner):
+        job = jobs.get(recap_key(rid)) if RID.fullmatch(rid) else None
+        if not job or job.get("owner") != owner:
+            raise HTTPException(404, SK["recap_missing"])
+        return job
+
+    @api.post("/recap")
+    def recap_new(clips: int = Query(...), owner=Depends(user)):
+        if not 1 <= clips <= MAX_RECAP_CLIPS:
+            raise HTTPException(400, SK["recap_clips"])
+        rid = pysecrets.token_urlsafe(16)
+        t = now()
+        jobs.put(recap_key(rid), {"state": "uploading", "owner": owner, "clips": clips, "got": [], "createdAt": t, "updatedAt": t})
+        return {"recapId": rid}
+
+    @api.post("/recap/{rid}/clip/{k}")
+    async def recap_clip(rid: str, k: int, request: Request, owner=Depends(user)):
+        job = recap_of(rid, owner)
+        if job.get("state") != "uploading" or not 0 <= k < job["clips"]:
+            raise HTTPException(400, SK["recap_clips"])
+        path = clips_dir / f"recap-{rid}-c{k}"
+        size = 0
+        try:
+            with open(path, "wb") as f:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > MAX_UPLOAD:
+                        raise HTTPException(413, SK["too_big"])
+                    f.write(chunk)
+            if not size:
+                raise HTTPException(400, SK["empty"])
+        except (HTTPException, ClientDisconnect):
+            path.unlink(missing_ok=True)
+            raise
+        job = jobs.get(recap_key(rid)) or job
+        job["got"] = sorted(set(job.get("got", [])) | {k})
+        job["updatedAt"] = now()
+        jobs.put(recap_key(rid), job)
+        return {"ok": True}
+
+    @api.post("/recap/{rid}/render")
+    async def recap_render(rid: str, request: Request, owner=Depends(user)):
+        job = recap_of(rid, owner)
+        body = await request.body()
+        if len(body) > MAX_STORY:
+            raise HTTPException(413, SK["recap_story"])
+        try:
+            story = json.loads(body)
+            ok = isinstance(story, dict) and isinstance(story.get("frames"), list) and 0 < len(story["frames"]) <= 4000 and isinstance(story.get("clips"), list) and len(story["clips"]) == job["clips"]
+        except ValueError:
+            ok = False
+        if not ok:
+            raise HTTPException(400, SK["recap_story"])
+        if sorted(job.get("got", [])) != list(range(job["clips"])):
+            raise HTTPException(400, SK["recap_clips"])
+        (clips_dir / f"recap-{rid}.json").write_bytes(body)
+
+        def start():
+            commit_clips()
+            jobs.put(recap_key(rid), {**job, "state": "queued", "updatedAt": now()})
+            try:
+                start_recap(rid, owner)
+            except Exception as e:
+                print("recap start failed:", e)
+                jobs.put(recap_key(rid), {**job, "state": "error", "error": SK["recap_start"], "updatedAt": now()})
+                raise HTTPException(503, SK["recap_start"])
+
+        await run_in_threadpool(start)
+        return {"ok": True}
+
+    @api.get("/recap/{rid}")
+    def recap_state(rid: str, owner=Depends(user)):
+        job = recap_of(rid, owner)
+        if job["state"] in ("queued", "running") and now() - job.get("updatedAt", 0) > 900:
+            job = {**job, "state": "error", "error": SK["recap_start"]}
+            jobs.put(recap_key(rid), job)
+        return {k: v for k, v in job.items() if k in ("state", "error", "seconds", "done", "total", "got", "clips")}
+
+    @api.get("/recap/{rid}/video")
+    def recap_video(rid: str, owner=Depends(user)):
+        job = recap_of(rid, owner)
+        if job.get("state") != "done":
+            raise HTTPException(409, SK["recap_wait"])
+        path = clips_dir / f"recap-{rid}.mp4"
+        for _ in range(3):   # the render container's commit can land a moment after its "done"
+            if path.exists():
+                break
+            if reload_clips:
+                reload_clips()
+            if not path.exists():
+                time.sleep(1)
+        if not path.exists():
+            raise HTTPException(404, SK["recap_missing"])
+        return FileResponse(path, media_type="video/mp4", filename="trening.mp4")
 
     @api.get("/push/key")
     def key(_=Depends(user)):
