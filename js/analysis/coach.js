@@ -135,8 +135,10 @@ const FAULTS = [
     why: 'Ťažisko má klesnúť asi o 9 cm. Viac už len brzdí a rozbeh sa míňa.',
   },
   {
-    id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho',
-    img: 'Ako lietadlo, ktoré sa pred vzletom na chvíľu prisaje k dráhe a potom sa odlepí.',
+    // 2026-11-16 (Stanley: „poďme všetko"): „dlhý – krátky" instead of „predposledný naplocho". The
+    // longer penultimate step lowers the hips by itself; the old cue spoke of the foot.
+    id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
+    img: 'Rytmus tá-dam: predposledný krok dlhší a nižší, posledný krátky a rýchly.',
     keys: [['hipDrop', 'low', 1.5]],
     title: 'Trochu znížiť boky pred doskou',
     take: 'malé zníženie bokov pred doskou ti dá z čoho ísť hore',

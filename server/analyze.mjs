@@ -103,7 +103,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     // Metres from the runway: the take-off line, the sand and the runway lines in every frame.
     // Without them the analysis falls back to the gravity fit.
     {
-      const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb });
+      const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true });
       if (!pre.error) {
         onProgress?.({ stage: 'ground', done: 0, total: 1 });
         try {

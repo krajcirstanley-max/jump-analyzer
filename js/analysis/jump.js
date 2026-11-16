@@ -266,7 +266,8 @@ export function cleanEdges(e) {
   for (const k of EDGE_KEYS) if (Number.isInteger(e?.[k])) out[k] = e[k];
   return Object.keys(out).length ? out : null;
 }
-export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null, edges = null } = {}) {
+// preGround: the server's pass before the runway is measured; the horizontal-speed floor waits for it.
+export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null, edges = null, preGround = false } = {}) {
   const clean = result.clean, smooth = result.smooth;
   if (!clean || !smooth) return { error: 'Chýba vyčistený záznam pohybu.' };
   const fps = result.fps ?? (ts ? (ts.length - 1) / (ts.at(-1) - ts[0]) : NaN);
@@ -314,7 +315,12 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // No take-off at all (2026-11-16, IMG_4866: a sprint filmed in the jump mode was read as a jump
   // with the body going down and backwards at "toe-off", vy -0.73, vx -1.18 m/s). Every real jump so
   // far leaves the board at vy 2.0-2.5 and vx 6.6-8.3 m/s, so these floors sit far below any jump.
-  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(air.vxTO) && (air.vyTO < 0.5 || air.vxTO < 2.5)) {
+  // The server's first pass runs before the runway is measured: there the horizontal floor waits,
+  // or a clip whose speed only the runway can set right never gets the runway measured. Without a
+  // runway at all a panning phone can turn the speed around (Miška's 240 fps pop-up from the track,
+  // 2026-11-16: vx −10,5): that clip says why it can't be measured instead of showing nonsense.
+  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(air.vxTO) && (air.vyTO < 0.5 || (!(preGround && !result.ground) && air.vxTO < 2.5))) {
+    if (air.vyTO >= 0.5 && !result.ground) return { error: 'Skok sa nedá zmerať: v zábere chýba doska alebo čiary dráhy.', noTakeoff: { vx: air.vxTO, vy: air.vyTO } };
     return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: air.vxTO, vy: air.vyTO } };
   }
   // Metres from the runway when the server found it; the gravity scale is only the fallback.

@@ -23,7 +23,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.24.0';
+const APP_VERSION = '0.24.1';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -734,7 +734,9 @@ function showJump() {
   player.refresh();
   if (jump.error) {
     console.warn('No jump', jump.error);
-    showMsg('bad', ...NOT_FOUND);
+    showMsg('bad', ...(/nedá zmerať/.test(jump.error)
+      ? ['Skok sa nedá zmerať', 'V zábere chýba doska alebo čiary dráhy, z ktorých sa počítajú metre a rýchlosť. Video si môžeš pozrieť; nabudúce natoč tak, aby bolo vidno dosku aj dráhu.']
+      : NOT_FOUND));
     return null;
   }
   jump.coach = cloudCoach ?? (awaitingCoach ? null : coaching(jump.metrics, who.sex, { name: who.name }));   // analyzeJump doesn't know the name
