@@ -23,7 +23,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.22.3';
+const APP_VERSION = '0.22.4';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -898,7 +898,7 @@ async function renderLists() {
 
 // ---------- Tréning and História ----------
 const KINDS = {
-  skok: { hint: 'Kto skáče, appka zistí z videa sama. Natočené v appke ide 240 fps; z Fotiek vyber originál (Share → Export Unmodified Original → Files).' },
+  skok: { hint: 'Kto skáče, appka zistí z videa sama. Natočené v appke ide 120 fps; z Fotiek vyber originál (Share → Export Unmodified Original → Files).' },
   sprint: { hint: 'Natočené v appke ide 120 fps a s Freelapom aj s časmi vo videu. Rozbor príde sám.' },
   rsi: { hint: 'Drop jump, odrazy, prekážky aj výskok z miesta. Natáčaj spredu, celé chodidlá v zábere. Natočené v appke sa uloží s časmi.' },
 };
@@ -939,7 +939,9 @@ $('train-film').addEventListener('click', () => {
   if (cloudReady()) warmCloud();   // the server boots (~3 min) while the athlete films
   if (kind === 'sprint') return sprintView.film();
   if (kind === 'rsi') return rsiView.film();
-  jumpCam?.open({ fps: 240, mode: 'jump', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
+  // 120 fps: the jump analysis is proven there; Miška's two 240 fps jumps (2026-11-16) failed
+  // (Stanley: "vypni 240 fps v appke").
+  jumpCam?.open({ fps: 120, mode: 'jump', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
 });
 
 // Freelap at a glance on Tréning; its runs, by training, under História → Freelap.
