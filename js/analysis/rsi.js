@@ -72,7 +72,9 @@ function scaleAt(track, sex, height) {
 // runs. Each run keeps its own level: from the front the athlete moves towards or away from the
 // phone between contacts, so the floor is not one image row.
 const PX = 5;   // px: the pose's own jitter on a planted toe (IMG_2213: 4.5 lost a hop, 5 and 6 read all 11)
-function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {}) {
+// minMs 60: a pose glitch of one foot for 2-3 frames in mid-flight split a hurdle hop in two and
+// showed a 0,025 s "contact" with RSI 1,96 (Stanley's hurdle hops, 2026-11-16, frames 800-802).
+function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 60 } = {}) {
   const n = y.length, v = y.map((_, i) => ((y[i + 1] ?? NaN) - (y[i - 1] ?? NaN)) * fps / 2);
   // A far athlete is small in the picture (IMG_2213, hops over cones filmed from the side: 141 px
   // per metre), and there 2 cm is under 3 px while a planted toe's keypoint wanders 5 px. The bands
@@ -121,7 +123,8 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 25 } = {})
 }
 
 // result: the pose result (wire shape after fromWire), ts: frame times in s.
-export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = null, cam = null } = {}) {
+// noBox: the drill has no box (Claude saw none): a long first contact is never "on the box".
+export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = null, cam = null, noBox = false } = {}) {
   const track = rawTrack(result, cam);
   if (!track.length) return { error: 'Vo videu som nenašiel športovca.' };
   const fps = (ts.length - 1) / (ts.at(-1) - ts[0]);
@@ -170,7 +173,7 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   contacts.forEach((c, k) => {
     c.ms = ((c.to - c.td + 1) / fps) * 1000;
     const next = contacts[k + 1];
-    c.onBox = c.ms >= 300 && !!next && next.level - c.level > STEP && (k === 0 || contacts[k - 1].onBox);
+    c.onBox = !noBox && c.ms >= 300 && !!next && next.level - c.level > STEP && (k === 0 || contacts[k - 1].onBox);
   });
   // Flights between contacts, and what each contact did: reactive (air before and after, short),
   // a standing start or finish, a drop from the box.

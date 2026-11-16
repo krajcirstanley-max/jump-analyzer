@@ -116,20 +116,35 @@ function camera(cap = globalThis.Capacitor) {
 const s2 = x => num(x, 2), s3 = x => num(x, 3), cm = x => `${num(x, 0)} cm`, cm1 = x => `${num(x, 1)} cm`;
 const odrazy = n => `${n} ${n >= 2 && n <= 4 ? 'odrazy' : 'odrazov'}`;
 const prekazok = n => `${n} ${n === 1 ? 'prekážka' : n >= 2 && n <= 4 ? 'prekážky' : 'prekážok'}`;
+// Two taps to delete, like the jumps (Stanley 2026-11-16: "mal by som byť schopný zmazať hociakú analýzu").
+const armed = new WeakMap();
+function armOrGo(btn) {
+  if (armed.has(btn)) { clearTimeout(armed.get(btn)); armed.delete(btn); return true; }
+  const label = btn.textContent;
+  btn.textContent = 'Naozaj?'; btn.classList.add('armed');
+  armed.set(btn, setTimeout(() => { armed.delete(btn); btn.textContent = label; btn.classList.remove('armed'); }, 3000));
+  return false;
+}
+
 export function rsiMarks(r) {
   const ts = r.ts, t0 = ts?.[0] ?? 0, dt = 1 / (r.fps || 120), at = f => (ts?.[f] ?? f * dt) - t0;
   const out = [], jumps = r.jumps ?? [], many = jumps.length > 1;
   // Hurdle hops (Stanley, 2026-11-14: "prekážky chceme každý jeden"): the flight over the first
   // hurdle comes from a standing start, so it is no rebound, but it is a hurdle: shown too.
   const hurdles = r.exercise === 'hurdle_hops';
-  const start = (r.standing ?? []).filter(st => jumps.length && st.to < jumps[0].td).at(-1);
-  if (start) {
-    const up = at(start.to) + dt, fl = start.flightMs / 1000;
-    const next = jumps.length ? at(jumps[0].to) + dt : up + fl;
-    out.push({ from: up, to: next, title: hurdles ? '1. prekážka · let' : '1. skok · let', big: cm1(start.heightCm), small: `let ${s3(fl)} s · zo státia`,
-      hud: { top: hurdles ? '1. prekážka' : '1. skok', left: { cap: 'výška', v: num(start.heightCm, 1), u: 'cm' }, right: { cap: 'let', v: s3(fl), u: 's' }, ring: { v: '–', u: 'zo státia', fill: 0 } } });
-  }
-  const off = start ? 1 : 0;
+  // Every flight from a stop before the rebounds start is shown: over hurdles that is each hurdle
+  // jumped after a re-set (Stanley's hurdle hops 2026-11-16: two stops before the rebounds, the
+  // overlay began at the 3rd hurdle and called it the 1st). Elsewhere only the last one.
+  const before = (r.standing ?? []).filter(st => jumps.length && st.to < jumps[0].td);
+  const starts = hurdles ? before : before.slice(-1);
+  starts.forEach((start, k) => {
+    const up = at(start.to) + dt, fl = start.flightMs / 1000, n = k + 1;
+    const nx = starts[k + 1] ?? jumps[0];
+    const next = nx ? at(nx.to) + dt : up + fl;
+    out.push({ from: up, to: next, title: hurdles ? `${n}. prekážka · let` : '1. skok · let', big: cm1(start.heightCm), small: `let ${s3(fl)} s · zo státia`,
+      hud: { top: hurdles ? `${n}. prekážka` : '1. skok', left: { cap: 'výška', v: num(start.heightCm, 1), u: 'cm' }, right: { cap: 'let', v: s3(fl), u: 's' }, ring: { v: '–', u: 'zo státia', fill: 0 } } });
+  });
+  const off = starts.length;
   // The numbers ride on the video like a scoreboard (Stanley, 2026-11-14, a screenshot of another
   // app: "takto overlay"): the height on the left, the contact on the right, the RSI in a ring in
   // the middle, full for the best rebound of the clip. `hud` is that; title/big/small say the same
@@ -202,7 +217,7 @@ const pendingSteps = rec => {
 
 // bare: the Tréning tab owns the buttons and the lists; this root shows only the open result.
 export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
-  saveClip = null, loadClip = null, dropClip = null, makePlayer = null }) {
+  saveClip = null, loadClip = null, dropClip = null, makePlayer = null, onDeleted = () => {} }) {
   root.innerHTML = `
     <div class="card${bare ? ' hidden' : ''}"><h2>RSI</h2>
       <p class="note">Natáčaj <b>spredu</b>, pokojne aj z ruky (pohyb telefónu odrátam podľa pozadia), v zábere celé chodidlá a kus okolia. Najlepšie <b>240 fps</b> (Slo-mo). Cvik rozpoznám sám.</p>
@@ -232,6 +247,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     $('rsi-result').innerHTML = rec.pending
       ? `<h2>${esc(athletes[who]?.name ?? '')} · odrazy</h2>${videoHtml(rec)}<div data-rsi-prog="${esc(rec.id)}">${pendingSteps(rec)}</div>`
       : `<button class="top-who rsi-swap" data-rsi-swap>${esc(athletes[who].name)}<span class="who-swap" aria-hidden="true">⇄</span></button>${videoHtml(rec)}${resultHtml(rec)}`;
+    $('rsi-result').insertAdjacentHTML('beforeend', `<button class="btn danger" data-rsi-del>Zmazať</button>`);
     attachClip(rec);
   };
   // A list kept to 200; the clips of records that fall off go too.
@@ -327,6 +343,17 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       const { rec, who } = current;
       loadClip(rec.id).then(blob => { if (blob) analyze(new File([blob], 'rsi.mov', { type: blob.type || 'video/quicktime' }), null, { id: rec.id, who }); else alert('Video sa v telefóne nenašlo.'); });
     }
+  });
+  root.addEventListener('click', e => {
+    const del = e.target.closest('[data-rsi-del]');
+    if (!del || !current || !armOrGo(del)) return;
+    const { rec, who } = current;
+    drop();
+    save(who, load(who).filter(r => r.id !== rec.id));
+    if (rec.hasClip) dropClip?.(rec.id);
+    current = null;
+    $('rsi-result').classList.add('hidden'); $('rsi-result').innerHTML = '';
+    renderHistory(); onDeleted(rec);
   });
   // Wrong person: the result moves to the other athlete's history.
   root.addEventListener('click', e => {

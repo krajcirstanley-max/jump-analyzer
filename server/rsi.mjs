@@ -72,7 +72,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     let rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
     if (rsi.error) return { error: rsi.error };
     // Contact edges from the toe against the floor, as for sprints (refineEdges explains why).
-    let motion = null, toeError = null;
+    let motion = null, toeError = null, toe = null, land = null;
     // A phone that follows the athlete (hops over a row of cones, filmed from the side while turning:
     // IMG_2213, the frame centre moved 1916 px) leaves no steady floor for the toe to stand on, and
     // the toe edges cut contacts short: 0.083 s for a contact of 0.150 s by the frames (382-390 at
@@ -103,8 +103,8 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       // Tighter than for sprints: the phone hardly moves on a drop jump, so the floor estimate is
       // clean, and 0.55 %h took a toe still sinking for planted (IMG_3521 frame 94). 0.12 gives
       // 250 ms / 642 ms there; Stanley counted 240 / 640 by hand (2026-11-14).
-      const toe = ['l', 'r'].flatMap(s => footContacts(motion, s, meta.ts, meta.fps, { ...SPRINT, planted: 0.12 }));
-      const land = ['l', 'r'].flatMap(s => touchdowns(motion, s, meta.fps));
+      toe = ['l', 'r'].flatMap(s => footContacts(motion, s, meta.ts, meta.fps, { ...SPRINT, planted: 0.12 }));
+      land = ['l', 'r'].flatMap(s => touchdowns(motion, s, meta.fps));
       rsi = refineEdges(rsi, toe, meta.fps, land);
     } catch (e) { toeError = String(e?.message || e).slice(0, 200); }
     // Claude names the drill; the pattern of contacts is the fallback and the cross-check.
@@ -115,6 +115,13 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       const last = Math.min(meta.N - 1, (ev.at(-1)?.to ?? res.last) + Math.round(meta.fps * 0.3));
       const focus = ev.find(e => !e.onBox)?.td ?? null;
       try { named = await nameExercise({ frames, first, last, boxes: res.boxes, client, focus }); } catch (e) { nameError = String(e?.message || e).slice(0, 200); }
+    }
+    // Claude saw no box but the pattern found one: the camera following the athlete (hurdle hops
+    // filmed from the side, 2026-11-16) made the standing start look higher than the floor, and the
+    // clip became a drop jump from 27 cm. The analysis runs again without a box.
+    if (named?.box === false && (rsi.events ?? []).some(e => e.onBox)) {
+      const again = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam, noBox: true });
+      if (!again.error) rsi = toe ? refineEdges(again, toe, meta.fps, land) : again;
     }
     // Claude's name wins, 'other' included (a clip that is not a drill); without Claude, the pattern
     // A row of rebounds is hops whatever the picture looked like: Claude called hops over cones,

@@ -23,7 +23,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.23.0';
+const APP_VERSION = '0.24.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -85,6 +85,7 @@ const rsiView = initRsi({
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster, rememberAthlete,
   onProgress: t => trainProgress(t),
   onDone: ({ rec, who }, o) => { refreshFeeds(); if (!o?.quiet) openDetail('rsi', rec.id, who); },
+  onDeleted: () => { refreshFeeds(); renderLists(); showTab(backTo); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
   makePlayer: clipPlayer,
 });
@@ -101,6 +102,7 @@ const sprintView = initSprint({
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
   onProgress: t => trainProgress(t),
   onDone: (rec, o) => { refreshFeeds(); if (!o?.quiet) openDetail('sprint', rec.id); },
+  onDeleted: () => { refreshFeeds(); renderLists(); showTab(backTo); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
   makePlayer: clipPlayer,
   onAsk: id => openSprintChat(id),
@@ -359,6 +361,7 @@ $('res-msg').addEventListener('click', e => {
 
 // ---------- analysis ----------
 async function analyzeFile(file) {
+  detachRunning();   // a jump still on its way keeps going in the background
   const run = ++runId;
   clearResult();
   setWho(athlete);
@@ -445,10 +448,11 @@ async function followCloud(run, start) {
   abort = new AbortController();
   const signal = abort.signal;
   $('res-notify').hidden = !(window.Notification?.permission === 'default');
-  let numbersUp = false, attempt = null;
+  let numbersUp = false, attempt = null, p = null;
   const onResult = ({ result }) => {
     if (numbersUp || !stillCurrent()) return;
     numbersUp = true;
+    if (detachable?.promise === p) detachable = null;   // saved below; the coach lands on its own
     abort = null;              // from here the job outlives this screen: only the coach is left
     adoptWho(result);
     pose = result;
@@ -458,7 +462,10 @@ async function followCloud(run, start) {
   try {
     // Once the numbers are up the result screen shows its own "coaching on the way" slot; the
     // progress card must not come back on top of it for the coaching stage.
-    const out = await start({ signal, onResult, onProgress: p => { if (stillCurrent() && !numbersUp) progressFrom(p); } });
+    p = start({ signal, onResult, onProgress: q => { if (stillCurrent() && !numbersUp) progressFrom(q); } });
+    detachable = { promise: p, ctx: { id: held?.id ?? null, athlete: resultAthlete, file: currentFile, clip: currentClip } };
+    const out = await p;
+    if (detachable?.promise === p) detachable = null;
     if (numbersUp) return void landCoach(attempt, out.coach);
     if (!stillCurrent()) return;
     adoptWho(out.result);
@@ -466,6 +473,7 @@ async function followCloud(run, start) {
     cloudCoach = out.coach ?? null;
     finishPose();
   } catch (e) {
+    if (detachable?.promise === p) detachable = null;
     if (numbersUp) return void landCoach(attempt, null);
     if (!stillCurrent() || signal.aborted) return;
     console.warn('Cloud analysis failed', e);
@@ -473,6 +481,44 @@ async function followCloud(run, start) {
     showMsg('bad', 'Server teraz neodpovedá', e.name === 'CloudError' ? e.message : 'Skús to znova, alebo to nechaj prepočítať v telefóne, trvá to niekoľko minút.',
       '<button class="btn" data-retry="cloud">Skúsiť znova</button><button class="btn" data-retry="local">Analyzovať v telefóne</button>');
   }
+}
+
+// A jump still uploading or being analysed when the next one starts keeps going and lands in the
+// history on its own (Stanley 2026-11-16: "keď sa nedokončí analýza, môžem začať nové natáčať a na
+// pozadí sa tamto analyzuje"). The Tréning tab says how many are still on their way.
+let detachable = null;            // the cloud job on screen: { promise, ctx }
+const background = new Map();     // clip id -> ctx, jumps finishing in the background
+function bgStatus(msg = '') {
+  const n = background.size;
+  trainProgress(n ? `${n === 1 ? 'Jeden skok sa' : `${n} skoky sa`} dokončuje na pozadí…${msg ? ` ${msg}` : ''}` : msg);
+}
+function detachRunning() {
+  const d = detachable;
+  if (!d || !abort || !d.ctx.id) return;
+  detachable = null;
+  abort = null;                   // clearResult must not cancel the upload or the job
+  held = null;                    // nor drop its clip
+  background.set(d.ctx.id, d.ctx);
+  bgStatus();
+  d.promise.then(out => saveInBackground(d.ctx, out), e => {
+    console.warn('Background jump failed', e);
+    background.delete(d.ctx.id);
+    hist.dropIfOrphan(d.ctx.id);
+    bgStatus('Jeden skok sa nepodarilo dokončiť.');
+  });
+}
+async function saveInBackground(ctx, out) {
+  background.delete(ctx.id);
+  const result = out?.result;
+  const a = result?.who?.id in ATHLETES ? result.who.id : ctx.athlete, who = ATHLETES[a];
+  const j = result && !result.error ? analyzeJump(result, who.sex, result.ts ?? null, { height: who.height, pb: profiles[a].pb }) : { error: 'no result' };
+  if (j.error) { hist.dropIfOrphan(ctx.id); bgStatus('V jednom videu sa skok nenašiel.'); return; }
+  j.coach = out.coach ?? coaching(j.metrics, who.sex, { name: who.name });
+  const rec = hist.attemptRecord(j, { athlete: a, ...ctx.clip });
+  await hist.saveAttempt(rec, { clip: ctx.file, pose: result });
+  if (rec.id !== ctx.id) hist.dropIfOrphan(ctx.id);
+  renderLists(); refreshFeeds();
+  bgStatus(`Skok (${who.name}) je hotový v Histórii.`);
 }
 
 // The coach for a saved attempt, whether or not it is still on screen. No coach from the

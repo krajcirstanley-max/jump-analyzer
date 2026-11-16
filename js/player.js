@@ -72,13 +72,15 @@ export class Player {
     this.#resize();
     this.ro = new ResizeObserver(() => { this.#resize(); this.#redraw(); });
     this.ro.observe(this.stage);
+    this.filmRun = 0;
+    this.#fillFilm();
   }
 
   #build(root) {
     root.innerHTML = `
       <div class="stage"><canvas></canvas></div>
       <div class="hud"><span class="fr"></span><span class="zm"></span></div>
-      <div class="timeline"><div class="bands"></div><input type="range" class="scrub" min="0" value="0" step="1" aria-label="Snímka"></div>
+      <div class="timeline"><div class="film"></div><div class="bands"></div><input type="range" class="scrub" min="0" value="0" step="1" aria-label="Snímka"></div>
       <div class="controls controls-v1">
         <button class="btn step" data-step="-1" aria-label="O snímku späť">‹</button>
         <button class="btn play" aria-label="Prehrať">Prehrať</button>
@@ -94,6 +96,7 @@ export class Player {
     this.zmLabel = root.querySelector('.zm');
     this.scrub = root.querySelector('.scrub');
     this.bandsEl = root.querySelector('.bands');
+    this.filmEl = root.querySelector('.film');
     this.playBtn = root.querySelector('.play');
     this.scrub.max = String(this.src.count - 1);
     this.canvas.style.touchAction = 'pan-y'; // the page still scrolls until zoomed in
@@ -135,12 +138,37 @@ export class Player {
   }
 
   // ---------- range, loop, bands ----------
+  // The filmstrip under the picture, like the iPhone's Photos in iOS 6-8 (Stanley 2026-11-16):
+  // thumbnails across the range, and the finger dragged along them moves through the video (the
+  // range input lies over them). Decoded once per range on a small sink of its own.
+  async #fillFilm() {
+    const run = ++this.filmRun, el = this.filmEl, { src } = this;
+    if (!el || !src.mb || !src.track) return;
+    const { from, to } = this.range, n = 10;
+    const h = 44, w = Math.max(24, Math.round((h * src.width) / Math.max(1, src.height)));
+    el.innerHTML = '';
+    let sink;
+    try { sink = new src.mb.CanvasSink(src.track, { width: w * 2, height: h * 2, fit: 'cover' }); } catch { return; }
+    const idx = Array.from({ length: n }, (_, k) => Math.round(from + ((to - from) * (k + 0.5)) / n));
+    const times = idx.map(i => this.ts[i]);
+    const cells = idx.map(() => { const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2; el.appendChild(c); return c; });
+    try {
+      let k = 0;
+      for await (const wc of sink.canvasesAtTimestamps(times)) {
+        if (run !== this.filmRun) break;
+        if (wc) cells[k].getContext('2d').drawImage(wc.canvas, 0, 0, cells[k].width, cells[k].height);
+        k++;
+      }
+    } catch (e) { console.warn('filmstrip decode failed', e); }
+  }
+
   setRange(from, to) {
     const last = this.src.count - 1;
     const a = clamp(Math.round(from), 0, last), z = clamp(Math.round(to), a, last);
     this.range = { from: a, to: z };
     this.scrub.min = String(a);
     this.scrub.max = String(z);
+    this.#fillFilm();
     this.#drawBands();
     this.#fillHead();
     return this.show(this.target);
@@ -541,6 +569,7 @@ export class Player {
     this.gone = true;
     this.pause();
     this.headRun++;
+    this.filmRun++;
     this.#dropHead();
     this.#dropVideo();
     this.ro.disconnect();

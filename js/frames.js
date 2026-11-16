@@ -34,6 +34,7 @@ export class FrameSource {
     this.width = Math.round(dw * s);
     this.height = Math.round(dh * s);
     this.sink = new mb.CanvasSink(track, { width: this.width, height: this.height, fit: 'fill' });
+    this.mb = mb; this.track = track;   // the player's filmstrip decodes its thumbnails on a sink of its own
     this.cacheFrames = cacheFrames;
     this.cache = new Map();   // index -> ImageBitmap, insertion order = LRU order
     this.waiters = new Map(); // index -> [resolve]

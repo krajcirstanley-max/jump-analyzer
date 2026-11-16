@@ -165,11 +165,22 @@ function pendingSteps(rec) {
       ${rec.error ? `<p class="banner bad">${esc(rec.error)}</p><button class="btn" data-sp-retry="${esc(rec.id)}">Skúsiť znova</button>` : '<p class="note">Môžeš ísť na ďalší beh. Výsledok sa doplní sám.</p>'}`;
 }
 
+
+// Two taps to delete, like the jumps (Stanley 2026-11-16: "mal by som byť schopný zmazať hociakú analýzu").
+const armed = new WeakMap();
+function armOrGo(btn) {
+  if (armed.has(btn)) { clearTimeout(armed.get(btn)); armed.delete(btn); return true; }
+  const label = btn.textContent;
+  btn.textContent = 'Naozaj?'; btn.classList.add('armed');
+  armed.set(btn, setTimeout(() => { armed.delete(btn); btn.textContent = label; btn.classList.remove('armed'); }, 3000));
+  return false;
+}
+
 // ---------- Tab ----------
 // bare: the app's Tréning tab owns the buttons and the list; this root then shows only the open
 // analysis (the detail screen). onProgress(text) and onDone(rec) report back to it.
 export function initSprint({ root, athletes, freelap, getAthlete = () => null, roster = async () => [], cam = camera(), bare = false, onProgress = () => {}, onDone = () => {},
-  saveClip = null, loadClip = null, dropClip = null, makePlayer = null, onAsk = null }) {
+  saveClip = null, loadClip = null, dropClip = null, makePlayer = null, onAsk = null, onDeleted = () => {} }) {
   let unsub = null, last = '', busy = 0, progress = '', current = null;   // busy: uploads running
   let clipUrl = null, clipId = null, clipP = null;   // the open analysis's video as an object URL
   let live = null;   // the app's own player on the open clip: { id, player, input }
@@ -368,7 +379,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   function draw() {
     const list = load(), rec = list.find(r => r.id === current);
-    if (bare) { root.innerHTML = rec ? view(rec).html : ''; attachClip(rec); return; }
+    if (bare) { root.innerHTML = rec ? view(rec).html + delHtml(rec) : ''; attachClip(rec); return; }
     const head = `
       <div class="card sp-go">
         <div class="sp-btns">
@@ -379,7 +390,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         ${progress ? `<p class="note" aria-live="polite">${esc(progress)}</p>` : ''}
         ${last ? `<p class="sp-last">${esc(last)}</p>` : ''}
       </div>`;
-    const body = rec ? view(rec).html : '';
+    const body = rec ? view(rec).html + delHtml(rec) : '';
     const past = list.length ? `<div class="card"><h2>Rozbory</h2><ul class="sp-list">${list.map(r => {
       const who = athletes[r.run?.who ?? r.who]?.name ?? '';
       const k = r.pending ? null : r.mode ?? (r.run ? modeOfRun(r.run) : r.video.modeGuess);
@@ -425,7 +436,19 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     now.innerHTML = clipUrl ? `<video src="${clipUrl}" controls playsinline muted preload="metadata"></video>` : '<p class="note">Video sa nenašlo v telefóne.</p>';
   }
 
+  const delHtml = rec => `<button class="btn danger" data-sp-del="${esc(rec.id)}">Zmazať beh</button>`;
+  function remove(id) {
+    const list = load(), r = list.find(x => x.id === id);
+    if (!r) return;
+    if (live?.id === id) { live.player?.dispose?.(); live.input?.dispose?.(); live = null; }
+    store(list.filter(x => x.id !== id));
+    if (r.hasClip) dropClip?.(id);
+    if (current === id) current = null;
+    draw(); onDeleted(r);
+  }
   root.addEventListener('click', e => {
+    const del = e.target.closest('[data-sp-del]');
+    if (del) { if (armOrGo(del)) remove(del.dataset.spDel); return; }
     if (e.target.closest('[data-sp="film"]')) return film();
     const rt = e.target.closest('[data-rate]');
     if (rt) {
