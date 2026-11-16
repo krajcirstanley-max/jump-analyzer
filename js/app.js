@@ -23,7 +23,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.22.5';
+const APP_VERSION = '0.23.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -197,6 +197,19 @@ const els = {
   playerCard: $('player-card'), detail: $('res-detail'), speed: $('res-speed'), coach: $('res-coach'), whatif: $('res-whatif'), timeline: $('res-timeline'), all: $('res-all'), take: $('res-take'),
 };
 
+// The video plays while it uploads and the server works (Stanley 2026-11-16: "počas nahrávania to
+// ani neviem vidieť v appke"): the player card sits above the progress card until the numbers land,
+// then goes back to its place in the result.
+const playerHome = { parent: els.playerCard.parentNode, next: els.playerCard.nextSibling };
+function playerToProgress() {
+  if (!player || els.playerCard.nextSibling === $('res-progress')) return;
+  $('res-progress').before(els.playerCard);
+  els.playerCard.classList.remove('hidden');
+}
+function playerBackHome() {
+  if (els.playerCard.parentNode !== playerHome.parent) playerHome.parent.insertBefore(els.playerCard, playerHome.next);
+}
+
 let current = null;          // inspectClip result of the clip on screen
 let currentFile = null;
 let currentClip = null;      // { file: { name, size }, recordedAt }
@@ -288,6 +301,7 @@ function clearResult() {
   current?.input?.dispose?.(); current = null;
   pose = null; jump = null; cloudCoach = null; awaitingCoach = false; resultId = null;
   for (const id of ['res-progress', 'res-msg', 'res-feel', 'res-after']) $(id).classList.add('hidden');
+  playerBackHome();
   $('res-empty').classList.remove('hidden');
 }
 
@@ -307,6 +321,7 @@ function showProgress(stage, pct = null) {
   $('pose-stage').textContent = stage;
   $('pose-pct').textContent = pct == null ? '' : `${pct} %`;
   $('pose-bar').style.width = `${pct ?? 0}%`;
+  playerToProgress();
 }
 function progressFrom({ stage, done, total }) {
   const pct = total ? Math.min(100, Math.round((100 * done) / total)) : 0;
@@ -812,6 +827,7 @@ document.addEventListener('click', async e => {
 });
 
 function present(feel, noReplayNote) {
+  playerBackHome();
   runup = prefillRunup();
   renderResult(els, jump, player, {
     feel, noReplayNote, awaitingCoach, runup, sex: ATHLETES[resultAthlete ?? athlete].sex, name: ATHLETES[resultAthlete ?? athlete].name, height: ATHLETES[resultAthlete ?? athlete].height,
