@@ -62,7 +62,7 @@ function buildPhases(ev, metrics, score, last, runThrough = false) {
 // only 7-11 frames and read 0.3-0.5 m/s apart between methods on our clips.
 function withGround(f, g) {
   return {
-    ...f, ground: g, scaleSource: 'board', scaleOk: true, scaleWhy: null,
+    ...f, ground: g, scaleSource: 'board', scaleOk: true, scaleWhy: null, fitWhy: f.scaleWhy,
     vxTO: g.vxTO, speedLast: g.speedLast, speedLoss: g.speedLoss, speedLossTO: g.speedLossPct,
     approach: g.approach ?? NaN, speedKeep: g.approach > 0 ? (g.speedLast / g.approach - 1) * 100 : NaN,
     vxTD: NaN, velocityLoss: NaN,
@@ -266,6 +266,11 @@ export function cleanEdges(e) {
   for (const k of EDGE_KEYS) if (Number.isInteger(e?.[k])) out[k] = e[k];
   return Object.keys(out).length ? out : null;
 }
+// The pose track's foot contacts alone, for the server when no jump came out of them.
+export function poseContacts(result) {
+  const fps = result.fps ?? (result.ts ? (result.ts.length - 1) / (result.ts.at(-1) - result.ts[0]) : NaN);
+  return result.clean && fps > 0 ? detectContacts(result.clean, result.first, result.last, fps) : [];
+}
 // preGround: the server's pass before the runway is measured; the horizontal-speed floor waits for it.
 export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null, edges = null, preGround = false } = {}) {
   const clean = result.clean, smooth = result.smooth;
@@ -283,7 +288,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const named = refined ? refined.events : null;
   const detected = detectContacts(clean, result.first, result.last, fps);
   let contacts = withEvents(clean, detected, named, fps);
-  let ev = keyFrames(clean, contacts, fps, sex, { events: named });
+  let ev = keyFrames(clean, contacts, fps, sex, { events: named, height });
   if (ev.error) return { ...ev, error: 'V zázname sa nenašiel odraz.' };
   // The penultimate touchdown comes out one frame late on 4 of 4 clips checked by eye on zoomed feet
   // (2026-11-15: 4594 389/388, 4676 521/520, 4677 675/674, 4390 454/453), from the server's names
@@ -304,7 +309,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
     const e = { ...base, ...hand };
     const order = [e.penTD, e.penTO, e.TD, e.TO].filter(v => v != null);
     if (order.every((v, k) => k === 0 || v > order[k - 1]) && e.TO > e.TD) {
-      const c2 = withEvents(clean, detected, e, fps), ev2 = keyFrames(clean, c2, fps, sex, { events: e });
+      const c2 = withEvents(clean, detected, e, fps), ev2 = keyFrames(clean, c2, fps, sex, { events: e, height });
       if (!ev2.error) { contacts = c2; ev = ev2; handUsed = hand; }
     }
   }
@@ -375,7 +380,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
     runupJudged: steps, expected: steps ? expectedDistance(steps, pb) : null,
     profile: profileData(flight, ev),
     timeline: timelineOf(contacts, ev, flight?.ground, runThrough ? null : ev.landing, ev.apex, fps),
-    lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.comDropBoard } : null,
+    lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.ground?.raised ? null : flight.comDropBoard } : null,
     replay: {
       from: Math.max(result.first ?? 0, ev.takeoff.td - Math.round(fps)),
       to: ev.landing != null ? Math.min(last, ev.landing + Math.round(fps / 2)) : last,

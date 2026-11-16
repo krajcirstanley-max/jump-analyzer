@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import * as ort from 'onnxruntime-node';
 import { PoseEngine } from '../js/pose/engine.js';
 import { runPipeline, DEFAULTS } from '../js/pose/pipeline.js';
-import { analyzeJump } from '../js/analysis/jump.js';
+import { analyzeJump, poseContacts } from '../js/analysis/jump.js';
 import { toWire, fromWire } from '../js/cloud.js';
 import { writeCoaching } from './coach.mjs';
 import { cliClient } from './claude-cli.mjs';
@@ -74,7 +74,9 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     // where to look. Without a client, or if it fails, the pose track's own frames stand.
     let who = null;
     if (client) {
-      const guess = analyzeJump(fromWire(result), sex, meta.ts, { height, pb });
+      // Runs before the runway is measured, like the pass below: on Miška's IMG_4940 (2026-11-16)
+      // the horizontal-speed floor failed it and Claude got no pose contacts to take edges from.
+      const guess = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true });
       // Who is in the clip, read alongside the key frames.
       const whoP = athletes?.length > 1
         ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, near: guess.error ? null : guess.takeoff.td, athletes, client })
@@ -83,7 +85,8 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
       try {
         const loc = await locateEvents({
           frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, client, onProgress,
-          guess: guess.error ? {} : { TD: guess.takeoff.td, TO: guess.takeoff.to, landing: guess.landing, contacts: guess.contacts },
+          // Without a jump in the pose track its contacts still give Claude's runs their edges.
+          guess: guess.error ? { contacts: guess.contacts?.length ? guess.contacts : poseContacts(fromWire(result)) } : { TD: guess.takeoff.td, TO: guess.takeoff.to, landing: guess.landing, contacts: guess.contacts },
         });
         if (loc.events.TD != null) result.events = loc.events;
         // What Claude answered and what was kept, so a wrong frame can be traced later.

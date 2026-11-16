@@ -27,7 +27,7 @@ const OVERVIEW_PROMPT = `You see a long jump filmed on a phone that pans with th
 Find the jump. Answer with the printed frame numbers of the tile closest to the takeoff (the last foot contact before the athlete flies into the pit) and of the tile closest to the landing (the first touch of the sand). Use null for one you cannot see.`;
 
 const FRAMES_PROMPT = `You see a long jump filmed on a phone that pans with the athlete. Each image is a contact sheet of consecutive frames, row by row, cropped around the athlete, each stamped with its frame number in yellow.
-For every frame, decide whether a foot of the athlete is touching the running surface. A foot touches when it is flat on the ground or meets its own shadow; a foot above its shadow is in the air. Ignore the board and markings.
+For every frame, decide whether a foot of the athlete is touching the running surface. A foot touches when it is flat on the ground or meets its own shadow; a foot above its shadow is in the air. Ignore the board and markings. A low box, mat or plate lying on the runway (often at the board) is running surface too: a foot standing on it is touching.
 List every frame number with a foot on the running surface in on_ground. In sand, give the first frame where any part of the body touches the sand pit, or null if it is not shown.
 Set run_through to true if this is a run-through (pop-up) instead of a full jump: after the takeoff the athlete comes down onto one foot in the sand and keeps running, rather than landing with both legs reaching forward. If the landing is not shown, judge from the flight: a run-through has no leg extension forward before the sand.`;
 
@@ -63,7 +63,19 @@ export function groundRuns(frames, gap = 2) {
 // Claude's runs say which contacts are which; the pose track's overlapping contact gives the
 // edges. takeoffAt: the frame the takeoff contact should cover (the pose track's guess).
 export function pickContacts(runs, poseContacts, takeoffAt, fps) {
-  const real = runs.filter(r => (r.to - r.td + 1) / fps >= 0.03);
+  // Claude sometimes reads one contact in pieces (IMG_4953, 2026-11-16: 492-496, 502-506 and
+  // 510-512 for a 500-516 penultimate, with the pose track's 502-517 right): pieces inside one
+  // pose contact of at least 0.06 s are one contact.
+  const whole = poseContacts.filter(c => (c.to - c.td + 1) / fps >= 0.06);
+  const units = [];
+  for (const r of [...runs].sort((a, b) => a.td - b.td)) {
+    const sh = c => Math.min(c.to, r.to) - Math.max(c.td, r.td);
+    const p = whole.filter(c => sh(c) >= 0).sort((a, b) => sh(b) - sh(a))[0], last = units.at(-1);
+    if (p && last?.p === p) last.to = Math.max(last.to, r.to); else units.push({ td: r.td, to: r.to, p });
+  }
+  // A piece no pose contact backs has to be 0.05 s long to count: IMG_4953's 519-522, in the air
+  // between the last two steps, otherwise became the penultimate.
+  const real = units.filter(r => (r.to - r.td + 1) / fps >= (r.p ? 0.03 : 0.05)).map(({ td, to }) => ({ td, to }));
   if (!real.length) return {};
   const dist = r => (takeoffAt >= r.td && takeoffAt <= r.to ? 0 : Math.min(Math.abs(takeoffAt - r.td), Math.abs(takeoffAt - r.to)));
   const ti = real.reduce((b, r, k) => (dist(r) < dist(real[b]) ? k : b), 0);
@@ -72,7 +84,9 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps) {
   // 489-509; taking the pose piece (0.058 s) failed the contact-time check and the whole jump
   // fell back to a wrong place. The app refines Claude's own edges from the raw foot.
   const edges = r => {
-    const p = poseContacts.find(c => Math.min(c.to, r.to) >= Math.max(c.td, r.td));
+    // the pose contact sharing the most frames with the run (a run can touch two)
+    const shared = c => Math.min(c.to, r.to) - Math.max(c.td, r.td);
+    const p = poseContacts.filter(c => shared(c) >= 0).sort((a, b) => shared(b) - shared(a))[0];
     const whole = p && p.to - p.td + 1 >= 0.6 * (r.to - r.td + 1) && (p.to - p.td + 1) / fps >= 0.06;
     return whole ? { td: p.td, to: p.to, from: 'pose' } : { td: r.td, to: r.to, from: 'claude' };
   };
@@ -87,7 +101,9 @@ export function checkEvents(e, fps, { claudeTake = false } = {}) {
   const keep = (k, valid) => { if (e[k] == null) return; if (valid) ok[k] = e[k]; else bad.push(k); };
   const inRange = (v, lo, hi) => v >= lo && v <= hi;
   keep('TD', Number.isInteger(e.TD));
-  keep('TO', e.TD != null && inRange(s('TD', 'TO'), 0.06, 0.26));
+  // Claude's own take-off can be a piece of the contact (IMG_4953 on a box: 536-541 of 529-547);
+  // the app then finds both edges on the raw foot, so 0.04 s is enough to say where it is.
+  keep('TO', e.TD != null && inRange(s('TD', 'TO'), claudeTake ? 0.04 : 0.06, 0.26));
   keep('landing', ok.TO != null && inRange(s('TO', 'landing'), 0.3, 1.3));
   // Claude's own board touchdown can be a few frames early (the app moves it), so then the
   // flight into the board only has to be positive.
@@ -111,10 +127,13 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
     .catch(() => null);
 
   const read = async (T, L) => {
+    const Lok = L != null && L > T + f(0.3) && L < T + f(1.2) ? L : null;
     const windows = [
       range(clamp(T - f(0.6)), clamp(T - f(0.06)), per),
       range(clamp(T - f(0.06) + per), clamp(T + f(0.22)), per),
-      L != null ? range(clamp(L - f(0.2)), clamp(L + f(0.12)), per) : range(clamp(T + f(0.6)), clamp(T + f(1.0)), per),
+      // The landing window always covers 0.5-0.95 s after the take-off as well: the overview's
+      // landing tile was 0.23 s early on IMG_4951 (2026-11-16) and the sand never got shown.
+      range(clamp(Math.min(Lok ?? Infinity, T + f(0.7)) - f(0.2)), clamp(Math.max(Lok ?? -Infinity, T + f(0.83)) + f(0.12)), per),
     ];
     const sheets = [];
     for (const w of windows) for (const part of chunks(w, 36)) sheets.push(await contactSheet(frames, part, { boxes, cols: 9, tileW: 160 }));
@@ -133,6 +152,8 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
   if (coarse?.takeoff != null && Math.abs(coarse.takeoff - T0) > f(0.5)) seen = await read(coarse.takeoff, coarse.landing ?? null);
   onProgress?.({ stage: 'locate', done: 1, total: 1 });
 
+  // Two frames bridged, not more: at 4 (2026-11-16) Claude's stray frames in the flights joined
+  // IMG_4954's last three contacts into 652-675 and 681-703, and the board became the penultimate.
   const runs = groundRuns(seen.ground);
   const at = seen.T === guess.TD && guess.TO != null ? Math.round((guess.TD + guess.TO) / 2) : seen.T;
   const c = pickContacts(runs, guess.contacts ?? [], at, fps);

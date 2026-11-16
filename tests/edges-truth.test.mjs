@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { analyzeJump } from '../js/analysis/jump.js';
-import { pickContacts, checkEvents } from '../server/locate.mjs';
+import { pickContacts, checkEvents, groundRuns } from '../server/locate.mjs';
 
 const load = id => { const u = new URL(`./real/r${id}.json`, import.meta.url); return existsSync(u) ? JSON.parse(readFileSync(u)).result : null; };
 const TRUTH = {
@@ -58,4 +58,46 @@ test('a pose contact covering only a piece of Claude\'s run does not replace it'
   assert.deepEqual([c.pen.td, c.pen.to, c.pen.from], [472, 487, 'pose']);
   const e = checkEvents({ penTD: 472, penTO: 487, TD: 489, TO: 509, landing: 597 }, 120, { claudeTake: true });
   assert.deepEqual(e.rejected, []);
+});
+
+// 2026-11-16, five jumps from a 5 cm box on the board (Stanley 4950, 4954; Miška 4940, 4951, 4953),
+// landings checked by eye: 733, 800, 789, 973, 627. r49xxh = Miška's with the hand-checked contacts.
+const BOX = { 4950: ['male', 186, 733], 4954: ['male', 186, 800], '4940h': ['female', 171, 789], '4951h': ['female', 171, 973], '4953h': ['female', 171, 627] };
+test('landings from a 5 cm box: gravity bounds the sand frame', { skip: !Object.keys(BOX).every(load) }, () => {
+  for (const [id, [sex, h, truth]] of Object.entries(BOX)) {
+    const r = load(id), j = analyzeJump(r, sex, r.ts, { height: h });
+    // 4951: gravity says 960 and there is no sand frame; the rest within 4 frames
+    assert.ok(Math.abs(j.landing - truth) <= (id === '4951h' ? 14 : 4), `${id} landing ${j.landing} vs ${truth}`);
+  }
+});
+
+test('a raised take-off is recognised, its runway line comes from the penultimate, its lowering is hidden', { skip: !load(4954) || !load(4677) || !load(4930) }, () => {
+  for (const id of [4950, 4954, '4951h', '4953h']) {
+    const r = load(id); if (!r) continue;
+    const [sex, h] = BOX[id], j = analyzeJump(r, sex, r.ts, { height: h });
+    assert.equal(j.flight.ground.raised, true, `${id}`);
+    assert.equal(j.metrics.find(m => m.key === 'comDropBoard').status, 'hidden');
+  }
+  for (const id of [4677, 4930, '4933b']) {
+    const r = load(id), j = analyzeJump(r, 'male', r.ts, { height: 186 });
+    assert.equal(j.flight.ground.raised, false, `${id}`);
+  }
+  // with the line on the runway Stanley's box jumps come out at 6.30 and 6.65 m (he jumps 6.30-6.70
+  // there); read on the box's line they were 8.64 and 9.33 m/s into the board, 0.6-0.8 too fast
+  const sp = id => { const r = load(id); return analyzeJump(r, 'male', r.ts, { height: 186 }).metrics.find(m => m.key === 'speedLast').value; };
+  assert.ok(sp(4954) < 8.9 && sp(4950) < 8.4, `${sp(4950)} ${sp(4954)}`);
+});
+
+test('Claude\'s pieces of one contact become one; an unbacked piece in the air is not a step (IMG_4953)', () => {
+  const runs = groundRuns([474, 475, 476, 477, 492, 493, 494, 495, 496, 502, 503, 504, 505, 506, 510, 511, 512, 519, 520, 521, 522, 528, 529, 530, 531, 532, 536, 537, 538, 539, 540, 541]);
+  const pose = [{ td: 469, to: 483 }, { td: 502, to: 517 }, { td: 529, to: 531 }, { td: 546, to: 550 }];
+  const c = pickContacts(runs, pose, 548, 120);
+  assert.deepEqual([c.pen.td, c.pen.to, c.pen.from], [502, 517, 'pose']);
+  // the take-off is a piece of 529-547; the app finds its edges on the raw foot (530/547)
+  assert.deepEqual([c.take.td, c.take.to, c.take.from], [536, 541, 'claude']);
+  assert.deepEqual(checkEvents({ penTD: 502, penTO: 517, TD: 536, TO: 541 }, 120, { claudeTake: true }).rejected, []);
+  // two stray frames in each flight must not join IMG_4954's last contacts (pose 668-683, 693-710)
+  const c2 = pickContacts([{ td: 652, to: 656 }, { td: 668, to: 675 }, { td: 681, to: 687 }, { td: 696, to: 703 }],
+    [{ td: 639, to: 652 }, { td: 668, to: 683 }, { td: 693, to: 710 }], 702, 120);
+  assert.deepEqual([c2.pen.td, c2.pen.to, c2.take.td, c2.take.to], [668, 683, 693, 710]);
 });

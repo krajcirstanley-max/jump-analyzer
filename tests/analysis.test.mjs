@@ -30,7 +30,8 @@ function jumper({ panRight = 9, tilt = 0, penDrop = 0 } = {}) {
       const [, a, b] = plan.at(-2);
       hipH -= penDrop * Math.min(1, Math.max(0, Math.min(i - a + 6, b + 6 - i) / 6));
     }
-    if (i > TO) { const s = (i - TO) / FPS; hipH = Math.max(0.55, 0.95 + 3.3 * s - 4.905 * s * s); }
+    // lands 0.6 m below the take-off height, as real jumps do (heels reach for the sand)
+    if (i > TO) { const s = (i - TO) / FPS; hipH = Math.max(0.35, 0.95 + 3.3 * s - 4.905 * s * s); }
     const stance = plan.find(([, a, b]) => i >= a && i <= b);
     // Planted 0.35 m ahead of the hip at touchdown; between contacts the foot travels
     // on a smooth arc, landing with downward speed and leaving with upward speed.

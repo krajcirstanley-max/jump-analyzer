@@ -3,6 +3,7 @@
 // and has stopped moving vertically. Touchdown is refined to the foot's deceleration
 // peak (Handsaker 2016); the jump is the last contact before a long flight.
 import { P, has, torsoLength, footLow, centreOfMass, angle3, subFrame, mid } from './kinematics.js';
+import { fitParabola } from './flight.js';
 
 export const DEFAULTS = {
   groundTol: 0.12,   // foot within this many torso lengths of the ground line
@@ -276,8 +277,36 @@ export function keyFrames(track, contacts, fps, sex = 'male', opts = {}) {
   // frames late on Miška's jump (2026-11-14 22:40: 624, heels stopped in the sand at 617-619, she
   // was already sitting, knee 36°, reach 0.17 m), and every landing number was read there. The
   // pose decides within 0.12 s before to 0.05 s after it; with no clear stop there it stands.
-  const named = o.events?.landing ?? null;
-  let landing = named;
+  let named = o.events?.landing ?? null;
+  // Where gravity puts the landing (2026-11-16): the time to the apex comes from the first 0.45 s
+  // of the flight, which is always in the air and needs no scale (rise = g·t²/2), and the fall
+  // goes from the apex to a third of the athlete's height below the take-off. Checked by eye on
+  // five 5 cm box jumps: 801/800, 729/733, 629/627, 787/789, and 962 for 973. The pose's own
+  // search had come 20-27 frames off on three of them (a panning, tilting phone moves the
+  // centre of mass in the image), and Claude's sand frame was 22 frames early on IMG_4954.
+  const physLanding = (() => {
+    const t = [], y = [];
+    for (let i = takeoff.to + 3; i <= Math.min(N - 1, takeoff.to + Math.round(0.45 * fps)); i++) {
+      const v = comY(i); if (Number.isFinite(v)) { t.push((i - takeoff.to) / fps); y.push(v); }
+    }
+    if (t.length < 0.3 * fps) return null;
+    const f = fitParabola(t, y), tUp = -f.b / (2 * f.a), pxPerM = (2 * f.a) / 9.81;
+    if (!(f.a > 0 && tUp > 0.08 && tUp < 0.4 && f.rms < 0.03 * pxPerM)) return null;
+    const drop = 0.33 * ((o.height ?? (sex === 'female' ? 168 : 180)) / 100);
+    const L = takeoff.to + Math.round((tUp + Math.sqrt(tUp * tUp + (2 * drop) / 9.81)) * fps);
+    // A landing the video doesn't show stays unknown (IMG_4390: 0.27 s of flight seen).
+    return L < N && com[L] ? L : null;
+  })();
+  // 0.15 s: IMG_4954's sand frame was 0.19 s early; on IMG_4676 (body moving away from the phone,
+  // so the image arc is biased) gravity said 633, the sand frame 649 and the feet stopped at 644
+  // for about 640 by eye, so a server frame within 0.15 s still decides where to look.
+  const near = Math.round(0.15 * fps);
+  // A sand frame from the server that gravity can't reach is dropped. With no sand frame, the
+  // feet's stop counts only within 0.05 s of gravity's frame, which stands otherwise: searched
+  // 0.1 s wide it picked 952 for 973 on IMG_4951; IMG_2674's clean stop (838) is 2 frames off.
+  if (named != null && physLanding != null && Math.abs(named - physLanding) > near) named = null;
+  let landing = named ?? physLanding;
+  const tight = Math.round(0.05 * fps);
   if (apex != null) {
     const low = i => { const kp = track[i]; if (!kp) return NaN; const a = footLow(kp, 'l'), b = footLow(kp, 'r'); return Math.max(a?.[1] ?? -Infinity, b?.[1] ?? -Infinity); };
     const ys = [];
@@ -288,7 +317,8 @@ export function keyFrames(track, contacts, fps, sex = 'male', opts = {}) {
     // "stop" when the athlete tucks them up in the air (IMG_4596: 1065 instead of ~1100).
     let back = 0;
     while (back < ys.length && !(comY(apex + back) >= comY(takeoff.to))) back++;
-    const lo = named != null ? named - Math.round(0.12 * fps) : -Infinity, hi = named != null ? named + Math.round(0.05 * fps) : Infinity;
+    const lo = named != null ? named - Math.round(0.12 * fps) : physLanding != null ? physLanding - tight : -Infinity;
+    const hi = named != null ? named + Math.round(0.05 * fps) : physLanding != null ? physLanding + tight : Infinity;
     for (let k = Math.max(2, back); k < ys.length - 2; k++) {
       if (apex + k < lo || apex + k > hi) continue;
       const stop = v[k - 2] - v[k + 2]; // downward speed lost over 4 frames

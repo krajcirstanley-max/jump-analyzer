@@ -84,7 +84,15 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const ok = i => H[i] && track[i];
 
   // The line the athlete runs on: the planted toe across the takeoff contact.
-  const yAth = median([...Array(T.to - T.td + 1)].map((_, k) => { const i = T.td + k; return ok(i) && has(track[i], s + 'bigtoe') ? toW(i, P(track[i], s + 'bigtoe'))[1] : NaN; }));
+  const lateral = (c, f) => median([...Array(c.to - c.td + 1)].map((_, k) => { const i = c.td + k; return ok(i) && has(track[i], f + 'bigtoe') ? toW(i, P(track[i], f + 'bigtoe'))[1] : NaN; }));
+  const yTake = lateral(T, s);
+  // A raised take-off (a box on the board, 2026-11-16): the toe stands above the runway, so the
+  // homography puts it 0.60-0.70 m off the line the penultimate step ran on (5 cm box, five
+  // clips), where take-offs from the runway itself stay within 0.17 m. The line then comes from
+  // the penultimate foot, and every height read from the foot on the box is too low by the box.
+  const yPen = ev.pen ? lateral(ev.pen, ev.pen.foot ?? (s === 'l' ? 'r' : 'l')) : NaN;
+  const raised = Number.isFinite(yPen) && Math.abs(yTake - yPen) > 0.35;
+  const yAth = raised ? yPen : yTake;
   if (!(yAth > -0.3 && yAth < RUNWAY_W + 0.3)) return { error: 'athlete not on the runway' };
 
   // Local metres per pixel along the run at a ground point, and the CoM dropped to the
@@ -339,7 +347,7 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const pxPerM = pxPerUnit(T.td, comX(T.td)) / boardM;
   return {
     steps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
-    boardM: boardM0, fix, implied, legRatio, yAth, pxPerM, splits,
+    boardM: boardM0, fix, implied, legRatio, yAth, raised, pxPerM, splits,
     speedLast, vxTO, speedLoss: vxTO - speedLast, speedLossPct: ((vxTO - speedLast) / speedLast) * 100,
     // + behind the take-off line (legal, distance given away), - past it towards the sand.
     toeToLine: toeTO - boardM, takeoffDist, landingReach: reach, jump, jumpDirect: direct, flightTime, partsGap: agree,

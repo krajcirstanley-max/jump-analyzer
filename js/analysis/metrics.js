@@ -221,9 +221,16 @@ export function flightMetrics(f, ev, sex = 'male') {
     if (value == null || !Number.isFinite(value)) return null;
     const n = NORMS[key], [lo, hi] = n[g];
     const fromApex = key === 'peakHeight' || key === 'vyTO';
-    const usable = SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk : fromApex ? f.apexOk || f.scaleOk : f.scaleOk);
+    // With the runway's metres the scale is fine, but the rise and vertical speed still come from
+    // the flight's arc: when that arc doesn't fit (IMG_4951 before its landing was fixed: 2.5°,
+    // vy 0.53, apex 1 cm) they go hidden with the angle. The reason is the arc's, not the scale's.
+    const board = f.scaleSource === 'board';
+    const raisedBox = key === 'comDropBoard' && f.ground?.raised;
+    const usable = !raisedBox && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
     const status = !usable ? 'hidden' : value < lo ? 'low' : value > hi ? 'high' : 'ok';
-    const why = fromApex ? (f.angleOk ? 'vrchol letu nie je na videu' : scaleReason(f)) : scaleReason(f);
+    const arc = board ? { ...f, scaleWhy: f.fitWhy } : f;
+    const why = raisedBox ? 'odraz z debničky: ťažisko sa meria od chodidla na debničke, zníženie by vyšlo o výšku debničky väčšie'
+      : key === 'takeoffAngle' || fromApex ? (f.angleOk ? 'vrchol letu nie je na videu' : scaleReason(arc)) : scaleReason(f);
     return { key, label: n.label, unit: n.unit, value, norm: [lo, hi], status, frame, good: n.good, estimate: true, reason: usable ? null : why };
   };
   return [
