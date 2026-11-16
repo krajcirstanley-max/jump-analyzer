@@ -67,16 +67,21 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps) {
   if (!real.length) return {};
   const dist = r => (takeoffAt >= r.td && takeoffAt <= r.to ? 0 : Math.min(Math.abs(takeoffAt - r.td), Math.abs(takeoffAt - r.to)));
   const ti = real.reduce((b, r, k) => (dist(r) < dist(real[b]) ? k : b), 0);
+  // A pose contact that covers only a piece of Claude's run is a broken detection, not better
+  // edges: on IMG_4933 (2026-11-16) the pose track had 506-512 of a 497-513 take-off, Claude
+  // 489-509; taking the pose piece (0.058 s) failed the contact-time check and the whole jump
+  // fell back to a wrong place. The app refines Claude's own edges from the raw foot.
   const edges = r => {
     const p = poseContacts.find(c => Math.min(c.to, r.to) >= Math.max(c.td, r.td));
-    return p ? { td: p.td, to: p.to, from: 'pose' } : { td: r.td, to: r.to, from: 'claude' };
+    const whole = p && p.to - p.td + 1 >= 0.6 * (r.to - r.td + 1) && (p.to - p.td + 1) / fps >= 0.06;
+    return whole ? { td: p.td, to: p.to, from: 'pose' } : { td: r.td, to: r.to, from: 'claude' };
   };
   const take = real[ti], pen = real[ti - 1], third = real[ti - 2];
   return { take: edges(take), pen: pen && edges(pen), third: third && edges(third) };
 }
 
 // Keeps only answers that fit a long jump: the right order and human contact and flight times.
-export function checkEvents(e, fps) {
+export function checkEvents(e, fps, { claudeTake = false } = {}) {
   const ok = {}, bad = [];
   const s = (a, b) => (e[b] - e[a]) / fps;
   const keep = (k, valid) => { if (e[k] == null) return; if (valid) ok[k] = e[k]; else bad.push(k); };
@@ -84,7 +89,9 @@ export function checkEvents(e, fps) {
   keep('TD', Number.isInteger(e.TD));
   keep('TO', e.TD != null && inRange(s('TD', 'TO'), 0.06, 0.26));
   keep('landing', ok.TO != null && inRange(s('TO', 'landing'), 0.3, 1.3));
-  keep('penTO', ok.TD != null && inRange(s('penTO', 'TD'), 0.02, 0.2));
+  // Claude's own board touchdown can be a few frames early (the app moves it), so then the
+  // flight into the board only has to be positive.
+  keep('penTO', ok.TD != null && inRange(s('penTO', 'TD'), claudeTake ? 0.5 / fps : 0.02, 0.2));
   keep('penTD', ok.penTO != null && inRange(s('penTD', 'penTO'), 0.05, 0.25));
   keep('td3', ok.penTD != null && inRange(s('td3', 'penTD'), 0.15, 0.5));
   if (ok.TO == null) { delete ok.TD; if (e.TD != null && !bad.includes('TD')) bad.push('TD'); }
@@ -133,7 +140,7 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
     td3: c.third?.td ?? null, penTD: c.pen?.td ?? null, penTO: c.pen?.to ?? null,
     TD: c.take?.td ?? null, TO: c.take?.to ?? null, landing: seen.sand,
   };
-  const checked = checkEvents(named, fps);
+  const checked = checkEvents(named, fps, { claudeTake: c.take?.from === 'claude' });
   // A run-through (pop-up) is the same jump up to the flight, then the athlete runs out of the pit.
   if (checked.events.TD != null) checked.events.kind = seen.runThrough ? 'runthrough' : 'jump';
   return {

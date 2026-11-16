@@ -79,3 +79,61 @@ export function refineTouchdowns(result, events, { height = null, tolM = 0.015 }
   }
   return { events: out, moved };
 }
+
+// Contact edges Claude read off the frames, where no pose-track contact overlapped (locate's
+// edges say 'claude'), are 3-8 frames off. IMG_4933 (2026-11-16, box under the penultimate):
+// the board contact came as 492/505, the raw track puts the foot down at 497 and the toe still
+// on the board at 513, and by eye it is ~495-496 / 512; the toe-off 7 frames early made a
+// straight take-off knee read 140°. Here the raw stance foot decides both edges, searched wider
+// than refineTouchdowns does: the touchdown is the frame the foot's lowest point stops falling
+// at its contact level, the toe-off the last frame the big toe is still at its contact level.
+// sources: locate's edges { take, pen } ('claude' | 'pose'). Pose edges are left alone.
+export function refineClaudeEdges(result, events, sources, { height = null, tolM = 0.015 } = {}) {
+  const raw = i => result.accurate?.[i] ?? result.fast?.[i] ?? null;
+  const fps = result.fps ?? 120, N = result.N ?? (result.fast?.length ?? 0);
+  const legM = (0.491 * (height ?? 180)) / 100;
+  const out = { ...events }, moved = {};
+  const med3 = (y, i) => median([y(i - 1), y(i), y(i + 1)]);
+  // search reach in time, so a 240 fps clip gets the same 0,05 s back / 0,1 s forward
+  const back = Math.max(6, Math.round(0.05 * fps)), fwd = Math.max(12, Math.round(0.1 * fps));
+  for (const [src, kTD, kTO] of [['take', 'TD', 'TO'], ['pen', 'penTD', 'penTO']]) {
+    const td = events[kTD], to = events[kTO];
+    if (sources?.[src] !== 'claude' || td == null || to == null || to - td < 4) continue;
+    const inner = []; for (let i = td + 2; i <= to - 2; i++) inner.push(i);
+    const lowOf = f => median(inner.map(i => lowPoint(raw(i), f)?.[1]));
+    const f = (lowOf('l') || -1) > (lowOf('r') || -1) ? 'l' : 'r';
+    const legPx = median(inner.map(i => { const k = raw(i), h = at(k, f + 'hip'), n = at(k, f + 'knee'), a = at(k, f + 'ank'); return h && n && a ? Math.hypot(h[0] - n[0], h[1] - n[1]) + Math.hypot(n[0] - a[0], n[1] - a[1]) : NaN; }));
+    if (!(legPx > 0)) continue;
+    const tol = (tolM * legPx) / legM;
+    const low = i => (i >= 0 && i < N ? lowPoint(raw(i), f)?.[1] ?? NaN : NaN);
+    const toe = i => { if (i < 0 || i >= N) return NaN; const k = raw(i), p = at(k, f + 'bigtoe') ?? at(k, f + 'smalltoe'); return p ? p[1] : NaN; };
+    const level = median(inner.map(i => med3(low, i)));
+    if (!Number.isFinite(level)) continue;
+    // touchdown: first frame at the level whose next frame is no lower, then back up while the
+    // frame before is within the tolerance (heel down before the forefoot settles)
+    let nTD = null;
+    for (let i = td - back; i <= Math.min(td + fwd, to - 3); i++) {
+      const a = low(i), b = low(i + 1);
+      if (Number.isFinite(a) && Number.isFinite(b) && a >= level - 2 * tol && b - a <= 0.2 * tol) { nTD = i; break; }
+    }
+    while (nTD != null && nTD > td - back && Number.isFinite(low(nTD - 1)) && (low(nTD) - low(nTD - 1) <= tol || low(nTD - 1) >= level - 1.5 * tol)) nTD--;
+    // toe-off: the toe's level over the back half of the contact (the heel is already up), then
+    // the last frame still at it before two frames clearly above (median of three: single-frame
+    // leg swaps, IMG_4933 505/507, would end the contact early)
+    const startTD = nTD ?? td, mid = Math.round((startTD + to) / 2);
+    const late = []; for (let i = mid; i <= to - 1; i++) late.push(med3(toe, i));
+    const tLevel = median(late);
+    let nTO = null;
+    if (Number.isFinite(tLevel)) {
+      for (let i = mid; i <= to + fwd; i++) {
+        const up = j => Number.isFinite(med3(toe, j)) && med3(toe, j) < tLevel - 2 * tol;
+        if (Number.isFinite(med3(toe, i)) && med3(toe, i) >= tLevel - 2 * tol && up(i + 1) && up(i + 2)) { nTO = i; break; }
+      }
+    }
+    const newTD = nTD ?? td, newTO = nTO ?? to, dur = (newTO - newTD + 1) / fps;
+    if (dur < 0.06 || dur > 0.26 || newTO <= newTD) continue;   // implausible: keep Claude's
+    if (newTD !== td) { out[kTD] = newTD; moved[kTD] = newTD - td; }
+    if (newTO !== to) { out[kTO] = newTO; moved[kTO] = newTO - to; }
+  }
+  return { events: out, moved };
+}

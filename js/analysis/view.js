@@ -337,7 +337,9 @@ const EDGE_SET = { penTD: 'Dotyk predposledného', penTO: 'Odlepenie predposledn
 const EDGE_HINT = { penTD: 'prvú snímku, keď je chodidlo na zemi', penTO: 'poslednú snímku, keď je špička ešte na zemi', TD: 'prvú snímku, keď je chodidlo na doske', TO: 'poslednú snímku, keď je špička ešte na doske' };
 // '+1 snímka', '−2 snímky': the player counts frames from the start of its cut, so the bar speaks in steps
 const steps = n => `${n > 0 ? '+' : '−'}${Math.abs(n)} ${Math.abs(n) === 1 ? 'snímka' : Math.abs(n) < 5 ? 'snímky' : 'snímok'}`;
-const EDGE_REACH = 3;   // frames either side of the analysis' frame
+// How far from the analysis' frame a hand edit may go: 0,1 s (12 frames at 120 fps). It was 3
+// frames, and IMG_4933's toe-off came 7 frames early (2026-11-16): it could not be fixed by hand.
+const EDGE_REACH_S = 0.1;
 let editOn = false, editSel = null;   // the phase being edited stays selected after the numbers are read again
 export const stopEdit = () => { editOn = false; editSel = null; };
 export function renderResult(els, jump, player, { feel = null, onFeel, noReplayNote, awaitingCoach = false, runup = null, sex = 'male', name = '', height = null, onEdge = null } = {}) {
@@ -370,7 +372,8 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   const markChip = () => els.chips.querySelectorAll('.kf[data-frame]').forEach(b => b.classList.toggle('on', +b.dataset.frame === chipFrame));
   if (player) player.onFrame = f => { chipFrame = f; markChip(); drawBar(); };
   // "Upraviť" and its bar: one "… je tu · frame" button per contact edge of the phase, live only
-  // within EDGE_REACH frames of the analysis' frame, so a slip of the finger can't move it far.
+  // within 0,1 s of the analysis' frame, so a slip of the finger can't move it far.
+  const EDGE_REACH = Math.max(3, Math.round(EDGE_REACH_S * (jump.fps > 0 ? jump.fps : 120)));
   const edgesOf = p => (p?.keyFrames ?? []).filter(k => k.frame != null && EDGE_SET[k.id]);
   function editHtml(p) {
     if (!onEdge || !player || !edgesOf(p).length) return '';

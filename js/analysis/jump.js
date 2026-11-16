@@ -6,7 +6,7 @@ import { adjustForRunup, judgedSteps, expectedDistance } from './runup.js';
 import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from './metrics.js';
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
-import { refineTouchdowns } from './refine.js';
+import { refineTouchdowns, refineClaudeEdges } from './refine.js';
 import { sharpen } from './kinematics.js';
 import { techniqueScore, coaching, PHASES } from './coach.js';
 
@@ -274,7 +274,11 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // Key frames Claude named on the server win over the ones detected from the pose track.
   // Their touchdowns are then moved to the first frame the foot is really down (raw track).
   const named0 = result.events?.TD != null && result.events?.TO != null ? result.events : null;
-  const refined = named0 ? refineTouchdowns(result, named0, { height }) : null;
+  // Edges Claude read itself (no pose contact there) first get both ends from the raw foot.
+  // Those keep their new frames; refineTouchdowns' narrower search would nudge them again.
+  const claudeFixed = named0 ? refineClaudeEdges(result, named0, result.locate?.edges, { height }) : null;
+  const refined = claudeFixed ? refineTouchdowns(result, claudeFixed.events, { height }) : null;
+  if (refined) for (const k of Object.keys(claudeFixed.moved)) refined.events[k] = claudeFixed.events[k];
   const named = refined ? refined.events : null;
   const detected = detectContacts(clean, result.first, result.last, fps);
   let contacts = withEvents(clean, detected, named, fps);
