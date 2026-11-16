@@ -1,7 +1,7 @@
 // Coaching written by the model from the 5 phase snapshots and the numbers, checked in
 // code against the Coaching SOP. Anything that fails the check, the network or the clock
 // falls back to the template coach, so this never throws and never returns junk.
-import { coaching, APPROVED_CUES, MISKA_ONLY_CUE, PHASE_IDS } from '../js/analysis/coach.js';
+import { coaching, APPROVED_CUES, PHASE_IDS } from '../js/analysis/coach.js';
 
 export const MODEL = 'claude-opus-5-5';
 export const TIMEOUT_MS = 90_000;
@@ -77,7 +77,6 @@ export function validateCoach(c, { metrics = [], sex = 'male', name } = {}) {
 
     if (f.cue != null) {
       if (!APPROVED_CUES.includes(f.cue)) errs.push(`${at}.cue „${f.cue}" nie je na schválenom zozname.`);
-      if (f.cue === MISKA_ONLY_CUE && sex !== 'female') errs.push(`${at}.cue „${f.cue}" patrí len Miške.`);
       if (i > 0) errs.push(`${at}.cue musí byť null: jedno cue na ďalší rozbeh, a to v prvej oprave.`);
     }
 
@@ -110,9 +109,9 @@ Run-up length. Every jump is a full effort, but often from a shortened run-up (r
 
 Cues. Copy one exactly from this list, or use null:
 ${APPROVED_CUES.map(c => `- ${c}`).join('\n')}
-„${MISKA_ONLY_CUE}" is only for Miška, and it replaces „predposledný naplocho" for her. Cues are external images. Numbers go in the body, never in the cue. A landing or flight fix has no cue.
+Miška and Stanley get the same cues. Never write „float" in any form: neither of them understands it. Cues are external images. Numbers go in the body, never in the cue. A landing or flight fix has no cue.
 Never write these anywhere, in any form: „zdvihni koleno", „natiahni krok", „cykluj nohu", „pritiahni pätu k zadku", „odraz silnejšie", „vyššie". They are banned because they cause reaching, braking and a longer contact. Say what to do instead with the approved cue.
-Why cues are limited: inside a 0.10-0.12 s contact nothing can be corrected, everything is set before touchdown. Cues reach foot placement, shin angle, pre-tension, trunk and the penultimate float. Strength and stiffness come from the gym and the bounds. Don't promise a cue will fix those.
+Why cues are limited: inside a 0.10-0.12 s contact nothing can be corrected, everything is set before touchdown. Cues reach foot placement, shin angle, pre-tension, trunk and the penultimate step. Strength and stiffness come from the gym and the bounds. Don't promise a cue will fix those.
 
 Do not prescribe drills, exercises, sets, reps, distances or doses anywhere in the text. The app gives the cue and explains the fault; the training plan is separate.
 

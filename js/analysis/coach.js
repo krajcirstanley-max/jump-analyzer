@@ -53,10 +53,11 @@ export function techniqueScore(metrics) {
 // 2026-11-14: one cue per fault where research found one (Stanley approved the list with his own
 // Slovak wording: „drž vysoké boky do dosky", „dopredu cez dosku", „odraz ako na schod",
 // „oči na koniec doskočiska", „päty za čiaru", „zrýchľuj každým krokom do dosky").
-export const APPROVED_CUES = ['vysoké boky', 'stlač zem pod seba', 'tvrdá pružina', 'predposledný naplocho', 'boky hore cez dosku', 'predposledný je float, nie krok',
+export const APPROVED_CUES = ['vysoké boky', 'stlač zem pod seba', 'tvrdá pružina', 'predposledný naplocho', 'boky hore cez dosku',
   'rýchly posledný', 'prebehni predposledný', 'drž vysoké boky do dosky', 'dlhý – krátky', 'dopredu cez dosku', 'prebehni cez dosku', 'odraz ako na schod',
   'oči na koniec doskočiska', 'švih a stop', 'zrýchľuj každým krokom do dosky', 'päty za čiaru', 'nohy von až pri piesku'];
-export const MISKA_ONLY_CUE = 'predposledný je float, nie krok';
+// The Miška-only „predposledný je float, nie krok" is gone (2026-11-16, Stanley: neither of them
+// understands it). She gets the same cues as Stanley.
 export const PHASE_IDS = ['pen', 'plant', 'toeoff', 'flight', 'landing'];
 
 const COMMA = v => v.replace('.', ',').replace('-', '−');
@@ -116,7 +117,7 @@ const FAULTS = [
     why: 'Vystretá a napätá noha prenesie rýchlosť do odrazu. Pokrčená ju stratí v kolene.',
   },
   {
-    id: 'sitting', tier: 'approach', phase: 'pen', cue: 'prebehni predposledný', cueF: 'predposledný je float, nie krok',
+    id: 'sitting', tier: 'approach', phase: 'pen', cue: 'prebehni predposledný',
     img: 'Predposledný krok sa odvalí ako koleso, nezastaví ako brzda.',
     keys: [['contactPen', 'high', 15]],
     title: 'Prebehni predposledný krok',
@@ -125,7 +126,7 @@ const FAULTS = [
     why: 'Predposledný pripraví odraz, ale s dlhým kontaktom je z neho brzda. Treba ho prebehnúť, telo klesá len o pár centimetrov.',
   },
   {
-    id: 'hipDropHigh', tier: 'approach', phase: 'pen', cue: 'drž vysoké boky do dosky', cueF: 'predposledný je float, nie krok',
+    id: 'hipDropHigh', tier: 'approach', phase: 'pen', cue: 'drž vysoké boky do dosky',
     img: 'Pred doskou podbehneš natiahnutú šnúru len o šírku dlane, nie prikrčený.',
     keys: [['hipDrop', 'high', 1.5]],
     title: 'Plytší predposledný krok',
@@ -134,7 +135,7 @@ const FAULTS = [
     why: 'Ťažisko má klesnúť asi o 9 cm. Viac už len brzdí a rozbeh sa míňa.',
   },
   {
-    id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho', cueF: 'predposledný je float, nie krok',
+    id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'predposledný naplocho',
     img: 'Ako lietadlo, ktoré sa pred vzletom na chvíľu prisaje k dráhe a potom sa odlepí.',
     keys: [['hipDrop', 'low', 1.5]],
     title: 'Trochu znížiť boky pred doskou',
@@ -322,7 +323,7 @@ export function coaching(metrics = [], sex = 'male', { name, all = false } = {})
   const top = found.slice(0, 3);
 
   const fixes = top.map(({ f, m }, i) => {
-    const cue = sex === 'female' && f.cueF ? f.cueF : f.cue;
+    const cue = f.cue;
     return {
       title: f.title, body: f.body(m), phase: f.phase, metricKey: m.key,
       cue: i === 0 ? cue ?? null : null,   // one cue at a time, SOP §1
@@ -342,7 +343,7 @@ export function coaching(metrics = [], sex = 'male', { name, all = false } = {})
     fixes,
     nextCue: fixes[0]?.cue ?? null,
     // every fault found, in the same order, for the what-if card (whatif.js)
-    ...(all ? { ranked: found.map(({ f, m }) => ({ id: f.id, m, cue: (sex === 'female' && f.cueF ? f.cueF : f.cue) ?? null })) } : {}),
+    ...(all ? { ranked: found.map(({ f, m }) => ({ id: f.id, m, cue: f.cue ?? null })) } : {}),
   };
 }
 

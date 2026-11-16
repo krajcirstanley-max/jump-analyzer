@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { coaching, APPROVED_CUES, MISKA_ONLY_CUE } from '../js/analysis/coach.js';
+import { coaching, APPROVED_CUES } from '../js/analysis/coach.js';
 import { validateCoach, writeCoaching, MODEL, COACH_SCHEMA } from '../server/coach.mjs';
 
 // Metric to the contract; status follows the norm unless overridden.
@@ -66,9 +66,10 @@ test('approved cues are short and the template only uses them', () => {
   }
 });
 
-test('Miška gets the float cue on a penultimate fault, Stanley does not', () => {
+test('Miška gets the same penultimate cue as Stanley, never „float" (2026-11-16)', () => {
   const pen = [ms('contactPen', 170, [100, 125])];
-  assert.equal(coaching(pen, 'female').nextCue, MISKA_ONLY_CUE);
+  assert.equal(coaching(pen, 'female').nextCue, 'prebehni predposledný');
+  assert.ok(!APPROVED_CUES.some(c => /float/.test(c)));
   assert.equal(coaching(pen, 'male').nextCue, 'prebehni predposledný');   // sitting: Stanley's cue since 2026-11-14
 });
 
@@ -163,10 +164,10 @@ test('validator rejects a fix built on a hidden metric', () => {
   assert.ok(errs.some(e => /skrytá/.test(e)), errs.join(' / '));
 });
 
-test('float cue is rejected for Stanley and accepted for Miška', () => {
-  const c = edit(x => { x.fixes[0].cue = MISKA_ONLY_CUE; x.nextCue = MISKA_ONLY_CUE; x.take = 'Miška, na doske dlho.'; });
-  assert.ok(validateCoach(c, ctx).some(e => /len Miške/.test(e)));
-  assert.deepEqual(validateCoach(c, { metrics: BAD, sex: 'female', name: 'Miška' }), []);
+test('the old float cue is rejected for both', () => {
+  const c = edit(x => { x.fixes[0].cue = 'predposledný je float, nie krok'; x.nextCue = x.fixes[0].cue; x.take = 'Miška, na doske dlho.'; });
+  assert.ok(validateCoach(c, ctx).some(e => /schválenom/.test(e)));
+  assert.ok(validateCoach(c, { metrics: BAD, sex: 'female', name: 'Miška' }).some(e => /schválenom/.test(e)));
 });
 
 // --- writeCoaching with a mocked client ---
