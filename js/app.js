@@ -23,7 +23,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.24.1';
+const APP_VERSION = '0.25.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -339,7 +339,7 @@ function showMsg(kind, title, text, actions = '') {
   m.innerHTML = `<div class="banner ${kind}"><strong>${esc(title)}</strong>${esc(text)}</div>${actions ? `<div class="row msg-actions">${actions}</div>` : ''}`;
 }
 
-const ROUTE = 'Vo Photos daj Share → Export Unmodified Original, ulož do Files a tu vyber Choose File.';
+const ROUTE = globalThis.Capacitor?.isNativePlatform?.() ? 'Vyber ho cez Nahrať v appke: z galérie sa vezme tak, ako bolo natočené.' : 'Vo Photos daj Share → Export Unmodified Original, ulož do Files a tu vyber Choose File.';
 const NOT_FOUND = ['Skok sa nepodarilo nájsť', 'Skontroluj, či je v zábere odraz a aspoň posledné kroky, a skús to znova.'];
 
 $('res-cancel').addEventListener('click', () => {
@@ -962,7 +962,7 @@ async function renderLists() {
 
 // ---------- Tréning and História ----------
 const KINDS = {
-  skok: { hint: 'Kto skáče, appka zistí z videa sama. Natočené v appke ide 120 fps; z Fotiek vyber originál (Share → Export Unmodified Original → Files).' },
+  skok: { hint: 'Kto skáče, appka zistí z videa sama. Natočené v appke ide 120 fps; Nahrať otvorí galériu a vezme video ako je natočené, aj viac naraz.' },
   sprint: { hint: 'Natočené v appke ide 120 fps a s Freelapom aj s časmi vo videu. Rozbor príde sám.' },
   rsi: { hint: 'Drop jump, odrazy, prekážky aj výskok z miesta. Natáčaj spredu, celé chodidlá v zábere. Natočené v appke sa uloží s časmi.' },
 };
@@ -1155,7 +1155,43 @@ $('cloud-save').addEventListener('click', () => {
 renderCloud();
 
 // Before the picker: the upload takes about as long as a cold start of the server.
-$('train-pick').addEventListener('click', () => { if (cloudReady()) warmCloud(); });
+$('train-pick').addEventListener('click', e => {
+  if (cloudReady()) warmCloud();
+  if (!jumpCam) return;            // Safari: the file input as before
+  e.preventDefault();              // the app: straight from Photos, the original file
+  pickFromGallery();
+});
+
+// Videos picked in Photos come as the original files (the native picker, SprintCamera.pickVideo):
+// no "Export Unmodified Original → Files" any more (Stanley 2026-11-16). Several at once: jumps go
+// one after another, each starting once the one before is on its way to the server (it then
+// finishes in the background); sprints and RSI queue on their own.
+async function pickFromGallery() {
+  let files;
+  try { files = (await globalThis.Capacitor.nativePromise('SprintCamera', 'pickVideo', { limit: 10 }))?.files ?? []; }
+  catch (err) { return alert(`Galériu sa nepodarilo otvoriť: ${err?.message ?? err}`); }
+  for (const [k, f] of files.entries()) {
+    let file;
+    try {
+      const blob = await (await fetch(globalThis.Capacitor.convertFileSrc(f.path))).blob();
+      file = new File([blob], f.name || `video-${Date.now()}.mov`, { type: blob.type || 'video/quicktime', lastModified: Date.now() });
+    } catch (err) { trainProgress(`Video ${f.name ?? ''} sa nepodarilo otvoriť.`); continue; }
+    if (kind === 'sprint') sprintView.upload(file);
+    else if (kind === 'rsi') rsiView.analyze(file);
+    else {
+      const run = runId + 1;
+      analyzeFile(file);
+      if (k < files.length - 1) await onItsWay(run);
+    }
+  }
+}
+// Until jump run `run` is uploading (it can then finish in the background) or is over.
+async function onItsWay(run) {
+  for (let t = 0; t < 600; t++) {
+    if (run !== runId || (detachable && abort) || !isBusy && t > 3) return;
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
 
 $('file').addEventListener('change', e => {
   const f = e.target.files?.[0];

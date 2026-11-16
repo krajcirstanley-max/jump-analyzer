@@ -18,6 +18,8 @@ import AVFoundation
 import Photos
 import CoreImage
 import Capacitor
+import PhotosUI
+import UniformTypeIdentifiers
 import CoreBluetooth
 
 /// The app's root view controller: Capacitor plus the app's own plugin.
@@ -45,8 +47,31 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "run", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "finalize", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveVideo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pickVideo", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
+    private var galleryDelegate: GalleryPickerDelegate?
+
+    /// Videos straight from Photos as the original files (HEVC at the filmed 120 or 240 fps), with no
+    /// detour through Files (Stanley 2026-11-16: "rád by som obišiel krok nahrať súbor, len z
+    /// galérie"). The web file input hands over a re-encoded copy without the slow-motion frames;
+    /// PHPicker with the .current representation gives the asset as it is. Resolves
+    /// { files: [{ path, name }] }, empty when the picker is closed.
+    @objc func pickVideo(_ call: CAPPluginCall) {
+        let limit = max(0, call.getInt("limit") ?? 1)
+        DispatchQueue.main.async {
+            guard let host = self.bridge?.viewController else { call.reject("No view"); return }
+            var cfg = PHPickerConfiguration(photoLibrary: .shared())
+            cfg.filter = .videos
+            cfg.selectionLimit = limit
+            cfg.preferredAssetRepresentationMode = .current
+            let picker = PHPickerViewController(configuration: cfg)
+            let d = GalleryPickerDelegate(call: call) { [weak self] in self?.galleryDelegate = nil }
+            self.galleryDelegate = d
+            picker.delegate = d
+            host.present(picker, animated: true)
+        }
+    }
 
     /// Opens the recorder over the app. freelap: whether the chips are being listened to.
     @objc func open(_ call: CAPPluginCall) {
@@ -1036,3 +1061,40 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
         dismiss(animated: true) { self.onEvent?("closed", [:]) }
     }
 }
+
+/// Copies each picked video out of the picker's temporary file (it is deleted when the callback
+/// returns) into the app's own temporary folder, in the order picked.
+final class GalleryPickerDelegate: NSObject, PHPickerViewControllerDelegate {
+    private let call: CAPPluginCall
+    private let done: () -> Void
+    init(call: CAPPluginCall, done: @escaping () -> Void) { self.call = call; self.done = done }
+
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        if results.isEmpty { call.resolve(["files": []]); done(); return }
+        let group = DispatchGroup(), lock = NSLock()
+        var files = [[String: Any]?](repeating: nil, count: results.count)
+        var failure: String?
+        for (i, r) in results.enumerated() {
+            let p = r.itemProvider
+            let type = p.registeredTypeIdentifiers.first { UTType($0)?.conforms(to: .movie) == true } ?? UTType.movie.identifier
+            group.enter()
+            p.loadFileRepresentation(forTypeIdentifier: type) { url, err in
+                defer { group.leave() }
+                guard let url = url else { lock.lock(); failure = err?.localizedDescription ?? "Video sa nepodarilo načítať."; lock.unlock(); return }
+                let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension
+                let dst = FileManager.default.temporaryDirectory.appendingPathComponent("pick-\(UUID().uuidString).\(ext)")
+                do {
+                    try FileManager.default.copyItem(at: url, to: dst)
+                    lock.lock(); files[i] = ["path": dst.path, "name": url.lastPathComponent]; lock.unlock()
+                } catch { lock.lock(); failure = error.localizedDescription; lock.unlock() }
+            }
+        }
+        group.notify(queue: .main) {
+            let got = files.compactMap { $0 }
+            if got.isEmpty, let f = failure { self.call.reject(f) } else { self.call.resolve(["files": got]) }
+            self.done()
+        }
+    }
+}
+
