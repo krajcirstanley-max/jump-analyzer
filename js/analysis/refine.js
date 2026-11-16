@@ -92,7 +92,7 @@ export function refineClaudeEdges(result, events, sources, { height = null, tolM
   const raw = i => result.accurate?.[i] ?? result.fast?.[i] ?? null;
   const fps = result.fps ?? 120, N = result.N ?? (result.fast?.length ?? 0);
   const legM = (0.491 * (height ?? 180)) / 100;
-  const out = { ...events }, moved = {};
+  const out = { ...events }, moved = {}, done = [];
   const med3 = (y, i) => median([y(i - 1), y(i), y(i + 1)]);
   // search reach in time, so a 240 fps clip gets the same 0,05 s back / 0,1 s forward
   const back = Math.max(6, Math.round(0.05 * fps)), fwd = Math.max(12, Math.round(0.1 * fps));
@@ -134,6 +134,7 @@ export function refineClaudeEdges(result, events, sources, { height = null, tolM
     if (dur < 0.06 || dur > 0.26 || newTO <= newTD) continue;   // implausible: keep Claude's
     if (newTD !== td) { out[kTD] = newTD; moved[kTD] = newTD - td; }
     if (newTO !== to) { out[kTO] = newTO; moved[kTO] = newTO - to; }
+    done.push(kTD, kTO);
   }
-  return { events: out, moved };
+  return { events: out, moved, done };
 }

@@ -37,10 +37,14 @@ test('a sprint filmed in the jump mode is not a jump (IMG_4866)', { skip: !load(
 // contact came from Claude as 492/505 (by eye ~495-496 / 512, raw foot 497/513), which made the
 // straight take-off knee read 140°.
 test('Claude-only board edges are moved to the raw foot (IMG_4933), pose edges stay (IMG_4930)', { skip: !load(4933) || !load(4930) }, () => {
-  const r = load(4933), j = analyzeJump(r, 'male', r.ts, { height: 186 });
-  assert.ok(j.takeoff.td >= 495 && j.takeoff.td <= 498, `TD ${j.takeoff.td}`);
-  assert.ok(j.takeoff.to >= 512 && j.takeoff.to <= 513, `TO ${j.takeoff.to}`);
-  assert.ok(j.metrics.find(m => m.key === 'kneeTO').value > 160);
+  // two server runs of the same clip: Claude named 492/505 the first time, 497/510 the second
+  for (const id of [4933, '4933b']) {
+    const r = load(id); if (!r) continue;
+    const j = analyzeJump(r, 'male', r.ts, { height: 186 });
+    assert.ok(j.takeoff.td >= 495 && j.takeoff.td <= 498, `${id} TD ${j.takeoff.td}`);
+    assert.ok(j.takeoff.to >= 512 && j.takeoff.to <= 513, `${id} TO ${j.takeoff.to}`);
+    assert.ok(j.metrics.find(m => m.key === 'kneeTO').value > 160);
+  }
   const q = load(4930), k = analyzeJump(q, 'male', q.ts, { height: 186 });
   assert.equal(k.takeoff.td, 911);
   assert.ok(Math.abs(k.takeoff.to - 926.5) <= 1, `TO ${k.takeoff.to}`);
