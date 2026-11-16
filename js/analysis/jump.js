@@ -280,13 +280,21 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   let contacts = withEvents(clean, detected, named, fps);
   let ev = keyFrames(clean, contacts, fps, sex, { events: named });
   if (ev.error) return { ...ev, error: 'V zázname sa nenašiel odraz.' };
+  // The penultimate touchdown comes out one frame late on 4 of 4 clips checked by eye on zoomed feet
+  // (2026-11-15: 4594 389/388, 4676 521/520, 4677 675/674, 4390 454/453), from the server's names
+  // and from the pose track alike; toe-offs matched. So it moves one frame earlier, when the step
+  // before still ends before it. Hand-set frames below replace it as they are.
+  if (ev.pen && ev.pen.td - 1 > (ev.third?.to ?? -Infinity)) {
+    ev.pen.td -= 1;
+    ev.keyFrames = ev.keyFrames.map(k => (k.id === 'penTD' ? { ...k, frame: ev.pen.td } : k));
+  }
   // Frames set by hand: the jump's own key frames with those replaced, run through the same path
   // as the server's names. Kept only when they stay in order (pen touchdown < pen toe-off < board
   // touchdown < toe-off) and the jump is still found.
   const hand = cleanEdges(edges);
   let handUsed = null;
   if (hand) {
-    const base = { td3: named?.td3 ?? ev.third?.td ?? null, penTD: named?.penTD ?? ev.pen?.td ?? null, penTO: named?.penTO ?? ev.pen?.to ?? null,
+    const base = { td3: named?.td3 ?? ev.third?.td ?? null, penTD: ev.pen?.td ?? named?.penTD ?? null, penTO: named?.penTO ?? ev.pen?.to ?? null,
       TD: named?.TD ?? ev.takeoff.td, TO: named?.TO ?? ev.takeoff.to, ...(named?.landing != null ? { landing: named.landing } : {}), ...(result.events?.kind ? { kind: result.events.kind } : {}) };
     const e = { ...base, ...hand };
     const order = [e.penTD, e.penTO, e.TD, e.TO].filter(v => v != null);
@@ -299,6 +307,12 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const dir = contacts[0]?.dir ?? 1;
   const times = ts ?? Array.from({ length: clean.length }, (_, i) => i / fps);
   const air = flightAnalysis(smooth, ev, times, sex, dir, height);
+  // No take-off at all (2026-11-16, IMG_4866: a sprint filmed in the jump mode was read as a jump
+  // with the body going down and backwards at "toe-off", vy -0.73, vx -1.18 m/s). Every real jump so
+  // far leaves the board at vy 2.0-2.5 and vx 6.6-8.3 m/s, so these floors sit far below any jump.
+  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(air.vxTO) && (air.vyTO < 0.5 || air.vxTO < 2.5)) {
+    return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: air.vxTO, vy: air.vyTO } };
+  }
   // Metres from the runway when the server found it; the gravity scale is only the fallback.
   const ground = result.ground && !air.error ? groundAnalysis(result.ground, smooth, ev, times, sex, height) : null;
   // Where the video's metres can be wrong (2026-11-14, IMG_4677): not on the runway, where the
