@@ -285,7 +285,7 @@ export function whatIfHtml(w) {
   const row = (x, i) => `<div class="wi${i === 0 ? ' pick' : ''}">
       ${i === 0 ? '<span class="wi-tag">Teraz zlepšuj toto</span>' : ''}
       <div class="wi-head"><b>${esc(x.title)}</b><span class="wi-gain">${x.total ? cmText(x.total) : ''}</span></div>
-      <p class="wi-num">${x.freelap ? `Freelap 1–11 m: ${num(x.freelap.now, 2)} → ${num(x.freelap.target, 2)} s` : x.numText ? esc(x.numText) : `${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}`}</p>
+      <p class="wi-num">${x.freelap ? `${x.freelap.typed ? 'Freelap 1–11 m' : '1–11 m z videa'}: ${num(x.freelap.now, 2)} → ${num(x.freelap.target, 2)} s` : x.numText ? esc(x.numText) : `${esc(x.label)}: ${withU(x.now, x.unit)} → ${withU(x.target, x.unit)}`}</p>
       ${x.cue ? `<p class="wi-cue">Cue: „${esc(x.cue)}“</p>` : ''}
       ${x.img ? `<p class="wi-img"><b>Predstav si</b>${esc(x.img)}</p>` : ''}
       ${x.effects.length ? `<div class="fx"><span class="fx-l">Z toho</span>${x.effects.map(eff).join('')}

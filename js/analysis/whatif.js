@@ -100,7 +100,10 @@ export function whatIf(jump, sex = 'male', { height = null } = {}) {
       // Shown as the Freelap 1-11 m time (Stanley): his own time when typed, else the video's,
       // else 10 / speed (Berlin 2009: last stride ≈ 11-1 m mean speed); the target scales with speed.
       // the speed into the board is 10 / the 1-11 m time (typed, cones or board), so the two agree
-      it.freelap = { now: 10 / m.value, target: 10 / target };
+      // only a typed time is Freelap; the cones in the video read IMG_4677 at 1.07 s where the chip
+      // said 1.10 (Stanley, 2026-11-16: „1.07 to nebolo, ale 1.10“)
+      const typed = jump.flight?.ground ? jump.flight.ground.approachFrom === 'freelap' : Number.isFinite(jump.flight?.approach);
+      it.freelap = { now: 10 / m.value, target: 10 / target, typed };
       // the norm is for a full run-up until the steps are confirmed (it scales with them, Béres 2014)
       if (!(jump.runupJudged > 0)) it.note = 'Cieľ je pre plný rozbeh. Potvrď počet krokov a cieľ sa prispôsobí rozbehu.';
     }
