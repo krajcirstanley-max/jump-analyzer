@@ -1,0 +1,23 @@
+{
+  "_about": "Hand-checked frames on zoomed feet. penTD/TD = first frame on the ground, penTO/TO = last frame on the ground, landing = first frame a foot touches the sand (null: not in the video). Videos are local (tests/real/IMG_<id>.MOV, never committed). Contacts are good to about one frame, landings to about two. 2026-11-17: five edges re-read at a fixed 3x crop moved by one frame (4950 penTD, 4940 penTD/TO, 4951 penTO, 4933 TD).",
+  "clips": {
+    "4390": { "who": "miska", "date": "2026-11-09", "setup": "sneakers, short run-up", "penTD": 453, "penTO": 469, "TD": 482, "TO": 497, "landing": null },
+    "4594": { "who": "miska", "date": "2026-11-09", "setup": "sneakers, short run-up", "penTD": 388, "penTO": 404, "TD": 415, "TO": 433, "landing": 511 },
+    "4676": { "who": "stanley", "date": "2026-11-11", "setup": "10 steps", "penTD": 520, "penTO": 534, "TD": 541, "TO": 556, "landing": 642 },
+    "4677": { "who": "stanley", "date": "2026-11-11", "setup": "10 steps, tape 6.85 m from the toe", "freelap": 1.10, "tape": 6.85, "penTD": 674, "penTO": 689, "TD": 696, "TO": 713, "landing": 799 },
+    "4930": { "who": "stanley", "date": "2026-11-16", "setup": "10 steps, box under the penultimate", "penTD": 887, "penTO": 904, "TD": 911, "TO": 927, "landing": 1008 },
+    "4933": { "who": "stanley", "date": "2026-11-16", "setup": "10 steps, box under the penultimate", "penTD": 472, "penTO": 487, "TD": 497, "TO": 512, "landing": 594 },
+    "4940": { "who": "miska", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 661, "penTO": 677, "TD": 689, "TO": 706, "landing": 789 },
+    "4950": { "who": "stanley", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 604, "penTO": 621, "TD": 631, "TO": 648, "landing": 733 },
+    "4951": { "who": "miska", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 847, "penTO": 864, "TD": 877, "TO": 895, "landing": 973 },
+    "4953": { "who": "miska", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 500, "penTO": 516, "TD": 529, "TO": 547, "landing": 627 },
+    "4954": { "who": "stanley", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 668, "penTO": 683, "TD": 693, "TO": 710, "landing": 800 },
+    "4866": { "who": "miska", "date": "2026-11-15", "setup": "a sprint filmed in the jump mode", "noJump": true }
+  },
+  "athletes": {
+    "stanley": { "sex": "male", "name": "Stanley", "height": 186 },
+    "miska": { "sex": "female", "name": "Miška", "height": 171 }
+  },
+  "tolerance": { "contact": 1, "landing": 3, "gateContact": 2 },
+  "_tolerance": "contact 1 frame is the aim; the benchmark fails a change only past gateContact (2) or landing (3). freelap = 1-11 m time in s, tape = metres from the toe."
+}

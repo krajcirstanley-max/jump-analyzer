@@ -9,12 +9,12 @@ import { fileURLToPath } from 'node:url';
 import * as ort from 'onnxruntime-node';
 import { PoseEngine } from '../js/pose/engine.js';
 import { runPipeline, DEFAULTS } from '../js/pose/pipeline.js';
-import { analyzeJump, poseContacts } from '../js/analysis/jump.js';
+import { analyzeJump } from '../js/analysis/jump.js';
 import { toWire, fromWire } from '../js/cloud.js';
 import { writeCoaching } from './coach.mjs';
 import { cliClient } from './claude-cli.mjs';
 import { probe, openFrames, jpeg } from './frames.mjs';
-import { locateEvents } from './locate.mjs';
+import { locateEvents, locateGuess } from './locate.mjs';
 import { measureGround } from './ground.mjs';
 import { analyzeRsiClip } from './rsi.mjs';
 import { analyzeSprintClip } from './sprint.mjs';
@@ -74,23 +74,20 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     // where to look. Without a client, or if it fails, the pose track's own frames stand.
     let who = null;
     if (client) {
-      // Runs before the runway is measured, like the pass below: on Miška's IMG_4940 (2026-11-16)
-      // the horizontal-speed floor failed it and Claude got no pose contacts to take edges from.
-      const guess = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true });
+      const guessed = locateGuess(fromWire(result), sex, meta.ts, { height, pb });
       // Who is in the clip, read alongside the key frames.
       const whoP = athletes?.length > 1
-        ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, near: guess.error ? null : guess.takeoff.td, athletes, client })
+        ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, near: guessed.TD ?? null, athletes, client })
           .catch(e => ({ id: null, error: String(e?.message || e).slice(0, 200) }))
         : null;
       try {
         const loc = await locateEvents({
           frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, client, onProgress,
-          // Without a jump in the pose track its contacts still give Claude's runs their edges.
-          guess: guess.error ? { contacts: guess.contacts?.length ? guess.contacts : poseContacts(fromWire(result)) } : { TD: guess.takeoff.td, TO: guess.takeoff.to, landing: guess.landing, contacts: guess.contacts },
+          guess: guessed,
         });
         if (loc.events.TD != null) result.events = loc.events;
         // What Claude answered and what was kept, so a wrong frame can be traced later.
-        result.locate = { ms: loc.ms, model: loc.model, coarse: loc.coarse, runs: loc.runs, edges: loc.edges, windows: loc.windows, rejected: loc.rejected };
+        result.locate = { ms: loc.ms, model: loc.model, coarse: loc.coarse, runs: loc.runs, edges: loc.edges, windows: loc.windows, rejected: loc.rejected, seen: loc.seen };
       } catch (e) {
         console.error('locate failed:', e?.message || e);
         result.locate = { error: String(e?.message || e).slice(0, 300) };

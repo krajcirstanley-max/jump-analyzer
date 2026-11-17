@@ -8,6 +8,7 @@
 // An overview of the whole clip runs alongside and moves the search if the pose track picked
 // the wrong place. Anything implausible falls back to the pose track.
 import { contactSheet } from './grid.mjs';
+import { analyzeJump, poseContacts } from '../js/analysis/jump.js';
 
 export const LOCATE_MODEL = 'claude-opus-5-5';    // per-frame reading: Sonnet merged steps on IMG_2674
 export const OVERVIEW_MODEL = 'claude-sonnet-5-5'; // finding the jump in a thumbnail strip is easy
@@ -73,9 +74,17 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps) {
     const p = whole.filter(c => sh(c) >= 0).sort((a, b) => sh(b) - sh(a))[0], last = units.at(-1);
     if (p && last?.p === p) last.to = Math.max(last.to, r.to); else units.push({ td: r.td, to: r.to, p });
   }
+  // Pieces no pose contact backs, up to 0.035 s apart, are one contact too: a rerun of IMG_4953
+  // read its box take-off (529-547) as 529-533 and 537-541, both too short to count alone, and the
+  // penultimate became the take-off. Pose-backed units are never joined this way (IMG_4954 at 4).
+  const joined = [];
+  for (const u of units) {
+    const last = joined.at(-1);
+    if (last && !last.p && !u.p && u.td - last.to <= Math.max(2, Math.round(0.035 * fps))) last.to = u.to; else joined.push({ ...u });
+  }
   // A piece no pose contact backs has to be 0.05 s long to count: IMG_4953's 519-522, in the air
   // between the last two steps, otherwise became the penultimate.
-  const real = units.filter(r => (r.to - r.td + 1) / fps >= (r.p ? 0.03 : 0.05)).map(({ td, to }) => ({ td, to }));
+  const real = joined.filter(r => (r.to - r.td + 1) / fps >= (r.p ? 0.03 : 0.05)).map(({ td, to }) => ({ td, to }));
   if (!real.length) return {};
   const dist = r => (takeoffAt >= r.td && takeoffAt <= r.to ? 0 : Math.min(Math.abs(takeoffAt - r.td), Math.abs(takeoffAt - r.to)));
   const ti = real.reduce((b, r, k) => (dist(r) < dist(real[b]) ? k : b), 0);
@@ -87,7 +96,11 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps) {
     // the pose contact sharing the most frames with the run (a run can touch two)
     const shared = c => Math.min(c.to, r.to) - Math.max(c.td, r.td);
     const p = poseContacts.filter(c => shared(c) >= 0).sort((a, b) => shared(b) - shared(a))[0];
-    const whole = p && p.to - p.td + 1 >= 0.6 * (r.to - r.td + 1) && (p.to - p.td + 1) / fps >= 0.06;
+    // A full-length pose contact (0.09 s and more) wins even when Claude's run is longer: on a
+    // rerun of IMG_4390 (2026-11-17) Claude marked flight frames as ground, 470-497 for a 482-497
+    // take-off, and the pose track's right 15 frames lost to the 0.6 rule (IMG_4933: 452-480 for 472-487).
+    const len = p ? p.to - p.td + 1 : 0;
+    const whole = p && len / fps >= 0.06 && (len >= 0.6 * (r.to - r.td + 1) || len / fps >= 0.09);
     return whole ? { td: p.td, to: p.to, from: 'pose' } : { td: r.td, to: r.to, from: 'claude' };
   };
   const take = real[ti], pen = real[ti - 1], third = real[ti - 2];
@@ -154,6 +167,17 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
 
   // Two frames bridged, not more: at 4 (2026-11-16) Claude's stray frames in the flights joined
   // IMG_4954's last three contacts into 652-675 and 681-703, and the board became the penultimate.
+  const n = nameEvents(seen, guess, fps);
+  return {
+    ...n, coarse, windows: { T: seen.T, L: seen.L }, model, ms: Date.now() - t0,
+    // what Claude answered, kept so tools/bench.mjs can replay the choice above with new code
+    seen: { ground: seen.ground, sand: seen.sand, runThrough: seen.runThrough },
+  };
+}
+
+// From Claude's ground frames and sand frame to the named key frames. Pure, so the benchmark can
+// replay it on stored answers: seen { ground, sand, runThrough, T }, guess as for locateEvents.
+export function nameEvents(seen, guess, fps) {
   const runs = groundRuns(seen.ground);
   const at = seen.T === guess.TD && guess.TO != null ? Math.round((guess.TD + guess.TO) / 2) : seen.T;
   const c = pickContacts(runs, guess.contacts ?? [], at, fps);
@@ -164,8 +188,14 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
   const checked = checkEvents(named, fps, { claudeTake: c.take?.from === 'claude' });
   // A run-through (pop-up) is the same jump up to the flight, then the athlete runs out of the pit.
   if (checked.events.TD != null) checked.events.kind = seen.runThrough ? 'runthrough' : 'jump';
-  return {
-    ...checked, coarse, runs, edges: { take: c.take?.from, pen: c.pen?.from, third: c.third?.from },
-    windows: { T: seen.T, L: seen.L }, model, ms: Date.now() - t0,
-  };
+  return { ...checked, runs, edges: { take: c.take?.from, pen: c.pen?.from, third: c.third?.from } };
+}
+
+// What locateEvents gets from the pose track: where it thinks the jump is and its contacts. Runs
+// before the runway is measured; without a jump its contacts still give Claude's runs their edges
+// (Miška's IMG_4940, 2026-11-16: the horizontal-speed floor failed it and no contacts reached Claude).
+export function locateGuess(result, sex, ts, opts = {}) {
+  const g = analyzeJump(result, sex, ts, { ...opts, preGround: true });
+  return g.error ? { contacts: g.contacts?.length ? g.contacts : poseContacts(result) }
+    : { TD: g.takeoff.td, TO: g.takeoff.to, landing: g.landing, contacts: g.contacts };
 }

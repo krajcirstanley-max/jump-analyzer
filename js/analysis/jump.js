@@ -355,6 +355,12 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // Gravity-scale clip (no board): a typed Freelap time still gives the approach and the hold.
   const airOnly = sUse && !(ground && !ground.error) ? { ...air, approach: 10 / sUse, speedKeep: air.speedLast > 0 ? (air.speedLast * sUse / 10 - 1) * 100 : NaN } : air;
   const flight = ground && !ground.error ? withGround(air, ground) : airOnly;
+  // Faster than any human jump (2026-11-17, a rerun of the sprint IMG_4866: the server named a
+  // "take-off" mid-stride and it read vy 7.0, 66 m/s, a 5.8 m apex). Every checked jump leaves the
+  // board at vy 1.6-2.7 and 6.6-8.6 m/s, so 4.5 and 13 sit far above any jump.
+  if (!flight.error && ((flight.angleOk || flight.apexOk) && flight.vyTO > 4.5 || flight.vxTO > 13)) {
+    return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: flight.vxTO, vy: flight.vyTO } };
+  }
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
   // landing to measure, and the flight ends early, so flight time and the distance estimate go too.
   const runThrough = result.events?.kind === 'runthrough';

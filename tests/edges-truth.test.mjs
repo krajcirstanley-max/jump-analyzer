@@ -93,11 +93,16 @@ test('Claude\'s pieces of one contact become one; an unbacked piece in the air i
   const pose = [{ td: 469, to: 483 }, { td: 502, to: 517 }, { td: 529, to: 531 }, { td: 546, to: 550 }];
   const c = pickContacts(runs, pose, 548, 120);
   assert.deepEqual([c.pen.td, c.pen.to, c.pen.from], [502, 517, 'pose']);
-  // the take-off is a piece of 529-547; the app finds its edges on the raw foot (530/547)
-  assert.deepEqual([c.take.td, c.take.to, c.take.from], [536, 541, 'claude']);
+  // the two unbacked pieces of the 529-547 take-off join; the app finds its edges on the raw foot
+  assert.deepEqual([c.take.td, c.take.to, c.take.from], [528, 541, 'claude']);
   assert.deepEqual(checkEvents({ penTD: 502, penTO: 517, TD: 536, TO: 541 }, 120, { claudeTake: true }).rejected, []);
   // two stray frames in each flight must not join IMG_4954's last contacts (pose 668-683, 693-710)
   const c2 = pickContacts([{ td: 652, to: 656 }, { td: 668, to: 675 }, { td: 681, to: 687 }, { td: 696, to: 703 }],
     [{ td: 639, to: 652 }, { td: 668, to: 683 }, { td: 693, to: 710 }], 702, 120);
   assert.deepEqual([c2.pen.td, c2.pen.to, c2.take.td, c2.take.to], [668, 683, 693, 710]);
+});
+
+test('a sprint the server read as a jump stays no jump (rerun of IMG_4866: vy 7, 66 m/s)', { skip: !existsSync(new URL('./real/bench_run2_4866.json', import.meta.url)) }, () => {
+  const r = JSON.parse(readFileSync(new URL('./real/bench_run2_4866.json', import.meta.url))).result;
+  assert.equal(analyzeJump(r, 'female', r.ts, { height: 171 }).error, 'V zázname sa nenašiel odraz.');
 });

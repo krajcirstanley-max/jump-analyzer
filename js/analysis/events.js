@@ -304,7 +304,10 @@ export function keyFrames(track, contacts, fps, sex = 'male', opts = {}) {
   // A sand frame from the server that gravity can't reach is dropped. With no sand frame, the
   // feet's stop counts only within 0.05 s of gravity's frame, which stands otherwise: searched
   // 0.1 s wide it picked 952 for 973 on IMG_4951; IMG_2674's clean stop (838) is 2 frames off.
-  if (named != null && physLanding != null && Math.abs(named - physLanding) > near) named = null;
+  // Claude's sand frame, when wrong, has been early (IMG_4954 778 for 800, a rerun of IMG_4677 780
+  // for 799: feet over the sand before they touch it), and gravity's frame was never more than 2
+  // frames late on 11 checked jumps (up to 13 early), so the frame may sit 0.1 s before gravity's.
+  if (named != null && physLanding != null && (named < physLanding - Math.round(0.1 * fps) || named > physLanding + near)) named = null;
   let landing = named ?? physLanding;
   const tight = Math.round(0.05 * fps);
   if (apex != null) {
