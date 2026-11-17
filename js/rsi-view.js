@@ -33,16 +33,23 @@ function record(r, file) {
 }
 const bestOf = rec => (rec.jumps ?? []).reduce((b, j) => (!b || j.rsi > b.rsi ? j : b), null);
 
+// The athlete's own box, typed once (Claude's estimates of one 30 cm box ran 15-45 cm, 2026-11-17).
+const BOX_KEY = who => `rsiBox:${who}`;
+export function lastBox(who) { try { const v = +localStorage.getItem(BOX_KEY(who)); return v >= 5 && v <= 120 ? v : null; } catch { return null; } }
+function rememberBox(who, cm) { try { localStorage.setItem(BOX_KEY(who), String(cm)); } catch {} }
+// An estimate from an older analysis is not shown: it was off by up to 15 cm.
+const boxShown = r => (r.boxCm && r.boxFrom !== 'estimate' ? r.boxCm : null);
+
 function tile(label, value, sub = '') { return `<div><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`; }
 
 function resultHtml(rec) {
   const b = bestOf(rec), st = rec.standing?.[0];
   const odd = rec.exercise === 'other' ? '<p class="note">Toto nevyzerá ako drop jump, odrazy ani výskok. Čísla nižšie sú len z dotykov, ktoré som našiel.</p>' : '';
-  const head = odd + `<h2>${esc(NAMES[rec.exercise] ?? rec.exercise)} <small>${esc(LEG[rec.leg] ?? '')}${rec.boxCm ? ` · debna ${rec.boxFrom === 'estimate' ? '≈ ' : ''}${rec.boxCm} cm` : ''} · ${rec.fps} fps</small></h2>`;
+  const head = odd + `<h2>${esc(NAMES[rec.exercise] ?? rec.exercise)} <small>${esc(LEG[rec.leg] ?? '')}${boxShown(rec) ? ` · debna ${boxShown(rec)} cm` : ''} · ${rec.fps} fps</small></h2>`;
   // RSI is jump height / contact time, the box never enters it (Stanley). Its height is only
   // noted: read off the video, or typed in when the video could not show it.
-  const box = rec.askBox && !rec.boxCm ? `<p class="note">Výšku debničky som z videa nevedel odhadnúť. Dopíš ju:</p>
-    <label class="measured"><span>Výška debničky</span><input data-rsi-box type="text" inputmode="numeric" autocomplete="off" placeholder="napr. 30"><span>cm</span></label>` : '';
+  const box = rec.askBox ? `${rec.boxCm ? '' : '<p class="note">Výšku debničky z videa neviem. Dopíš ju raz, ďalšie skoky si ju pamätajú:</p>'}
+    <label class="measured"><span>Výška debničky</span><input data-rsi-box type="text" inputmode="numeric" autocomplete="off" placeholder="napr. 30" value="${rec.boxCm ?? ''}"><span>cm</span></label>` : '';
   if (!b && rec.noRebound) {
     return `${head}${box}<p class="banner warn">Vo videu je zoskok a dopad, ale odraz po ňom nie je vidieť: video končí skôr, alebo po dopade nebol výskok. RSI sa bez odrazu nedá vyrátať. Natoč aj výskok po dopade.</p>`;
   }
@@ -91,7 +98,7 @@ function historyHtml(list) {
     const vals = rs.map(r => r.best5?.rsi ?? bestOf(r)?.rsi).filter(Number.isFinite);
     const items = rs.slice(-8).reverse().map(r => {
       const b = bestOf(r), d = new Date(r.at);
-      return `<li><span>${d.getDate()}. ${d.getMonth() + 1}.${r.boxCm ? ` · ${r.boxCm} cm` : ''}</span><b>${b ? num(r.best5?.rsi ?? b.rsi, 2) : `${num(r.standing?.[0]?.heightCm, 1)} cm`}</b><small>${b ? `${r.best5?.contactMs ?? b.contactMs} ms` : 'výška'}</small></li>`;
+      return `<li><span>${d.getDate()}. ${d.getMonth() + 1}.${boxShown(r) ? ` · ${boxShown(r)} cm` : ''}</span><b>${b ? num(r.best5?.rsi ?? b.rsi, 2) : `${num(r.standing?.[0]?.heightCm, 1)} cm`}</b><small>${b ? `${r.best5?.contactMs ?? b.contactMs} ms` : 'výška'}</small></li>`;
     }).join('');
     const spark = vals.length > 1 ? (() => { const lo = Math.min(...vals), hi = Math.max(...vals), w = 120, h = 28;
       const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * w).toFixed(1)},${(h - 3 - ((v - lo) / (hi - lo || 1)) * (h - 6)).toFixed(1)}`).join(' ');
@@ -320,7 +327,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     const cm = Math.round(parseFloat(String(e.target.value).replace(',', '.')));
     if (!(cm >= 5 && cm <= 120)) { e.target.value = ''; return; }
     const { rec, who } = current;
-    rec.boxCm = cm; rec.boxFrom = 'typed';
+    rec.boxCm = cm; rec.boxFrom = 'typed'; rememberBox(who, cm);
     save(who, load(who).map(r => (r.id === rec.id ? rec : r)));
     show(rec, who); renderHistory();
   });
@@ -405,6 +412,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       const old = load(pwho).find(r => r.id === pid);
       const rec = { ...record(result, file), id: pid, at: old?.at ?? new Date().toISOString(), hasClip: !!old?.hasClip };
       const id = result.who?.id in athletes ? result.who.id : pwho;
+      if (rec.askBox && !rec.boxCm && lastBox(id)) { rec.boxCm = lastBox(id); rec.boxFrom = 'typed'; }
       rememberAthlete(id);
       // the pending record becomes the result, under whoever the server saw
       save(pwho, load(pwho).filter(r => r.id !== pid));
@@ -471,7 +479,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       const name = NAMES[rec.exercise] ?? rec.exercise, leg = rec.leg && rec.leg !== 'both' && rec.leg !== 'lr' ? ` ${LEG[rec.leg] ?? ''}` : '';
       return {
         kind: 'rsi', id: rec.id, who, at: Date.parse(rec.at),
-        title: `${athletes[who]?.name ?? ''} · ${name}${leg}${rec.boxCm ? ` ${rec.boxCm} cm` : ''}`,
+        title: `${athletes[who]?.name ?? ''} · ${name}${leg}${boxShown(rec) ? ` ${boxShown(rec)} cm` : ''}`,
         sub: b ? `zem ${num((rec.best5?.contactMs ?? b.contactMs) / 1000, 3)} · let ${num(b.flightMs / 1000, 3)}` : st ? `let ${num(st.flightMs / 1000, 3)} s` : '',
         value: b ? num(rec.best5?.rsi ?? b.rsi, 2) : st ? num(st.heightCm, 1) : '–', valueSub: b ? 'RSI' : st ? 'cm' : '',
       };

@@ -74,6 +74,37 @@ export function pickAthlete(tracks, W, H) {
   return best;
 }
 
+// Joins to the athlete's track the tracks that pick up where it was lost, within maxGap frames
+// and about one body width to the side: a drop jump filmed low loses the head out of the top of
+// the picture in the air, the detector loses the person, and the landing came back as a new
+// track that the athlete pick left out (2026-11-17, Stanley 15:18: no landing, no RSI).
+export function rejoinTracks(athlete, tracks, maxGap) {
+  const pts = athlete.points;
+  for (;;) {
+    const end = pts[pts.length - 1];
+    const next = tracks
+      .filter(t => t !== athlete && t.points[0].frame > end.frame && t.points[0].frame - end.frame <= maxGap)
+      .filter(t => Math.abs(cx(t.points[0].box) - cx(end.box)) < 0.6 * boxH(end.box)
+        && Math.abs(Math.log(boxH(t.points[0].box) / boxH(end.box))) < Math.log(2.5))
+      .sort((a, b) => a.points[0].frame - b.points[0].frame)[0];
+    if (!next) break;
+    pts.push(...next.points);
+    tracks.splice(tracks.indexOf(next), 1);
+  }
+  // and the other way, when the pick was the landing part
+  for (;;) {
+    const start = pts[0];
+    const prev = tracks
+      .filter(t => t !== athlete && t.points.at(-1).frame < start.frame && start.frame - t.points.at(-1).frame <= maxGap)
+      .filter(t => Math.abs(cx(t.points.at(-1).box) - cx(start.box)) < 0.6 * boxH(start.box)
+        && Math.abs(Math.log(boxH(t.points.at(-1).box) / boxH(start.box))) < Math.log(2.5))
+      .sort((a, b) => b.points.at(-1).frame - a.points.at(-1).frame)[0];
+    if (!prev) return athlete;
+    pts.unshift(...prev.points);
+    tracks.splice(tracks.indexOf(prev), 1);
+  }
+}
+
 // Constant-velocity guess of where the athlete's box will be at `frame`,
 // from the two nearest known points on the side we're extending from.
 export function predictBox(points, frame) {

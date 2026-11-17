@@ -50,7 +50,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
   const meta = probe(clip);
   const frames = openFrames(clip, meta);
   try {
-    const res = await runPipeline(frames, engine, { onProgress });
+    const res = await runPipeline(frames, engine, { onProgress, rejoinS: 1.2 });
     if (res.error) return { error: 'Vo videu som nenašiel športovca. Skontroluj, či sú v zábere celé nohy.' };
     const wire = toWire(res, meta.ts);
     // The phone may be hand-held: follow its motion over the background, then read the feet in
@@ -126,10 +126,16 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     // Claude's name wins, 'other' included (a clip that is not a drill); without Claude, the pattern
     // A row of rebounds is hops whatever the picture looked like: Claude called hops over cones,
     // filmed from the side, "other" (IMG_2213, 11 rebounds), and the screen then said it was no drill.
-    const exercise = named?.exercise === 'other' && rsi.jumps.length >= 3 ? rsi.kind : named?.exercise ?? rsi.kind;
-    const usesBox = named?.box ?? Boolean(rsi.boxEstCm);
+    // A drop off the box that the timing shows (stand, 0.06-0.23 s down, rebound, flight) wins over
+    // a name without a box: filmed low, Claude saw legs and called Stanley's drop jump a pogo and
+    // Miška's a row of hops (2026-11-17).
+    const dropSeen = String(rsi.kind).startsWith('drop_jump') && !String(named?.exercise ?? '').startsWith('drop_jump');
+    const exercise = dropSeen || (named?.exercise === 'other' && rsi.jumps.length >= 3) ? rsi.kind : named?.exercise ?? rsi.kind;
+    const usesBox = dropSeen || (named?.box ?? Boolean(rsi.boxEstCm));
     // The box height read off the video (printed label or estimate), in cm, unless the app sent one.
-    const boxSeen = usesBox && named?.boxCm > 0 ? { cm: Math.round(named.boxCm), from: named.boxFrom } : null;
+    // Only a printed height counts: Claude's estimates of the same 30 cm box ran from 15 to 45 cm
+    // (2026-11-17), so without a label the app asks once and remembers the athlete's box.
+    const boxSeen = usesBox && named?.boxCm > 0 && named.boxFrom === 'label' ? { cm: Math.round(named.boxCm), from: named.boxFrom } : null;
     const ev = rsi.events ?? [];
     const noRebound = !rsi.jumps?.length && ev.some(e => e.onBox) && ev.some(e => !e.onBox && e.flightAfter == null);
     const result = {

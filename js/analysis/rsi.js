@@ -128,6 +128,13 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   const track = rawTrack(result, cam);
   if (!track.length) return { error: 'Vo videu som nenašiel športovca.' };
   const fps = (ts.length - 1) / (ts.at(-1) - ts[0]);
+  // Only the legs in the picture (the phone on the floor close to the box, 2026-11-17: three of
+  // Stanley's clips): the pose model then puts the shoulders on the knees and the feet wander,
+  // and the numbers came out as 0.03 RSI or no jump at all. The hips must be in the picture.
+  const seen = track.filter(Boolean), H = result.H;
+  // (the model still places hips there, at the top edge or above it: y under 3 % of the height)
+  const hipIn = kp => ['lhip', 'rhip'].every(j => { const p = at(kp, j); return p && p[1] > 0.03 * H && p[1] < H; });
+  if (H > 0 && seen.length && seen.filter(hipIn).length < 0.5 * seen.length) return { error: 'V zábere sú len nohy. Natoč celú postavu, aspoň od pása po chodidlá, aj s debničkou a miestom dopadu.', framing: 'legs' };
   const pxM = scaleAt(track, sex, height);
   if (!(pxM > 0)) return { error: 'Na videu nevidno celé nohy.' };
   const feet = { l: med3(track.map(kp => footLow(kp, 'l'))), r: med3(track.map(kp => footLow(kp, 'r'))) };
@@ -170,11 +177,30 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // On the box: standing there (300 ms or more) at the start, with the next contact a step lower.
   // Not "highest level in the clip": from the front a landing nearer the phone sits lower in the
   // picture, and the real floor contact then looked like a box (IMG_4186, IMG_3521).
+  contacts.forEach(c => { c.ms = ((c.to - c.td + 1) / fps) * 1000; });
+  const gap = (a, b) => ((b.td - a.to - 1) / fps) * 1000;
   contacts.forEach((c, k) => {
-    c.ms = ((c.to - c.td + 1) / fps) * 1000;
-    const next = contacts[k + 1];
-    c.onBox = !noBox && c.ms >= 300 && !!next && next.level - c.level > STEP && (k === 0 || contacts[k - 1].onBox);
+    const next = contacts[k + 1], after = contacts[k + 2];
+    // A clip that starts with the athlete already standing still counts what it shows of the stand.
+    const stood = c.ms >= 300 || (k === 0 && c.td <= 2 && c.ms >= 150);
+    const level = !noBox && stood && !!next && next.level - c.level > STEP;
+    // Off a box by the timing alone: a stand, a short drop (stepping off 30 cm takes 0.13-0.15 s
+    // here, a jump from the floor is 0.35 s or more in the air), then a rebound with a real flight
+    // after it. A CMJ has no flight before its take-off. From a low phone the box top and the floor
+    // in front of it sit at nearly the same height in the picture, and Claude, seeing only legs,
+    // said "no box" (2026-11-17: Stanley's 15:17 drop jump came out as a pogo, Miška's 15:01 as a CMJ).
+    const byFlight = stood && !!next && !!after && gap(c, next) >= 60 && gap(c, next) <= 230 && next.ms < 600 && gap(next, after) >= 300;
+    c.onBox = (level || byFlight) && (k === 0 || contacts[k - 1].onBox);
+    c.byFlight = c.onBox && byFlight;
   });
+  // Stepping off, the leading foot hangs still in front of the box for a moment before the drop
+  // (Miška 2026-11-17 15:02, frames 230-252, one foot, then 0.14 s "in the air" and both feet
+  // land): no contact, the drop goes on to the next one. A real single-leg landing off the box
+  // (IMG_4186) jumps up after it, it is not followed by a two-foot landing a moment later.
+  for (let k = 1; k < contacts.length - 1; k++) {
+    const p = contacts[k - 1], c = contacts[k], nx = contacts[k + 1];
+    if (p.onBox && c.td - p.to <= 2 && c.feet.length === 1 && nx.feet.length === 2 && gap(c, nx) < 200) { contacts.splice(k, 1); k--; }
+  }
   // Flights between contacts, and what each contact did: reactive (air before and after, short),
   // a standing start or finish, a drop from the box.
   const events = contacts.map((c, k) => {
@@ -212,8 +238,9 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // standing on something 10-100 cm high at the start; more than that is the athlete moving
   // towards or away from the phone, not a box
   const firstUp = events[0]?.onBox && events[0].ms > 300 ? ((floor - events[0].level) / pxM) * 100 : null;
-  const startsOnBox = firstUp != null && firstUp >= 10 && firstUp <= 100;
-  const boxEstCm = startsOnBox ? firstUp : null;
+  const levelBox = firstUp != null && firstUp >= 10 && firstUp <= 100;
+  const startsOnBox = levelBox || !!events[0]?.byFlight;
+  const boxEstCm = levelBox ? firstUp : null;
   const singleLeg = jumps.length && jumps.every(j => j.feet.length === 1);
   const kind = startsOnBox && jumps.length ? (singleLeg ? 'drop_jump_single' : 'drop_jump')
     : jumps.length >= 3 ? 'repeated_hops'

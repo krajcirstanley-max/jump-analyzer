@@ -4,7 +4,7 @@
 //
 // frames: { N, W, H, fps, get(i) -> rgba, sequential(from, to, step) -> async iterable of { i, rgba } }
 // engine: PoseEngine with 'detector', fast and accurate models loaded.
-import { linkTracks, pickAthlete, predictBox, searchRoi, bestMatch, interpolateBoxes, boxFromKeypoints, boxH, iou } from './tracker.js';
+import { linkTracks, pickAthlete, rejoinTracks, predictBox, searchRoi, bestMatch, interpolateBoxes, boxFromKeypoints, boxH, iou } from './tracker.js';
 import { meanScore } from './engine.js';
 import { MODELS } from './models.js';
 import { cleanTrack } from './clean.js';
@@ -30,8 +30,12 @@ export async function runPipeline(frames, engine, opts = {}) {
     samples.push({ frame: i, boxes: await engine.detect(rgba, W, H) });
     progress('Finding the jumper', i, N);
   }
-  const athlete = pickAthlete(linkTracks(samples), W, H);
+  const tracks = linkTracks(samples);
+  const athlete = pickAthlete(tracks, W, H);
   if (!athlete) return { error: 'No person found in this clip.' };
+  // opts.rejoinS: tracks that pick up within that many seconds where the athlete was lost are
+  // the athlete (rejoinTracks). Only the RSI analysis asks for it; jumps and sprints are unchanged.
+  if (o.rejoinS) rejoinTracks(athlete, tracks, o.rejoinS * (frames.fps || 30));
   const points = athlete.points.map(p => ({ frame: p.frame, box: p.box }));
 
   // Extend the track both ways by searching around the predicted position. This
