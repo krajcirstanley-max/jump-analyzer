@@ -55,6 +55,12 @@ const HAND = {
   1794925090410: [376, 403, 485],  // no landing before: the head left the picture in the air (needs the rejoined pose)
   1794924142275: [270, 300, null], // Miška, the stepping foot had counted as a rebound
   1794932384646: [53, 82, null],   // Miška, had read as hops
+  // only the legs in the picture, phone close and following (the way Stanley films): the stand on
+  // the box came in pieces, a 0.03 RSI "rebound" on it, touchdowns 3-4 frames early
+  1794929272459: [239, 262, 347],
+  1794932202395: [309, 331, 411],
+  1794932274606: [216, 245, 328],
+  1794924114112: [131, 157, 227],  // Miška, legs at the top edge, the landing in the last frames
 };
 
 test('gym 2026-11-17: every drop jump is a drop jump off the box, edges within 2 frames', { skip: !have }, () => {
@@ -75,12 +81,5 @@ test('gym 2026-11-17: Miška\'s other drop jumps are drop jumps too', { skip: !h
     const r = replay(id);
     assert.equal(r.kind, 'drop_jump', `${id} kind ${r.kind}`);
     assert.equal(r.jumps.length, 1, id);
-  }
-});
-
-test('gym 2026-11-17: only the legs in the picture says so instead of numbers', { skip: !have }, () => {
-  for (const id of ['1794929272459', '1794932202395', '1794932274606', '1794924114112']) {
-    const r = replay(id);
-    assert.equal(r.framing, 'legs', `${id}: ${r.error ?? r.kind}`);
   }
 });

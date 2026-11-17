@@ -128,13 +128,6 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   const track = rawTrack(result, cam);
   if (!track.length) return { error: 'Vo videu som nenašiel športovca.' };
   const fps = (ts.length - 1) / (ts.at(-1) - ts[0]);
-  // Only the legs in the picture (the phone on the floor close to the box, 2026-11-17: three of
-  // Stanley's clips): the pose model then puts the shoulders on the knees and the feet wander,
-  // and the numbers came out as 0.03 RSI or no jump at all. The hips must be in the picture.
-  const seen = track.filter(Boolean), H = result.H;
-  // (the model still places hips there, at the top edge or above it: y under 3 % of the height)
-  const hipIn = kp => ['lhip', 'rhip'].every(j => { const p = at(kp, j); return p && p[1] > 0.03 * H && p[1] < H; });
-  if (H > 0 && seen.length && seen.filter(hipIn).length < 0.5 * seen.length) return { error: 'V zábere sú len nohy. Natoč celú postavu, aspoň od pása po chodidlá, aj s debničkou a miestom dopadu.', framing: 'legs' };
   const pxM = scaleAt(track, sex, height);
   if (!(pxM > 0)) return { error: 'Na videu nevidno celé nohy.' };
   const feet = { l: med3(track.map(kp => footLow(kp, 'l'))), r: med3(track.map(kp => footLow(kp, 'r'))) };
@@ -163,6 +156,19 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     contacts.push({ td: i, to: j, level: Math.max(...lv), feet: [...used].sort().join('') });
     i = j;
   }
+  // A flight lifts the feet. Standing still on the box, filmed close with only the legs in the
+  // picture and the phone moving, the foot points wander and the stillness rule broke the stand into
+  // pieces with "flights" of 0.06-0.39 s between them, during which the lowest foot never rose
+  // (2026-11-17, Stanley 17:17: a 0.03 RSI "rebound" on the box). Pieces at one level with the feet
+  // under 2.5 cm off it all the way between them are one contact. Even a 0.15 s hop lifts them 3 cm.
+  const lowY = i => Math.max(feet.l[i], feet.r[i]);
+  for (let k = contacts.length - 2; k >= 0; k--) {
+    const a = contacts[k], b = contacts[k + 1];
+    if (Math.abs(a.level - b.level) > STEP || b.td - a.to < 2) continue;
+    let lift = 0, known = true;
+    for (let i = a.to + 1; i < b.td; i++) { const y = lowY(i); if (!Number.isFinite(y)) { known = false; break; } lift = Math.max(lift, Math.max(a.level, b.level) - y); }
+    if (known && lift < 0.025 * pxM) { a.to = b.to; a.level = Math.max(a.level, b.level); a.feet = [...new Set((a.feet + b.feet).split(''))].sort().join(''); contacts.splice(k + 1, 1); }
+  }
   // A short "contact" well above the ground on both sides of it is the foot hanging in the air
   // (a CMJ with the feet drawn up, 2026-11-14): nobody lands 10 cm up and jumps back down in
   // under 0.3 s. A box is stood on longer, and is not higher than the contact before it.
@@ -170,7 +176,48 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     const c = contacts[k], up = 0.10 * pxM;
     if ((c.to - c.td + 1) / fps < 0.3 && c.level < contacts[k - 1].level - up && c.level < contacts[k + 1].level - up) contacts.splice(k, 1);
   }
+  // The same at the top of the last flight, when the clip ends before a landing run is long enough
+  // to count (Miška 15:01, 114112: the feet paused at the apex 184-196, the landing is at 227 of 228).
+  { const k = contacts.length - 1, c = contacts[k], up = 0.10 * pxM;
+    if (k >= 1 && (c.to - c.td + 1) / fps < 0.3 && c.level < contacts[k - 1].level - up) contacts.splice(k, 1); }
+  // A landing in the last few frames: after a rebound off the box, the feet go up and come back to
+  // the floor before the clip ends, too briefly for the stillness rule (60 ms).
+  {
+    const c = contacts.at(-1), p = contacts.at(-2);
+    const before = p ? (c.td - p.to - 1) / fps : 0;
+    if (c && p && before >= 0.06 && before <= 0.23 && (c.to - c.td + 1) / fps < 0.6 && c.to < n - 1) {
+      // In the phone-motion-corrected picture a hand-held phone shifts the floor by a few cm over the
+      // flight (114112: rebound level 852 px, the feet on the floor at 921-932), so the level only says
+      // the feet are low again; the touchdown is where their fall stops: the first frame that drops
+      // under half of the three frames before it.
+      let up = false, land = null;
+      for (let i = c.to + 1; i < n; i++) {
+        const y = lowY(i);
+        if (!Number.isFinite(y)) continue;
+        if (y < c.level - 0.05 * pxM) { up = true; continue; }
+        if (!up || i < 4) continue;
+        const v = [1, 2, 3].map(q => lowY(i - q) - lowY(i - q - 1)), fall = median(v), now = y - lowY(i - 1);
+        if (fall > PX / 2 && now < 0.5 * fall) { land = i; break; }
+      }
+      if (land != null && (land - c.to - 1) / fps >= 0.3) contacts.push({ td: land, to: n - 1, level: c.level, feet: c.feet, atEnd: true });
+    }
+  }
   if (!contacts.length) return { error: 'Na videu som nenašiel žiadny dotyk so zemou.' };
+  // The run grows to every frame within 2 cm of its level, and filmed close (only the legs, the
+  // phone moving with the athlete) that took in the last frames of the fall: touchdowns 3-4 frames
+  // before the shoe was down (2026-11-17, 932274606: 212 for 216, 929272459: 236 for 239). After a
+  // flight the contact starts where the fall stops: the first frame whose drop is under half of the
+  // three before it. (With a still phone the toe edges set the frames later anyway: refineEdges.)
+  for (let k = 1; k < contacts.length; k++) {
+    const c = contacts[k], p = contacts[k - 1];
+    if (c.td - p.to < 6 || c.to - c.td < 6) continue;
+    for (let i = c.td, moved = 0; moved < 6 && i < c.to - 3; i++, moved++) {
+      const fall = median([1, 2, 3].map(q => lowY(i - q + 1) - lowY(i - q)));
+      const now = lowY(i + 1) - lowY(i);
+      if (!(fall > PX / 2) || !(now >= 0.5 * fall)) { c.td = i; break; }
+      c.td = i + 1;
+    }
+  }
 
   // The floor is the lowest level (largest y) used by contacts; a level well above it is a box.
   const floor = Math.max(...contacts.map(c => c.level));
@@ -190,8 +237,12 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     // in front of it sit at nearly the same height in the picture, and Claude, seeing only legs,
     // said "no box" (2026-11-17: Stanley's 15:17 drop jump came out as a pogo, Miška's 15:01 as a CMJ).
     const byFlight = stood && !!next && !!after && gap(c, next) >= 60 && gap(c, next) <= 230 && next.ms < 600 && gap(next, after) >= 300;
-    c.onBox = (level || byFlight) && (k === 0 || contacts[k - 1].onBox);
+    // The stand may come in pieces (close-up of the legs, a phone that moves): by the timing it
+    // still counts when every piece before it is at the same level, so the athlete never left the box.
+    const sameStand = contacts.slice(0, k).every(p => Math.abs(p.level - c.level) <= 1.5 * STEP);
+    c.onBox = (level && (k === 0 || contacts[k - 1].onBox)) || (byFlight && (k === 0 || contacts[k - 1].onBox || sameStand));
     c.byFlight = c.onBox && byFlight;
+    if (c.byFlight) for (let q = 0; q < k; q++) { contacts[q].onBox = true; contacts[q].byFlight = true; }
   });
   // Stepping off, the leading foot hangs still in front of the box for a moment before the drop
   // (Miška 2026-11-17 15:02, frames 230-252, one foot, then 0.14 s "in the air" and both feet
