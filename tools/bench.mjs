@@ -17,7 +17,7 @@ const args = process.argv.slice(2), server = args.includes('--server');
 const only = args.filter(a => /^\d+$/.test(a));
 const ids = Object.keys(T.clips).filter(id => !only.length || only.includes(id));
 
-const BASE = 'https://krajcir-stanley--jump-analyzer-web.eu-west.modal.run';
+const BASE = 'https://dexis98--jump-analyzer-web.eu-west.modal.run';
 async function analyse(id) {
   const tok = readFileSync(new URL('server/.app-tokens.txt', root), 'utf8').match(/stanley:\s*(\S+)/)?.[1];
   if (!tok) throw new Error('no app token');
