@@ -211,7 +211,7 @@ export function sprintFromMotion({ motion, ts, fps, o = SPRINT }) {
 export const SANE = { freq: [3.6, 5.6], length: [0.85, 1.32], height: 1.8 };
 export const STEP_RANGE = { contact: [0.07, 0.25], flight: [0.05, 0.22], step: [0.17, 0.33], startContact: 0.32, startStep: 0.42, startFlight: 0.02, jump: 0.25, minRun: 3 };
 export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
-  const contactOk = (s, i) => s && s.contact >= o.contact[0] && s.contact <= (accel && i < 3 ? o.startContact : o.contact[1]);
+  const contactOk = (s, i) => s && (s.estContact || (s.contact >= o.contact[0] && s.contact <= (accel && i < 3 ? o.startContact : o.contact[1])));
   const ok = (s, i) => {
     const early = accel && i < 3, next = steps[i + 1];
     if (!contactOk(s, i)) return false;
@@ -219,7 +219,7 @@ export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
     if (next && !contactOk(next, i + 1)) return false;
     if (s.step == null) return false;
     if (!(s.step >= o.step[0] && s.step <= (early ? o.startStep : o.step[1]))) return false;
-    if (!(s.flight >= (early ? o.startFlight : o.flight[0]) && s.flight <= o.flight[1])) return false;
+    if (!s.estFlight && !(s.flight >= (early ? o.startFlight : o.flight[0]) && s.flight <= o.flight[1])) return false;
     return !next || next.foot !== s.foot;
   };
   const runs = [];
@@ -233,6 +233,38 @@ export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
   if (cur.length) runs.push(cur);
   // seg: which unbroken run of steps a step belongs to; a gap between two is never one step
   return runs.filter(r => r.length >= o.minRun).flatMap((r, seg) => r.map(x => ({ ...x, seg })));
+}
+
+// A touchdown read a few frames off: a "contact" under 0.07 s or a step 25 % off its neighbour, the one
+// before or after it off the other way, the two together a normal pair (2026-11-15: Stanley 13:06 at 7.92 s, Miška
+// 13:11 at 5.43 s). cleanSteps dropped both, the run broke in two and the second 10 m had no steps
+// and no metres. The touchdowns either side are good, so the pair's time is right: each step gets
+// half of it. The flight before the moved touchdown and its contact are estimates (estFlight,
+// estContact): kept out of the averages and not shown.
+export function mendLateTouchdowns(steps, o = STEP_RANGE) {
+  const out = steps.map(s => ({ ...s }));
+  const typical = i => {
+    const v = out.slice(Math.max(0, i - 6), i + 8).filter(s => s.step != null && s.contact >= o.contact[0] && s.step >= o.step[0] && s.step <= o.step[1]).map(s => s.step);
+    return v.length >= 4 ? median(v) : null;
+  };
+  for (let i = 0; i + 2 < out.length; i++) {
+    const a = out[i], b = out[i + 1], c = out[i + 2];
+    if (a.step == null || b.step == null || a.estFlight || b.estContact || a.foot === b.foot || b.foot === c.foot) continue;
+    const m = typical(i);
+    if (!m) continue;
+    const near = x => Math.abs(x - m) <= 0.1 * m;
+    // both steps normal, only the contact between them short: the touchdowns are right, the toe-off
+    // was read early. The step times stand; that contact and its flight are not shown.
+    if (b.contact < o.contact[0] && near(a.step) && near(b.step)) { out[i + 1] = { ...b, estContact: true, estFlight: true }; continue; }
+    const lo = Math.min(a.step, b.step), half = (a.step + b.step) / 2;
+    if (!(b.contact < o.contact[0] && a.step > b.step) && !(a.step - b.step > o.jump * lo || b.step - a.step > o.jump * lo)) continue;
+    if (!near(half)) continue;
+    const td = +(a.td + half).toFixed(3);
+    if (td <= a.to || b.to - td < o.contact[0]) continue;
+    out[i] = { ...a, step: r3(half), flight: r3(td - a.to), estFlight: true };
+    out[i + 1] = { ...b, td, contact: r3(b.to - td), step: r3(half), estContact: true };
+  }
+  return out;
 }
 
 // Metres a Freelap run covered: 10 per leg. A run that kept its lap alone (its splits were not
@@ -358,7 +390,7 @@ function flyZone(full, lap) {
 const sidesOf = steps => {
   const side = foot => {
     const m = steps.filter(s => s.foot === foot);
-    return { n: m.length, contact: r3(mean(m.map(s => s.contact))), flight: r3(mean(m.filter(s => s.flight != null).map(s => s.flight))) };
+    return { n: m.length, contact: r3(mean(m.filter(s => !s.estContact).map(s => s.contact))), flight: r3(mean(m.filter(s => s.flight != null && !s.estFlight).map(s => s.flight))) };
   };
   return { l: side('l'), r: side('r') };
 };
@@ -390,7 +422,7 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
   const k0 = mode ?? (run ? modeOfRun(run) : video.modeGuess);
   const kind = k0 === 'rozbeh' ? 'fly' : k0;   // a run-up is analysed like a fly: steady steps at the end
   const raw = video.steps.filter(s => s.contact != null);
-  const all = cleanSteps(raw, { accel: kind === 'accel' && !!video.start });
+  const all = cleanSteps(kind === 'fly' ? mendLateTouchdowns(raw) : raw, { accel: kind === 'accel' && !!video.start });
   const legs = runMetres(run) ? run.legs : [];
   const out = { kind, distance: legs.length ? legs.length * 10 : null, legs, who, dropped: raw.length - all.length };
   if (all.length < 3) return { ...out, steps: [], tooFew: true, legStats: legs.map(l => ({ time: l, speed: r3(10 / l), stepLength: null })), sides: sidesOf([]) };
@@ -417,8 +449,8 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
     const vRun = legs.length && !windows.length ? (10 * legs.length) / lap : null;
     out.steps = zone.map(s => { const k = legOf(s); const v = k >= 0 ? windows[k].v : vRun; return { ...s, freq: r3(1 / s.step), leg: k >= 0 ? k : null, length: v ? r3(v * s.step) : null }; });
     out.freq = r3(zone.length / span);
-    out.contact = r3(mean(zone.map(s => s.contact)));
-    out.flight = r3(mean(zone.map(s => s.flight)));
+    out.contact = r3(mean(zone.filter(s => !s.estContact).map(s => s.contact)));
+    out.flight = r3(mean(zone.filter(s => !s.estFlight).map(s => s.flight)));
     out.stepTime = r3(span / zone.length);
     out.sides = sidesOf(zone);
     // Per 10 m: its own steps' frequency, and the step length that speed and frequency give. A value

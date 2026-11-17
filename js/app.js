@@ -23,7 +23,8 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.25.6';
+const APP_VERSION = '0.25.7';
+let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -84,7 +85,7 @@ const rsiView = initRsi({
   root: document.getElementById('rsi'), athletes: ATHLETES, bare: true,
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster, rememberAthlete,
   onProgress: t => trainProgress(t),
-  onDone: ({ rec, who }, o) => { refreshFeeds(); if (!o?.quiet) openDetail('rsi', rec.id, who); },
+  onDone: ({ rec, who }, o) => { refreshFeeds(); if (!o?.quiet && !inBatch) openDetail('rsi', rec.id, who); },
   onDeleted: () => { refreshFeeds(); renderLists(); showTab(backTo); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
   makePlayer: clipPlayer,
@@ -101,7 +102,7 @@ const sprintView = initSprint({
   root: document.getElementById('sprint'), athletes: ATHLETES, freelap: freelapView, bare: true,
   getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
   onProgress: t => trainProgress(t),
-  onDone: (rec, o) => { refreshFeeds(); if (!o?.quiet) openDetail('sprint', rec.id); },
+  onDone: (rec, o) => { refreshFeeds(); if (!o?.quiet && !inBatch) openDetail('sprint', rec.id); },
   onDeleted: () => { refreshFeeds(); renderLists(); showTab(backTo); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); }, loadClip: hist.loadClip, dropClip: hist.deleteMedia,
   makePlayer: clipPlayer,
@@ -1182,7 +1183,10 @@ async function pickFromGallery() {
     if (picked === 'sprint' || picked === 'rsi') {
       const view = picked === 'sprint' ? sprintView : rsiView;
       while (view.busy()) await new Promise(r => setTimeout(r, 500));
-      await (picked === 'sprint' ? view.upload(file) : view.analyze(file));
+      // only the first clip opens its screen: the next ones wait in the list, so the video being
+      // watched is not swapped for the next upload (2026-11-17)
+      inBatch = k > 0;
+      try { await (picked === 'sprint' ? view.upload(file, null, null, null, false, inBatch) : view.analyze(file, null, null, inBatch)); } finally { inBatch = false; }
     } else {
       const run = runId + 1;
       analyzeFile(file);

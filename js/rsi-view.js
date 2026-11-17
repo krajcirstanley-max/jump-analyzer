@@ -264,37 +264,49 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
   // The open record's video in the app's own player (the one the jumps use: frames decoded onto a
   // canvas, step by step, ½× to ⅒×). A plain <video> showed a struck-out play button on the phone
   // (2026-11-15, cone hops at 60 fps). The marks are drawn over it frame by frame.
-  let live = null;   // { id, player, input }
+  let live = null;   // { id, box, player, input, v, seek, rate }
   const drop = () => { if (!live) return; live.player?.dispose?.(); live.input?.dispose?.(); live = null; };
   async function attachClip(rec) {
     if (!rec?.hasClip || !loadClip) return;
     const box = root.querySelector(`[data-rsi-clip="${CSS.escape(rec.id)}"]`);
     if (!box) return;
+    // The same record drawn again (its clip saved, its result in, a box height typed): the player
+    // already there moves into the new screen and keeps playing. A new one each time restarted the
+    // video and decoded the clip again while the analysis ran (2026-11-17: "prehrávanie seká").
+    if (live?.id === rec.id && live.box && live.box !== box && (live.player || live.v)) {
+      box.replaceWith(live.box);
+      wire(rec, live);
+      return;
+    }
     drop();
-    const id = rec.id, mine = { id };
+    const id = rec.id, mine = { id, box };
     live = mine;
     const blob = await loadClip(id).catch(() => null);
     if (live !== mine || !box.isConnected) return;
     if (!blob) { box.innerHTML = '<p class="note">Video sa nenašlo v telefóne.</p>'; return; }
-    let player = null, frameAt = null, timeAt = null;
     if (makePlayer) {
       try {
         box.innerHTML = '';
         const made = await makePlayer(box, blob);
         if (live !== mine || !box.isConnected) { made.player?.dispose?.(); made.input?.dispose?.(); return; }
-        Object.assign(mine, made); player = made.player;
-        const ts = player.ts, t0 = ts[0] ?? 0;
-        timeAt = i => (ts[i] ?? 0) - t0;
-        frameAt = t => { let i = 0; while (i < ts.length - 1 && ts[i] - t0 < t) i++; return i; };
-      } catch (e) { console.warn('RSI clip: own player failed', e); player = null; }
+        Object.assign(mine, made);
+      } catch (e) { console.warn('RSI clip: own player failed', e); mine.player = null; }
     }
-    let v = null;
-    if (!player) {
+    if (!mine.player) {
       box.innerHTML = `<video src="${URL.createObjectURL(blob)}" controls playsinline muted preload="metadata"></video>`;
-      v = box.querySelector('video');
+      mine.v = box.querySelector('video');
     }
+    wire(rec, mine);
+  }
+  // Seeking, speed and the scoreboard over the picture, for the record on the screen now.
+  function wire(rec, mine) {
+    const { player, v } = mine;
+    const ts = player?.ts ?? [], t0 = ts[0] ?? 0;
+    const timeAt = i => (ts[i] ?? 0) - t0;
+    const frameAt = t => { let i = 0; while (i < ts.length - 1 && ts[i] - t0 < t) i++; return i; };
     mine.seek = t => { if (player) { player.pause(); player.show(frameAt(t)); } else if (v) { v.pause(); v.currentTime = t; } };
     mine.rate = r => { if (v) { v.playbackRate = r; v.defaultPlaybackRate = r; } };
+    if (player) { player.frameHooks.length = 0; player.stage.querySelectorAll('.rsi-ov').forEach(el => el.remove()); }
     if (rec.pending) return;
     const ov = root.querySelector('.rsi-ov'), strip = [...root.querySelectorAll('.rsi-strip span')];
     // over the picture itself, not over the player's buttons
@@ -316,8 +328,11 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       strip.forEach((el, k) => el.classList.toggle('on', times[k] != null && t >= times[k]));
     };
     if (player) { player.frameHooks.push(i => tick(timeAt(i))); tick(timeAt(player.index)); return; }
-    const loop = () => { if (!v.isConnected) return; tick(v.currentTime); v.requestVideoFrameCallback?.(loop); };
-    v.addEventListener('timeupdate', () => tick(v.currentTime)); v.addEventListener('seeked', () => tick(v.currentTime));
+    mine.tick = tick;
+    if (mine.wired) { tick(v.currentTime); return; }   // the plain <video> keeps its listeners: they read the newest tick
+    mine.wired = true;
+    const loop = () => { if (!v.isConnected) return; mine.tick(v.currentTime); v.requestVideoFrameCallback?.(loop); };
+    v.addEventListener('timeupdate', () => mine.tick(v.currentTime)); v.addEventListener('seeked', () => mine.tick(v.currentTime));
     v.requestVideoFrameCallback?.(loop);
     tick(0);
   }
@@ -375,7 +390,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
   // The record exists from the moment the clip is in (pending, with its video), so it can be
   // watched at once; the numbers and the overlay fill it in when the analysis lands (Stanley,
   // 2026-11-14: "video hneď a čísla neskôr", as for the sprint). retry: { id, who } of a pending one.
-  async function analyze(file, filmed = null, retry = null) {
+  async function analyze(file, filmed = null, retry = null, quiet = false) {
     if (busy && !filmed && !retry) return;
     const who = getAthlete(), el = $('rsi-progress');
     // the progress line, here and on the Tréning tab
@@ -389,7 +404,8 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       const pend = { id: pid, at: new Date().toISOString(), file: file?.name ?? '', pending: true, stage: 'Nahrávam video', hasClip: false, jumps: [], standing: [] };
       const list = load(pwho); list.push(pend); put(pwho, list);
       if (saveClip) saveClip(pid, file).then(() => { const x = patch(pwho, pid, r => { r.hasClip = true; }); if (x && current?.rec.id === pid) show(x, pwho); }).catch(() => {});
-      show(pend, pwho);
+      // a later clip of several picked at once waits in the list: the screen keeps the one being watched
+      if (!quiet || !current) show(pend, pwho);
       onDone({ rec: pend, who: pwho });   // opens the screen now: the video first
     } else {
       const x = patch(pwho, pid, r => { r.error = null; r.stage = 'Nahrávam video'; });

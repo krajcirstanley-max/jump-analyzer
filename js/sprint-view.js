@@ -57,7 +57,7 @@ function stepsHtml(a) {
     if (s.leg != null && s.leg > lastLeg) { sep = `<div class="sp-sep">${(lastLeg + 1) * 10} m · Freelap ${n2(a.legs.slice(0, lastLeg + 1).reduce((x, y) => x + y, 0))}</div>`; lastLeg = s.leg; }
     return `${sep}<div class="sp-row"><span class="sp-i">${i + 1}</span><span class="sp-f">${FOOT[s.foot]}</span>
       <span class="sp-bar"><span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>${s.flight != null ? `<span class="fl" style="width:${(s.flight * scale).toFixed(0)}px"></span>` : ''}</span>
-      <span class="sp-n">${n3(s.contact).replace(/^0/, '')}</span><span class="sp-n">${s.flight != null ? n3(s.flight).replace(/^0/, '') : '–'}</span><span class="sp-n">${s.freq != null ? n2(s.freq) : '–'}</span>${metres ? `<span class="sp-n">${n2(s.length)}</span>` : ''}</div>`;
+      <span class="sp-n">${s.estContact ? '–' : n3(s.contact).replace(/^0/, '')}</span><span class="sp-n">${s.flight != null && !s.estFlight ? n3(s.flight).replace(/^0/, '') : '–'}</span><span class="sp-n">${s.freq != null ? n2(s.freq) : '–'}</span>${metres ? `<span class="sp-n">${n2(s.length)}</span>` : ''}</div>`;
   }).join('');
   return `<div class="sp-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span><span class="sp-n">kr/s</span>${metres ? '<span class="sp-n">m</span>' : ''}</div>${rows}`;
 }
@@ -301,7 +301,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   // The run's record exists from the start (pending), with its clip, so the video plays at once.
   const patch = (id, f) => { const l = load(), x = l.find(r => r.id === id); if (x) { f(x); store(l); } return x; };
-  async function upload(file, filmed = null, retryId = null, onServer = null, fresh = false) {
+  async function upload(file, filmed = null, retryId = null, onServer = null, fresh = false, quiet = false) {
     if (busy > 0 && !filmed && !retryId) return;
     if (retryId && inFlight.has(retryId)) return;
     if (!cloudReady()) { say('Najprv ulož prístupový kľúč v nastaveniach.'); draw(); return; }
@@ -320,7 +320,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       store(l.slice(0, MAX));
       pid = pend.id;
       if (saveClip) saveClip(pid, file).then(() => { patch(pid, x => { x.hasClip = true; }); if (current === pid) draw(); }).catch(() => {});
-      current = pid;
+      // a later clip of several picked at once waits in the list: the screen keeps the one being watched
+      if (!quiet || !current) current = pid;
       onDone(pend);   // opens the run's screen now: the video first
     } else patch(pid, x => { x.error = null; x.stage = 'Nahrávam video'; });
     inFlight.add(pid);
@@ -408,6 +409,14 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     if (!rec?.hasClip || !box || !loadClip) return;
     if (makePlayer) {
       if (live?.id === rec.id && live.root === box) return;
+      // The same run drawn again (its clip saved, its result in): the player already there moves
+      // into the new screen and keeps playing. A new one each time restarted the video and decoded
+      // the clip again while the analysis ran (2026-11-17: "prehrávanie seká").
+      if (live?.id === rec.id && live.player && live.root && live.root !== box) {
+        box.replaceWith(live.root);
+        live.root.closest('section')?.querySelector('.sp-rate')?.classList.add('hidden');
+        return;
+      }
       live?.player?.dispose?.(); live?.input?.dispose?.();
       const mine = { id: rec.id, root: box }; live = mine;
       const blob = await loadClip(rec.id).catch(() => null);
@@ -513,7 +522,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // lost). The old numbers stay on screen until the new ones land.
   // Only the analysis opened (2026-11-15 review: all of them at start meant ~250 MB on mobile data).
   async function rerunOld(only) {
-    const since = Date.now() - 3 * 86400_000;
+    const since = Date.now() - 7 * 86400_000;
     const ids = load().filter(r => r.id === only && !r.pending && r.hasClip && r.video && (r.video.algo ?? 1) < SPRINT_ALGO && r.at >= since && !r.rerun).map(r => r.id);
     for (const id of ids) {
       patch(id, x => { x.rerun = SPRINT_ALGO; });

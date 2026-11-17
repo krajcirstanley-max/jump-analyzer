@@ -134,3 +134,23 @@ test('far and near: every stance of a panned fly, alternating, a running stride 
   const t2 = sprintFromMotion({ motion: m2.motion, ts: m2.ts, fps: m2.fps }).steps.map(s => s.frames[0]);
   for (const f of [414, 443, 472, 672, 702, 730, 759, 786, 815, 843, 872]) assert.ok(t2.some(t => Math.abs(t - f) <= 3), `Miška stance near ${f}`);
 });
+
+// 2026-11-15 13:06, Stanley's fly 1.02 + 1.06 filmed in the app (steps as the server gave them).
+// The left touchdown at frame 951 was read 4-5 frames late (by eye the shoe is down at 946-947): a
+// 0.067 s "contact", a 0.25 s step before it and a 0.183 s one after. Both were dropped, the run
+// broke in two and the second 10 m had no steps and no metres.
+test('a touchdown read late is mended: both 10 m keep their steps and metres', () => {
+  const raw = [['l', 5.965, 6.023], ['r', 6.398, 6.457], ['l', 6.574, 6.682], ['r', 6.79, 6.89], ['l', 7.04, 7.174], ['r', 7.249, 7.332], ['l', 7.457, 7.566], ['r', 7.674, 7.774], ['l', 7.924, 7.991], ['r', 8.107, 8.208], ['l', 8.332, 8.433], ['r', 8.541, 8.641], ['l', 8.766, 8.85], ['r', 9.033, 9.075], ['l', 9.208, 9.3], ['r', 9.433, 9.541], ['l', 9.633, 9.75], ['r', 10.133, 10.208], ['l', 10.483, 10.575]];
+  const steps = raw.map(([foot, td, to], i) => {
+    const next = raw[i + 1];
+    return { foot, td, to, frames: [Math.round(td * 119.95), Math.round(to * 119.95)], contact: +(to - td).toFixed(3), flight: next ? +(next[1] - to).toFixed(3) : null, step: next ? +(next[1] - td).toFixed(3) : null };
+  });
+  const a = analyzeSprint({ steps, finishAt: 8.911, modeGuess: 'fly', algo: 2 }, { key: 'k', lap: 2.07, legs: [1.02, 1.06], who: 'stanley' }, { who: 'stanley', height: 186 });
+  assert.equal(a.zoneFrom, 'freelap');
+  assert.ok(a.legStats.every(l => l.stepLength != null && l.steps >= 4), JSON.stringify(a.legStats));
+  const moved = a.steps.find(s => s.estContact);
+  assert.ok(moved && Math.abs(moved.td * 119.95 - 946.5) <= 1.5, `moved touchdown at frame ${moved?.td * 119.95}`);
+  assert.ok(a.legStats.every(l => l.stepLength > 1.95 && l.stepLength < 2.2), JSON.stringify(a.legStats.map(l => l.stepLength)));
+  // the estimated contact and flight stay out of the averages
+  assert.ok(a.contact >= 0.09 && a.contact <= 0.12, `contact ${a.contact}`);
+});
