@@ -23,7 +23,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.25.2';
+const APP_VERSION = '0.25.3';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '–' : Number(x).toFixed(d));
@@ -1170,15 +1170,20 @@ async function pickFromGallery() {
   let files;
   try { files = (await globalThis.Capacitor.nativePromise('SprintCamera', 'pickVideo', { limit: 10 }))?.files ?? []; }
   catch (err) { return alert(`Galériu sa nepodarilo otvoriť: ${err?.message ?? err}`); }
+  const picked = kind;   // the switch can change while the clips wait their turn
   for (const [k, f] of files.entries()) {
     let file;
     try {
       const blob = await (await fetch(globalThis.Capacitor.convertFileSrc(f.path))).blob();
       file = new File([blob], f.name || `video-${Date.now()}.mov`, { type: blob.type || 'video/quicktime', lastModified: Date.now() });
     } catch (err) { trainProgress(`Video ${f.name ?? ''} sa nepodarilo otvoriť.`); continue; }
-    if (kind === 'sprint') sprintView.upload(file);
-    else if (kind === 'rsi') rsiView.analyze(file);
-    else {
+    // Sprint and RSI take one upload at a time and drop a second one while busy (2026-11-17: of
+    // several drop jumps picked at once only the first was analysed), so each waits its turn.
+    if (picked === 'sprint' || picked === 'rsi') {
+      const view = picked === 'sprint' ? sprintView : rsiView;
+      while (view.busy()) await new Promise(r => setTimeout(r, 500));
+      await (picked === 'sprint' ? view.upload(file) : view.analyze(file));
+    } else {
       const run = runId + 1;
       analyzeFile(file);
       if (k < files.length - 1) await onItsWay(run);
