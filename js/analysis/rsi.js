@@ -129,7 +129,7 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   if (!track.length) return { error: 'Vo videu som nenašiel športovca.' };
   const fps = (ts.length - 1) / (ts.at(-1) - ts[0]);
   const pxM = scaleAt(track, sex, height);
-  if (!(pxM > 0)) return { error: 'Na videu nevidno celé nohy.' };
+  if (!(pxM > 0)) return { error: 'Appka na videu nenašla nohy na meranie. Je to chyba rozboru.' };
   const feet = { l: med3(track.map(kp => footLow(kp, 'l'))), r: med3(track.map(kp => footLow(kp, 'r'))) };
   const runs = { l: footRuns(feet.l, fps, pxM), r: footRuns(feet.r, fps, pxM) };
 

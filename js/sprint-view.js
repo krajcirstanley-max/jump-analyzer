@@ -121,9 +121,10 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = []
     ${insight}</section>`;
   const shorter = a.kind === 'accel' && a.contactFrom && a.contactTo ? `<p class="banner ok">Na zemi čoraz kratšie (${n2(a.contactFrom)} → ${n2(a.contactTo)}), vo vzduchu dlhšie (${n2(a.flightFrom)} → ${n2(a.flightTo)}).</p>` : '';
   // Only steps seen clearly are shown (a far runner from behind gives impossible ones); say so.
-  // Only the measured stretch (2026-11-18: "nikdy nemeriame nábeh"); no advice on how to film.
+  // Only the measured stretch (2026-11-18: "nikdy nemeriame nábeh"); no advice on how to film. The start
+  // and every step are always in the picture (Stanley, same day): steps not found are the analysis's fault.
   const timedZone = a.zoneFrom === 'freelap' || (a.kind === 'accel' && run?.lap && (rec.video.start || a.zeroFromFinish != null));
-  const clear = a.tooFew ? `<p class="banner warn">${timedZone ? 'V úseku, ktorý meral Freelap, nebolo vo videu dosť jasných krokov za sebou.' : 'Vo videu nebolo dosť jasných krokov za sebou.'}</p>`
+  const clear = a.tooFew ? `<p class="banner warn">${timedZone ? 'Appka v úseku Freelapu nenašla dosť krokov za sebou.' : 'Appka vo videu nenašla dosť krokov za sebou.'} Video je v poriadku, je to chyba rozboru.</p>`
     : timedZone ? `<p class="note">${a.kind === 'accel' ? 'Len kroky od štartu po cieľ Freelapu.' : 'Len kroky v úseku Freelapu, rozbeh pred ním sa nemeria.'}</p>`
     : a.kind === 'fly' ? `<p class="note">Bez času cieľa z Freelapu neviem, kde úsek začal. Ukazujem rovnomerné kroky pred spomalením.</p>` : '';
   const few = !a.tooFew && a.steps.length < 5 ? ' Z mála krokov je frekvencia a dĺžka ±4 %.' : '';

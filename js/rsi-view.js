@@ -51,7 +51,7 @@ function resultHtml(rec) {
   const box = rec.askBox ? `${rec.boxCm ? '' : '<p class="note">Výšku debničky z videa neviem. Dopíš ju raz, ďalšie skoky si ju pamätajú:</p>'}
     <label class="measured"><span>Výška debničky</span><input data-rsi-box type="text" inputmode="numeric" autocomplete="off" placeholder="napr. 30" value="${rec.boxCm ?? ''}"><span>cm</span></label>` : '';
   if (!b && rec.noRebound) {
-    return `${head}${box}<p class="banner warn">Vo videu je zoskok a dopad, ale odraz po ňom nie je vidieť: video končí skôr, alebo po dopade nebol výskok. RSI sa bez odrazu nedá vyrátať. Natoč aj výskok po dopade.</p>`;
+    return `${head}${box}<p class="banner warn">Appka našla zoskok a dopad, ale odraz po ňom nenašla, takže RSI nevyrátala. Ak bol výskok vo videu, je to chyba rozboru.</p>`;
   }
   if (!b) {
     // Vertical jumps from standing (CMJ, squat jump): every one in the clip, the best on top.
