@@ -80,7 +80,34 @@ export function athleteBox(kp) {
 // Per frame f (motion from f to f+1): the athlete's height h in px, the track's motion beside
 // the athlete at the feet (g), and each toe's motion (l, r), all in full-resolution px.
 // getRGBA(f) -> RGBA buffer, frames in increasing order. track: keypoints per frame.
-export async function measureMotion(args) { return smoothGround(await measureMotionRaw(args)); }
+export async function measureMotion(args) { return smoothGround(await measureMotionRaw(args), { shake: true }); }
+
+// A toe the pose lost for a few frames (2026-11-18: the right toe of today's 7.3 s clip at 262-265,
+// 13:06 at 1079-1083, both while the shoe stood on the track) gets its place straight between the
+// frames either side, up to `maxGap` frames, so the toe's pixels are still matched there. Marked by
+// the score FILLED, exact in float32; the steps keep a stance only where a real toe stood (sprint.js).
+export const FILLED = 0.3125;
+export function fillToes(track, maxGap = 6) {
+  const out = track.map(k => (k ? Float32Array.from(k) : k));
+  for (const s of ['l', 'r']) {
+    const j = JI[`${s}bigtoe`] * 3, ok = k => k && k[j + 2] >= 0.3 && Number.isFinite(k[j]);
+    let last = -1;
+    for (let i = 0; i < out.length; i++) {
+      if (!ok(track[i])) continue;
+      if (last >= 0 && i - last > 1 && i - last - 1 <= maxGap) {
+        for (let f = last + 1; f < i; f++) {
+          if (!out[f]) continue;
+          const t = (f - last) / (i - last);
+          out[f][j] = track[last][j] + t * (track[i][j] - track[last][j]);
+          out[f][j + 1] = track[last][j + 1] + t * (track[i][j + 1] - track[last][j + 1]);
+          out[f][j + 2] = FILLED;
+        }
+      }
+      last = i;
+    }
+  }
+  return out;
+}
 
 // The same pass split over worker threads (2026-11-15: one core took 13-17 s of a 13 s clip while
 // seven idled). Each part starts a few frames early so the ground's predicted motion (g0) is warm
@@ -96,7 +123,7 @@ export async function measureMotionParallel({ fd, W, H, track, from, to, parts =
   const pieces = [];
   for (let a = from; a < to; a += chunk) pieces.push([a, Math.min(to, a + chunk)]);
   const out = await motionPool({ fd, W, H, track, pieces, warm, threads: Math.min(parts, pieces.length) });
-  const all = smoothGround(out.flat());
+  const all = smoothGround(out.flat(), { shake: true });
   all.stats = { pieces: out.length, threads: Math.min(parts, pieces.length), cpuMs: out.stats.reduce((x, m) => x + m.all, 0), readMs: out.stats.reduce((x, m) => x + m.read, 0) };
   return all;
 }
@@ -139,7 +166,7 @@ export async function measureMotionRaw({ getRGBA, getRows = null, W, H, track, f
   for (let f = from; f < to; f++) {
     const kp = track[f - trackBase], kq = track[f + 1 - trackBase], box = kp && athleteBox(kp);
     if (!box || !kq || box.h < 20) { prev = null; out.push(null); continue; }
-    const d = Math.max(1, Math.floor(box.h / 200));
+    const d = Math.max(1, Math.floor(box.h / 200));   // ceil (100-200 px) was 6x faster but lost steps and toe-offs (2026-11-18)
     const toes = ['l', 'r'].map(s => pt(kp, `${s}bigtoe`)).filter(Boolean);
     const lowFull = toes.length ? Math.max(...toes.map(p => p[1])) : box.y1;
     const fp = ['l', 'r'].flatMap(s => ['bigtoe', 'smalltoe', 'heel', 'ank'].map(n => pt(kp, s + n))).filter(Boolean);
@@ -159,7 +186,10 @@ export async function measureMotionRaw({ getRGBA, getRows = null, W, H, track, f
     // one just under the feet. A close athlete fills the width, so each is cut to what is in frame.
     const X = v => (v - ox) / d, Y = v => (v - oy) / d;   // full-resolution px -> region px
     const low = Y(lowFull);
-    const sh = Math.max(9, Math.round(0.12 * hs)), gap = 0.08 * hs, R = Math.max(6, Math.round(0.08 * hs)), edge = R + 2;
+    // The search: up to 8 %h around where the track and the toe are expected, never more than 16 / 12 px
+    // of the shrunk image (the search grew with the 4th power of a close athlete's size: 5 s -> 2 s,
+    // the same steps to the frame on four clips, 2026-11-18).
+    const sh = Math.max(9, Math.round(0.12 * hs)), gap = 0.08 * hs, R = Math.min(16, Math.max(6, Math.round(0.08 * hs))), edge = R + 2;
     const strips = [];
     // Beside the feet, not beside the whole body: filmed close from the front (RSI, IMG_3521) the
     // body and arms fill the width and no strip beside them fits, while the floor next to the
@@ -171,6 +201,7 @@ export async function measureMotionRaw({ getRGBA, getRows = null, W, H, track, f
     const by = low + 0.06 * hs + sh / 2;
     if (by + sh / 2 + edge < A.h) strips.push([X((fx0 + fx1) / 2), by, Math.min(Math.round(0.8 * hs), A.w - 2 * edge)]);
     const gs = [];
+    // (2026-11-18: dropping strips that move with the hips fixed one close step and lost 5-6 others)
     for (const [cx, cy, w] of strips) {
       const m = match(A, B, cx, cy, w, sh, cx + g0[0] / d, cy + g0[1] / d, R, 2);
       if (m && m.score > 0.5) gs.push(m);
@@ -183,8 +214,9 @@ export async function measureMotionRaw({ getRGBA, getRows = null, W, H, track, f
       const p = pt(kp, `${s}bigtoe`), q = pt(kq, `${s}bigtoe`);
       if (!p || !q) continue;
       const pw = Math.max(9, Math.round(0.12 * hs)), ph = Math.max(7, Math.round(0.1 * hs));
-      const m = match(A, B, X(p[0]), Y(p[1]), pw, ph, X(q[0]), Y(q[1]), Math.max(4, Math.round(0.06 * hs)));
+      const m = match(A, B, X(p[0]), Y(p[1]), pw, ph, X(q[0]), Y(q[1]), Math.min(12, Math.max(4, Math.round(0.06 * hs))));
       if (m) rec[s] = [m.dx * d, m.dy * d, +m.score.toFixed(2), +p[0].toFixed(1), +p[1].toFixed(1)];
+      if (m && (kp[JI[`${s}bigtoe`] * 3 + 2] === FILLED || kq[JI[`${s}bigtoe`] * 3 + 2] === FILLED)) rec[`${s}f`] = 1;
     }
     out.push(rec);
   }
@@ -193,10 +225,16 @@ export async function measureMotionRaw({ getRGBA, getRows = null, W, H, track, f
 
 // The camera turns smoothly: a frame whose track match failed takes its neighbours' motion, and
 // odd matches are replaced by the median around them.
-export function smoothGround(out) {
+// shake (sprints): a match is kept as it is unless it is more than 3 % of the athlete's height off
+// the median of its 13 frames. A phone in the hand bobs up and down within a stance (13:11 clip:
+// the track moved +3 then -6 px a frame within 0.1 s), and the median took that bob away, so a toe
+// standing on the track seemed to move with it: touchdowns 2-4 frames late, toe-offs 2 early. The
+// raw match follows the standing toe to under 0.5 % of the height. RSI keeps the plain median.
+export function smoothGround(out, { shake = false } = {}) {
   const idx = out.map((r, i) => (r?.g ? i : -1)).filter(i => i >= 0);
   if (!idx.length) return out;
   const raw = out.map(r => r?.g ?? null);
+  for (let i = 0; i < out.length; i++) if (out[i] && raw[i]) out[i].gRaw = raw[i];   // the match itself, before any filling or median
   for (let i = 0; i < out.length; i++) {
     if (!out[i] || raw[i]) continue;
     const a = idx.findLast(j => j < i), b = idx.find(j => j > i);
@@ -215,7 +253,8 @@ export function smoothGround(out) {
     const win = filled.slice(Math.max(0, i - 6), i + 7).filter(Boolean);
     if (win.length < 3) continue;
     const med = k => win.map(g => g[k]).sort((x, y) => x - y)[Math.floor(win.length / 2)];
-    out[i].g = [med(0), med(1)];
+    const m = [med(0), med(1)];
+    out[i].g = shake && raw[i] && Math.hypot(raw[i][0] - m[0], raw[i][1] - m[1]) <= 0.03 * out[i].h ? [...raw[i]] : m;
   }
   return out;
 }
@@ -231,7 +270,7 @@ export function recordedAt(clip) {
   } catch { return null; }
 }
 
-export async function analyzeSprintClip(engine, { clip, athletes = null, who: known = null, client, onProgress }) {
+export async function analyzeSprintClip(engine, { clip, athletes = null, who: known = null, client, onProgress, dump = false }) {
   const t0 = performance.now();
   const meta = probe(clip);
   const frames = openFrames(clip, meta);
@@ -245,7 +284,7 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, who: kn
     stage = null;
     if (res.error) return { error: 'Vo videu som nenašiel bežca. Skontroluj, či sú v zábere celé nohy.' };
     const wire = toWire(res, meta.ts);
-    const track = fromWire(wire).clean;
+    const pose = fromWire(wire).clean, track = fillToes(pose);
     onProgress?.({ stage: 'contacts', done: 0, total: 1 });
     const it = frames.sequential(res.first, res.last, 1);
     let at = -1, cur = null;
@@ -278,16 +317,18 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, who: kn
     if (sprint.error) return { error: sprint.error };
     // how each step looks from the side (foot against the hips, shin, trunk, knee): the advice's
     // "ako to vyzerá"; null where the camera did not see the step from the side
-    sprint.looks = sprintLooks(track, sprint.steps);
+    sprint.looks = sprintLooks(pose, sprint.steps);
     const result = {
       kind: 'sprint', ...sprint, ...(who ? { who } : {}),
       // The raw toe/track motion, rounded: lets a better contact rule be re-run on the phone or
       // checked here without another upload. The phone does not keep it.
-      motion: motion.map(m => m && { f: m.f, h: +m.h.toFixed(1), g: m.g && m.g.map(v => +v.toFixed(2)), l: m.l && m.l.slice(0, 3).map(v => +v.toFixed(2)), r: m.r && m.r.slice(0, 3).map(v => +v.toFixed(2)) }),
+      motion: motion.map(m => m && { f: m.f, h: +m.h.toFixed(1), g: m.g && m.g.map(v => +v.toFixed(2)), l: m.l && m.l.slice(0, 3).map(v => +v.toFixed(2)), r: m.r && m.r.slice(0, 3).map(v => +v.toFixed(2)), ...(m.lf ? { lf: 1 } : {}), ...(m.rf ? { rf: 1 } : {}) }),
       ts0: meta.ts[0],
       recordedAt: recordedAt(clip), duration: +(meta.ts[meta.N - 1] - meta.ts[0]).toFixed(3),
       W: meta.W, H: meta.H, N: meta.N, fps: +meta.fps.toFixed(3), ms: Math.round(performance.now() - t0), timing,
     };
+    // dump: the pose and the raw toe motion (with the toe's place) for the offline tests
+    if (dump) result.dump = { meta: { fps: meta.fps, W: meta.W, H: meta.H, N: meta.N }, ts: meta.ts, wire, motion, first: res.first, last: res.last };
     return { result };
   } finally {
     frames.close();

@@ -63,6 +63,8 @@ export function footContacts(motion, foot, ts, fps, o = SPRINT) {
     }
   }
   close();
+  // a run only on toe places the server filled in (lf/rf: the pose had lost the toe) is not a stance
+  for (let k = runs.length - 1; k >= 0; k--) if (!realToe(motion, foot, runs[k][0], runs[k][1])) runs.splice(k, 1);
   // A run of motions a..b means the toe stood still from frame a to frame b+1: it landed between
   // a-1 and a, and left between b+1 and b+2. Edges sit half a frame out.
   return runs.map(([i, j]) => {
@@ -119,11 +121,13 @@ export function stepsOf(contacts, start) {
 // the smoothed speed (median of 5) stays under T, its edges where the speed has climbed a share
 // `edge` of the way from the trough's floor to T.
 // Bumped when the contact rule changes, so the phone knows which analyses to run again.
-export const SPRINT_ALGO = 2;
-export const STANCE = { T: 2.0, edge: 0.45, minLen: 5, wide: 3.2 };
-function footSpeed(motion, foot, fps) {
+// 3 (2026-11-18): the server keeps the phone's bob in the track's motion and fills a lost toe.
+export const SPRINT_ALGO = 3;
+const realToe = (motion, foot, a, b) => motion.slice(a, b + 1).some(m => m && m[foot] && !m[`${foot}f`]);
+export const STANCE = { T: 2.0, edge: 0.45, minLen: 5, wide: 3.2, xw: 1 };
+function footSpeed(motion, foot, fps, xw = STANCE.xw) {
   const k = 120 / fps;
-  const raw = motion.map(m => (m && m.g && m[foot] && (m[foot][2] ?? 1) >= 0.6 && m.h ? Math.hypot(m[foot][0] - m.g[0], m[foot][1] - m.g[1]) / m.h * 100 * k : null));
+  const raw = motion.map(m => (m && m.g && m[foot] && (m[foot][2] ?? 1) >= 0.6 && m.h ? Math.hypot(xw * (m[foot][0] - m.g[0]), m[foot][1] - m.g[1]) / m.h * 100 * k : null));
   const w = Math.max(2, Math.round((2 * fps) / 120));
   return raw.map((_, i) => { const v = raw.slice(Math.max(0, i - w), i + w + 1).filter(x => x != null); return v.length >= 3 ? median(v) : null; });
 }
@@ -139,7 +143,7 @@ export function footStances(motion, foot, ts, fps, { T = STANCE.T, edge = STANCE
     const E = m[k] + edge * (T - m[k]);
     let x = k; while (x - 1 >= a && m[x - 1] <= E) x--;
     let y = k; while (y + 1 <= b && m[y + 1] <= E) y++;
-    if (y - x + 1 < minN || !motion[x] || !motion[y]) continue;
+    if (y - x + 1 < minN || !motion[x] || !motion[y] || !realToe(motion, foot, x, y)) continue;
     // The edges, where the foot is big enough to read them: the hand-checked rule (vertical
     // speed under 0.55 %h, or under 0.8 px where that is less than a pixel) inside the trough.
     // only when it is the stance and not a piece of it (a far foot's rule breaks into bits)
