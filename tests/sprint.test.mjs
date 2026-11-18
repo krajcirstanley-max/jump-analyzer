@@ -154,3 +154,21 @@ test('a touchdown read late is mended: both 10 m keep their steps and metres', (
   // the estimated contact and flight stay out of the averages
   assert.ok(a.contact >= 0.09 && a.contact <= 0.12, `contact ${a.contact}`);
 });
+
+// 2026-11-18, Stanley: "nikdy nemeriame nábeh, iba úseky Freelap". A run heard by the phone shows
+// only the steps between Freelap's start and finish, also when only the lap came (no splits).
+test('only the Freelap stretch: no run-in, nothing after the finish', () => {
+  const steps = [];
+  for (let i = 0; i < 24; i++) { const td = 3 + i * 0.25; steps.push({ foot: i % 2 ? 'r' : 'l', td: +td.toFixed(3), to: +(td + 0.11).toFixed(3), contact: 0.11, flight: 0.14, step: 0.25, seg: 0, frames: [Math.round(td * 120), Math.round((td + 0.11) * 120)] }); }
+  const video = { steps, finishAt: 8.1, start: null };
+  const fly = analyzeSprint(video, { lap: 3.4, legs: [3.4], who: 'miska' }, { mode: 'fly', who: 'miska', height: 171 });
+  assert.equal(fly.zoneFrom, 'freelap');
+  assert.ok(fly.steps.length >= 10, `${fly.steps.length} steps`);
+  assert.ok(fly.steps.every(s => s.td >= 8.1 - 3.4 - 0.05 && s.td + s.step <= 8.1 + 0.12), 'a step outside the timed stretch');
+  const acc = analyzeSprint({ ...video, start: { release: 4.0, firstStep: 4.35, estimated: true } }, { lap: 3.0, legs: [3.0], who: 'miska' }, { mode: 'accel', who: 'miska', height: 171 });
+  assert.ok(acc.steps.length && acc.steps.every(s => s.td >= 3.95 && s.td < 7.0), 'accel steps outside start-finish');
+  // heard, but the runner not seen in the timed stretch: no steps rather than the run-in
+  const none = analyzeSprint({ steps: steps.slice(0, 6), finishAt: 8.1 }, { lap: 2.0, legs: [1.0, 1.0] }, { mode: 'fly', who: 'miska', height: 171 });
+  assert.equal(none.tooFew, true);
+  assert.equal(none.steps.length, 0);
+});
