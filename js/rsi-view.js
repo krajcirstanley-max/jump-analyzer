@@ -3,6 +3,8 @@
 // Results are kept per athlete in this browser (numbers only, no video) for the trend. The server
 // tells who is in the clip (no athlete switch since 2026-11-12); a tap on the name moves a result.
 import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
+// 2: contact edges against the frames by hand, the stand's last piece on the box (2026-11-18)
+const RSI_ALGO = 2;
 
 const NAMES = {
   drop_jump: 'Drop jump', drop_jump_single: 'Drop jump jednonož', pogo: 'Pogo', repeated_hops: 'Opakované odrazy',
@@ -254,7 +256,10 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     $('rsi-result').innerHTML = rec.pending
       ? `<h2>${esc(athletes[who]?.name ?? '')} · odrazy</h2>${videoHtml(rec)}<div data-rsi-prog="${esc(rec.id)}">${pendingSteps(rec)}</div>`
       : `<button class="top-who rsi-swap" data-rsi-swap>${esc(athletes[who].name)}<span class="who-swap" aria-hidden="true">⇄</span></button>${videoHtml(rec)}${resultHtml(rec)}`;
-    $('rsi-result').insertAdjacentHTML('beforeend', `<button class="btn danger" data-rsi-del>Zmazať</button>`);
+    // analysed before the 0.26.0 contact edges (2026-11-18): one tap analyses the saved clip again
+    const again = !rec.pending && !rec.error && rec.hasClip && (rec.algo ?? 1) < RSI_ALGO
+      ? `<button class="btn primary" data-rsi-retry="${esc(rec.id)}">Prepočítať s novým meraním</button>` : '';
+    $('rsi-result').insertAdjacentHTML('beforeend', `${again}<button class="btn danger" data-rsi-del>Zmazať</button>`);
     attachClip(rec);
   };
   // A list kept to 200; the clips of records that fall off go too.
@@ -408,7 +413,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       if (!quiet || !current) show(pend, pwho);
       onDone({ rec: pend, who: pwho });   // opens the screen now: the video first
     } else {
-      const x = patch(pwho, pid, r => { r.error = null; r.stage = 'Nahrávam video'; });
+      const x = patch(pwho, pid, r => { r.error = null; r.stage = 'Nahrávam video'; r.pending = true; });
       if (x && current?.rec.id === pid) show(x, pwho);
     }
     let lastStage = '';
@@ -426,7 +431,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       });
       if (result?.error) throw new CloudError(result.error);
       const old = load(pwho).find(r => r.id === pid);
-      const rec = { ...record(result, file), id: pid, at: old?.at ?? new Date().toISOString(), hasClip: !!old?.hasClip };
+      const rec = { ...record(result, file), id: pid, at: old?.at ?? new Date().toISOString(), hasClip: !!old?.hasClip, algo: RSI_ALGO };
       const id = result.who?.id in athletes ? result.who.id : pwho;
       if (rec.askBox && !rec.boxCm && lastBox(id)) { rec.boxCm = lastBox(id); rec.boxFrom = 'typed'; }
       rememberAthlete(id);

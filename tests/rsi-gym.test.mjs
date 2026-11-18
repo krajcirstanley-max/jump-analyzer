@@ -61,7 +61,13 @@ const HAND = {
   1794932202395: [309, 331, 411],
   1794932274606: [216, 245, 328],
   1794924114112: [131, 157, 227],  // Miška, legs at the top edge, the landing in the last frames
+  // 2026-11-18, an older clip uploaded: Miška off 50 cm, filmed from the front, the phone tilting
+  // down while she stood. The last piece of the stand (one foot, 844-861) read as a rebound of RSI
+  // 0,13 and toe runs in the air around the contact stretched it to 888-919: RSI 1,07 for 2,05.
+  1794991005508: [887, 909, 978],
 };
+// still phone (toe edges): every edge within one frame (2026-11-18, Stanley: "nepresne")
+const STILL = ['1794924872722', '1794924921055', '1794924995468', '1794925041151', '1794925090410', '1794932384646', '1794991005508'];
 
 test('gym 2026-11-17: every drop jump is a drop jump off the box, edges within 2 frames', { skip: !have }, () => {
   for (const [id, [td, to, landing]] of Object.entries(HAND)) {
@@ -82,4 +88,14 @@ test('gym 2026-11-17: Miška\'s other drop jumps are drop jumps too', { skip: !h
     assert.equal(r.kind, 'drop_jump', `${id} kind ${r.kind}`);
     assert.equal(r.jumps.length, 1, id);
   }
+});
+
+test('still phone: contact edges and the landing within one frame of the hand frames', { skip: !have }, () => {
+  for (const id of STILL) {
+    const [td, to, landing] = HAND[id], j = replay(id).jumps[0];
+    assert.ok(Math.abs(j.td - td) <= 1 && Math.abs(j.to - to) <= 1, `${id} contact ${j.td}-${j.to}, by eye ${td}-${to}`);
+    if (landing != null) { const L = j.to + 1 + Math.round(j.flightMs * 120 / 1000); assert.ok(Math.abs(L - landing) <= 1, `${id} landing ${L}, by eye ${landing}`); }
+  }
+  const j = replay('1794991005508').jumps[0];
+  assert.ok(Math.abs(j.rsi - 2.05) <= 0.05, `Miška 18 Nov RSI ${j.rsi}`);
 });

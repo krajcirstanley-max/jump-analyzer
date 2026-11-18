@@ -240,7 +240,12 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     // The stand may come in pieces (close-up of the legs, a phone that moves): by the timing it
     // still counts when every piece before it is at the same level, so the athlete never left the box.
     const sameStand = contacts.slice(0, k).every(p => Math.abs(p.level - c.level) <= 1.5 * STEP);
-    c.onBox = (level && (k === 0 || contacts[k - 1].onBox)) || (byFlight && (k === 0 || contacts[k - 1].onBox || sameStand));
+    // The last piece of a stand on the box, with no flight before it and nearer the box than the
+    // floor below (Miška 2026-11-18, 50 cm, phone tilting down: 187-843 standing, 844-861 the right
+    // foot alone before stepping off, read as a rebound of RSI 0,13): still on the box.
+    const p = contacts[k - 1];
+    const piece = !!p?.onBox && c.td - p.to <= 2 && !!next && next.level - c.level > STEP && c.level - p.level < 0.5 * (next.level - p.level);
+    c.onBox = piece || (level && (k === 0 || contacts[k - 1].onBox)) || (byFlight && (k === 0 || contacts[k - 1].onBox || sameStand));
     c.byFlight = c.onBox && byFlight;
     if (c.byFlight) for (let q = 0; q < k; q++) { contacts[q].onBox = true; contacts[q].byFlight = true; }
   });
@@ -288,7 +293,11 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // What the pattern looks like, before Claude names it.
   // standing on something 10-100 cm high at the start; more than that is the athlete moving
   // towards or away from the phone, not a box
-  const firstUp = events[0]?.onBox && events[0].ms > 300 ? ((floor - events[0].level) / pxM) * 100 : null;
+  // the longest piece of the stand at the start: a phone tilting down while the athlete stands
+  // cuts it into pieces, the first one short (Miška 2026-11-18: 0-19, 29-173, 187-843)
+  const lead = events.slice(0, Math.max(1, events.findIndex(e => !e.onBox))).filter(e => e.onBox);
+  const stand = lead.reduce((b, e) => (!b || e.ms > b.ms ? e : b), null);
+  const firstUp = stand && stand.ms > 300 ? ((floor - stand.level) / pxM) * 100 : null;
   const levelBox = firstUp != null && firstUp >= 10 && firstUp <= 100;
   const startsOnBox = levelBox || !!events[0]?.byFlight;
   const boxEstCm = levelBox ? firstUp : null;
@@ -325,14 +334,19 @@ export function refineEdges(r, toe, fps, land = toe) {
   if (!r?.events?.length || !toe?.length) return r;
   const G0 = 9.81, W = 8;
   const edge = (e, list) => {
-    const near = list.filter(c => c.b >= e.td - W && c.a <= e.to + W);
+    // toe runs that overlap the contact itself: a toe hanging still in the air a few frames before
+    // or after it (Miška 2026-11-18: falling 872-881, rising 918-926 around 887-911) is no contact
+    const near = list.filter(c => c.b >= e.td && c.a <= e.to);
     if (!near.length) return null;
     return { td: Math.max(e.td - W, Math.min(...near.map(c => c.a))), to: Math.min(e.to + W, Math.max(...near.map(c => c.b))) };
   };
   const events = r.events.map((e, k) => {
     if (e.onBox) return { ...e };
+    // Against the frames by hand (13 drop jumps, 2026-11-17/18, still phone): the toe stops one
+    // frame after the shoe is down (6 of 7), and the pose's contact holds one frame past the
+    // toe-off; the toe-off is the pose's minus one averaged with the toe's (every one within a frame).
     const full = edge(e, toe);
-    const out = { ...e, ...(full ?? {}) };
+    const out = { ...e, ...(full ? { td: Math.max(e.td, full.td - 1), to: Math.floor((e.to - 1 + full.to) / 2) } : {}) };
     // The landing after a rebound: its touchdown frame, from the foot that jumped when one did
     // (Miška's free leg swung down at 366, her right foot landed at 368).
     const jumped = r.jumps.find(j => j.td === r.events[k - 1]?.td) ?? (r.standing ?? []).find(j => j.td === r.events[k - 1]?.td);
