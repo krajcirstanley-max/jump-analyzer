@@ -19,6 +19,10 @@ const HAND = {
   sp1795034233149: [['l', 1298, 1311], ['r', 1537, 1548]],
   sp1795034357691: [['r', 866, 877], ['l', 1212, 1220]],
   sp1795034390691: [['l', 680, 691], ['r', 882, 893]],
+  // two more of the same evening (22:07); Miška's r 604-616 far away during a pan reads 612-617 and
+  // is left out of the clean steps, so it is not held here
+  sp1795036029184: [['l', 692, 704]],
+  sp1795036059832: [['l', 707, 715], ['r', 833, 842]],
 };
 const have = Object.keys(HAND).every(id => existsSync(new URL(`${id}.dump.json`, dir)));
 
