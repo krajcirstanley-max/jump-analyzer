@@ -78,7 +78,7 @@ export async function saveAttempt(rec, { clip, pose } = {}) {
   navigator.storage?.persist?.().catch(() => {});
   const media = { ...rec.media };
   if (pose) media.pose = await putMedia(rec.id, 'pose', poseBlob(pose));
-  if (clip) media.clip = await putMedia(rec.id, 'clip', clip);
+  if (clip) { media.clip = await putMedia(rec.id, 'clip', clip); storeView(rec.id, clip); }
   if (await getAttempt(rec.id)) await patchAttempt(rec.id, { media });
   else await removeMedia(rec.id);          // deleted while the clip was being written
   return { ok: true, media };
@@ -219,6 +219,13 @@ async function putMedia(id, kind, blob) {
   catch (e) { console.warn('Clip not stored', e); return null; }
 }
 
+// The watching copy (js/viewcopy.js), made from the native file in the background: kept beside
+// the clip under its own name, so a player reading the clip is never pulled from under it.
+function storeView(id, clip) {
+  if (!clip?.nativePath) return;
+  import('./viewcopy.js').then(m => m.viewCopy(clip.nativePath)).then(v => v && putMedia(id, 'view', v)).catch(() => {});
+}
+
 async function getMedia(id, kind) {
   const name = fileName(id, kind);
   try { return await (await (await opfsDir(false)).getFileHandle(name)).getFile(); }
@@ -227,7 +234,7 @@ async function getMedia(id, kind) {
 }
 
 async function removeMedia(id) {
-  for (const kind of ['clip', 'pose']) {
+  for (const kind of ['clip', 'view', 'pose']) {
     const name = fileName(id, kind);
     try { await (await opfsDir(false)).removeEntry(name); } catch { /* not there */ }
     try { await tx('readwrite', s => s.delete(name), BLOBS); } catch { /* not there */ }
@@ -235,9 +242,9 @@ async function removeMedia(id) {
 }
 
 // A clip held for a server job the app may have to resume after being closed.
-export const storeClip = (id, clip) => putMedia(id, 'clip', clip);
+export const storeClip = (id, clip) => { storeView(id, clip); return putMedia(id, 'clip', clip); };
 export const deleteMedia = id => removeMedia(id);
-export const loadClip = id => getMedia(id, 'clip');
+export const loadClip = async id => (await getMedia(id, 'view')) ?? getMedia(id, 'clip');
 export async function dropIfOrphan(id) {
   if (!(await getAttempt(id))) await removeMedia(id);
 }
@@ -246,7 +253,7 @@ export async function dropIfOrphan(id) {
 const poseBlob = pose => new Blob([JSON.stringify(pose, (k, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v))], { type: 'application/json' });
 
 export async function loadMedia(id) {
-  const [clip, raw] = await Promise.all([getMedia(id, 'clip'), getMedia(id, 'pose')]);
+  const [clip, raw] = await Promise.all([loadClip(id), getMedia(id, 'pose')]);
   let pose = null;
   try { pose = raw ? fromWire(JSON.parse(await raw.text())) : null; } catch (e) { console.warn('Pose unreadable', e); }
   return { clip, pose };

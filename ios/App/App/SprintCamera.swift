@@ -48,6 +48,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "finalize", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveVideo", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pickVideo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "viewCopy", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
     private var galleryDelegate: GalleryPickerDelegate?
@@ -70,6 +71,20 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             self.galleryDelegate = d
             picker.delegate = d
             host.present(picker, animated: true)
+        }
+    }
+
+    /// A copy for watching (2026-11-18, Stanley: "ako pretáčať video aby nesekalo"). The camera
+    /// writes a keyframe every 116 frames at 120 fps, so a frame-exact seek decodes up to 115
+    /// frames; this copy is H.264 with a keyframe every 4 frames and no B-frames, the same frame
+    /// rate and size, about the original's bytes. Resolves { path, ms }.
+    @objc func viewCopy(_ call: CAPPluginCall) {
+        guard let p = call.getString("path") else { call.reject("No path"); return }
+        let src = p.hasPrefix("file://") ? (URL(string: p) ?? URL(fileURLWithPath: p)) : URL(fileURLWithPath: p)
+        let dst = FileManager.default.temporaryDirectory.appendingPathComponent("view-\(UUID().uuidString).mp4")
+        let t0 = CACurrentMediaTime()
+        ViewCopy.make(src, to: dst) { err in
+            if let err = err { call.reject(err) } else { call.resolve(["path": dst.path, "ms": Int((CACurrentMediaTime() - t0) * 1000)]) }
         }
     }
 
@@ -1098,3 +1113,66 @@ final class GalleryPickerDelegate: NSObject, PHPickerViewControllerDelegate {
     }
 }
 
+
+
+// MARK: - The copy for watching
+
+enum ViewCopy {
+    static func make(_ src: URL, to dst: URL, done: @escaping (String?) -> Void) {
+        let q = DispatchQueue(label: "viewcopy", qos: .userInitiated)
+        q.async {
+            let asset = AVURLAsset(url: src)
+            guard let vt = asset.tracks(withMediaType: .video).first else { done("Vo videu nie je obraz."); return }
+            let at = asset.tracks(withMediaType: .audio).first
+            guard let reader = try? AVAssetReader(asset: asset), let writer = try? AVAssetWriter(outputURL: dst, fileType: .mp4) else { done("Kópiu sa nepodarilo pripraviť."); return }
+            let vOut = AVAssetReaderTrackOutput(track: vt, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange])
+            vOut.alwaysCopiesSampleData = false
+            guard reader.canAdd(vOut) else { done("Obraz sa nedá čítať."); return }
+            reader.add(vOut)
+            let size = vt.naturalSize, fps = Double(vt.nominalFrameRate > 0 ? vt.nominalFrameRate : 120)
+            let rate = fps > 150 ? 36_000_000 : 24_000_000
+            let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height),
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: rate,
+                    AVVideoMaxKeyFrameIntervalKey: 4,
+                    AVVideoAllowFrameReorderingKey: false,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoExpectedSourceFrameRateKey: Int(fps.rounded()),
+                ] as [String: Any],
+            ])
+            vIn.transform = vt.preferredTransform
+            vIn.expectsMediaDataInRealTime = false
+            guard writer.canAdd(vIn) else { done("Kópiu sa nedá zapísať."); return }
+            writer.add(vIn)
+            var aOut: AVAssetReaderTrackOutput? = nil, aIn: AVAssetWriterInput? = nil
+            if let at = at {
+                let o = AVAssetReaderTrackOutput(track: at, outputSettings: nil)
+                let fmt = (at.formatDescriptions.first as! CMFormatDescription?)
+                let i = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: fmt)
+                i.expectsMediaDataInRealTime = false
+                if reader.canAdd(o) && writer.canAdd(i) { reader.add(o); writer.add(i); aOut = o; aIn = i }
+            }
+            guard reader.startReading(), writer.startWriting() else { done(reader.error?.localizedDescription ?? writer.error?.localizedDescription ?? "Kópia zlyhala."); return }
+            writer.startSession(atSourceTime: .zero)
+            let group = DispatchGroup()
+            func pump(_ input: AVAssetWriterInput, _ output: AVAssetReaderTrackOutput, _ label: String) {
+                group.enter()
+                let qq = DispatchQueue(label: "viewcopy.\(label)")
+                input.requestMediaDataWhenReady(on: qq) {
+                    while input.isReadyForMoreMediaData {
+                        if let sb = output.copyNextSampleBuffer() { if !input.append(sb) { reader.cancelReading(); input.markAsFinished(); group.leave(); return } }
+                        else { input.markAsFinished(); group.leave(); return }
+                    }
+                }
+            }
+            pump(vIn, vOut, "v")
+            if let aIn = aIn, let aOut = aOut { pump(aIn, aOut, "a") }
+            group.notify(queue: q) {
+                if reader.status == .failed { writer.cancelWriting(); done(reader.error?.localizedDescription ?? "Čítanie zlyhalo."); return }
+                writer.finishWriting { done(writer.status == .completed ? nil : (writer.error?.localizedDescription ?? "Zápis zlyhal.")) }
+            }
+        }
+    }
+}

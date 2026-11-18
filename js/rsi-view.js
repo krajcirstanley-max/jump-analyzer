@@ -2,6 +2,7 @@
 // names the drill, and the screen shows contact time, flight, jump height and both RSI forms.
 // Results are kept per athlete in this browser (numbers only, no video) for the trend. The server
 // tells who is in the clip (no athlete switch since 2026-11-12); a tap on the name moves a result.
+import { withPath } from './viewcopy.js';
 import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
 // 2: contact edges against the frames by hand, the stand's last piece on the box (2026-11-18)
 const RSI_ALGO = 2;
@@ -472,7 +473,7 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
         try {
           const src = globalThis.Capacitor?.convertFileSrc?.(job.raw) ?? job.raw;
           const blob = await (await fetch(src)).blob();
-          await analyze(new File([blob], 'rsi.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() }), job);
+          await analyze(withPath(new File([blob], 'rsi.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() }), job.raw), job);
         } catch { cam.finalize({ id: job.id, marks: [] }).catch(() => {}); }
         queue.shift();
       }

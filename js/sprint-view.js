@@ -7,6 +7,7 @@
 // pairs it with the Freelap run heard while it was filmed and draws the analysis
 // (js/analysis/sprint.js). Freelap times stay in the phone.
 
+import { withPath } from './viewcopy.js';
 import { CHIPS } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { legsFormHtml, readLegs } from './freelap-view.js';
@@ -211,7 +212,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       try {
         const src = globalThis.Capacitor?.convertFileSrc?.(job.raw) ?? job.raw;
         const blob = await (await fetch(src)).blob();
-        const file = new File([blob], 'sprint.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() });
+        const file = withPath(new File([blob], 'sprint.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() }), job.raw);
         let onServer;
         const sent = new Promise(res => { onServer = res; });
         const done = upload(file, job, null, onServer);

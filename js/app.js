@@ -1,4 +1,5 @@
 import * as mb from '../vendor/mediabunny.min.mjs';
+import { withPath } from './viewcopy.js';
 import { inspectClip, VERDICT } from './footage.js';
 import { FrameSource } from './frames.js';
 import { Player } from './player.js';
@@ -23,7 +24,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.26.0';
+const APP_VERSION = '0.26.1';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -990,7 +991,7 @@ jumpCam?.on('saved', async d => {
   try {
     const src = globalThis.Capacitor?.convertFileSrc?.(d.raw) ?? d.raw;
     const blob = await (await fetch(src)).blob();
-    analyzeFile(new File([blob], `skok-${d.recordedAt ?? Date.now()}.mov`, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }));
+    analyzeFile(withPath(new File([blob], `skok-${d.recordedAt ?? Date.now()}.mov`, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }), d.raw));
   } catch (e) { trainProgress(`Natočený skok sa nepodarilo otvoriť: ${e?.message ?? e}`); }
 });
 document.querySelector('.segc').addEventListener('click', e => {
@@ -1176,7 +1177,7 @@ async function pickFromGallery() {
     let file;
     try {
       const blob = await (await fetch(globalThis.Capacitor.convertFileSrc(f.path))).blob();
-      file = new File([blob], f.name || `video-${Date.now()}.mov`, { type: blob.type || 'video/quicktime', lastModified: Date.now() });
+      file = withPath(new File([blob], f.name || `video-${Date.now()}.mov`, { type: blob.type || 'video/quicktime', lastModified: Date.now() }), f.path);
     } catch (err) { trainProgress(`Video ${f.name ?? ''} sa nepodarilo otvoriť.`); continue; }
     // Sprint and RSI take one upload at a time and drop a second one while busy (2026-11-17: of
     // several drop jumps picked at once only the first was analysed), so each waits its turn.
