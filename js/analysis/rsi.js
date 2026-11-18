@@ -143,7 +143,18 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // A foot held still more than 12 cm above the other one is the free leg of a single-leg
   // contact. (5 cm took one of two planted feet for a free leg from the front, IMG_3521: the foot
   // nearer the phone sits lower in the picture.)
-  for (const d of down) if (d && d.l != null && d.r != null) { const lo = Math.max(d.l, d.r); for (const s of ['l', 'r']) if (d[s] < lo - 0.12 * pxM) delete d[s]; }
+  // Not when both feet land and leave within two frames of each other: that is two planted feet,
+  // the far one higher in a view from the side and above (2026-11-18, a drop jump from the side:
+  // both still 197-216, the far foot 12.5 cm up, read as single-leg). A free leg moves with the body
+  // and is held higher than 18 cm.
+  const runAt = s => { const a = new Array(n).fill(null); for (const r of runs[s]) for (let i = r.td; i <= r.to; i++) a[i] = r; return a; };
+  const runOf = { l: runAt('l'), r: runAt('r') };
+  down.forEach((d, i) => {
+    if (!d || d.l == null || d.r == null) return;
+    const a = runOf.l[i], b = runOf.r[i];
+    if (a && b && Math.abs(a.td - b.td) <= 2 && Math.abs(a.to - b.to) <= 2 && Math.abs(d.l - d.r) <= 0.18 * pxM) return;
+    const lo = Math.max(d.l, d.r); for (const s of ['l', 'r']) if (d[s] < lo - 0.12 * pxM) delete d[s];
+  });
   // A foot landing a box-height lower than the contact so far starts a new contact: stepping off
   // a box on one leg, the other foot is still on the box when the first lands on the floor
   // (IMG_4186, Miška single-leg off a ~15 cm box, 2026-11-13: the floor contact had been merged
@@ -159,7 +170,11 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     // a foot counts for the contact within the free-leg line (12 cm), not the 8 cm step: filmed a
     // little from the side the foot nearer the phone sits lower (IMG_3519, 2026-11-18: both feet down,
     // 9 cm apart in the picture, read as a single-leg drop jump)
-    for (let k = i; k <= j; k++) for (const [s, l] of Object.entries(down[k])) if (l >= lvl - 0.12 * pxM) { used.add(s); lv.push(l); }
+    const sync = k => { const a = runOf.l[k], b = runOf.r[k]; return !!a && !!b && Math.abs(a.td - b.td) <= 2 && Math.abs(a.to - b.to) <= 2; };
+    for (let k = i; k <= j; k++) for (const [s, l] of Object.entries(down[k])) {
+      if (l >= lvl - 0.12 * pxM) { used.add(s); lv.push(l); }
+      else if (sync(k) && l >= lvl - 0.18 * pxM) used.add(s);   // the far foot of two planted ones (a free leg is held higher), its level left out
+    }
     contacts.push({ td: i, to: j, level: Math.max(...lv), feet: [...used].sort().join('') });
     i = j;
   }
@@ -280,7 +295,10 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     while (g0 > 0 && gap(contacts[g0 - 1], contacts[g0]) < 100) g0--;
     const groupMs = ((c.to - contacts[g0].td + 1) / fps) * 1000;
     const stood = c.ms >= 300 || groupMs >= 300 || (g0 === 0 && contacts[0].td <= 2 && groupMs >= 150);
-    const level = !noBox && stood && !!next && next.level - c.level > STEP;
+    // ...unless the feet rose first: a jump from the floor that lands nearer the phone also lands
+    // lower in the picture (2026-11-18, two CMJs filmed from the front: the stand read as a box,
+    // no jump at all came out). Stepping off a box the feet only go down.
+    const level = !noBox && stood && !!next && next.level - c.level > STEP && !(riseOf(c, next.td) > 0.12);
     // Off a box by the timing alone: a stand, a short drop (stepping off 30 cm takes 0.13-0.15 s
     // here, a jump from the floor is 0.35 s or more in the air), then a rebound with a real flight
     // after it. A CMJ has no flight before its take-off. From a low phone the box top and the floor

@@ -19,7 +19,10 @@ export function parseProbe(stream, packets) {
   const rot = Number(stream.side_data_list?.find(s => s.rotation != null)?.rotation ?? 0);
   if (Math.abs(rot) % 180 === 90) [W, H] = [H, W];
   // Packets are in decode order; sorted, they are the frame times, as on the phone.
-  const ts = packets.map(p => Number(p.pts_time)).filter(Number.isFinite).sort((a, b) => a - b);
+  // A negative time is a frame the edit list cuts off: ffmpeg decodes it but never outputs it
+  // (2026-11-18, IMG_5320 trimmed in Photos: 363 packets, 42 before 0, 321 frames out, and the job
+  // failed on "frame 328 of 363 was not decoded").
+  const ts = packets.map(p => Number(p.pts_time)).filter(t => Number.isFinite(t) && t >= -1e-6).sort((a, b) => a - b);
   const N = ts.length;
   if (!(W > 0 && H > 0 && N > 1)) throw new Error(`ffprobe: unusable stream (${W}x${H}, ${N} frames)`);
   // The worker's frame rate formula, so both paths compute the same number.
