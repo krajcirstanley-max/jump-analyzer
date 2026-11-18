@@ -1,4 +1,4 @@
-// Nine RSI clips uploaded on 2026-11-18 at 23:00-23:08 (other athletes too): seven drop jumps,
+// Nine RSI clips uploaded on 2026-11-18 at 23:00-23:08: seven drop jumps,
 // two countermovement jumps filmed from the front. The pose was dumped on the server (gitignored
 // tests/real/rsi18g/). Hand frames on fixed foot crops: touchdown, last frame on the floor, landing.
 //  - the two CMJs landed nearer the phone, lower in the picture: the stand read as a box, no jump came out
