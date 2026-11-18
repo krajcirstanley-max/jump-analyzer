@@ -356,10 +356,10 @@ function ransacH(src, dst, { tol = 2, iters = 300, rand = mulberry(11), model = 
 // The camera's motion over the ground, frame by frame: H[i] maps ref-frame pixels on the
 // ground plane to frame i. Ground texture is tracked with the athlete masked out; features
 // that leave are replaced. getRGBA(i) may be async. box(i) -> [x0, y0, x1, y1] to avoid.
-export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box, model = 'homography', sane = null }) {
+export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box, model = 'homography', sane = null, steps = [1, -1] }) {
   const out = { [ref]: { h: [1, 0, 0, 0, 1, 0, 0, 0, 1], n: 0, rms: 0 } };
   const inBox = (i, x, y) => { const b = box?.(i); if (!b) return false; const mx = (b[2] - b[0]) * 0.15 + 20, my = (b[3] - b[1]) * 0.1 + 20; return x > b[0] - mx && x < b[2] + mx && y > b[1] - my && y < b[3] + my; };
-  for (const step of [1, -1]) {
+  for (const step of steps) {
     let L = lumaU8(await getRGBA(ref), W, H);
     let feats = pickFeatures(L, W, H, { y0: groundY(ref), y1: H, avoid: (x, y) => inBox(ref, x, y) })
       .map(f => ({ ref: [f.x, f.y], cur: [f.x, f.y], tpl: patch(L, W, f.x, f.y) }));
@@ -442,7 +442,10 @@ export async function measureGround({ frames, track, jump, boxes }) {
   const from = Math.max(0, Math.min((jump.third?.td ?? (jump.pen?.td ?? T.td - 30) - 35) - 12, T.td - Math.round(1.7 * fps)));
   const to = Math.min(N - 1, (jump.landing ?? T.to + 90) + 6);
   const want = []; for (let i = from; i <= to; i++) want.push(i);
-  const px = await frames.pick(want);
+  // threaded (server): only the contact and the frames after it are looked at here, the rest on the
+  // threads; the last frame is waited for, so the threads find every frame decoded
+  const step3 = (a, b) => { const l = []; for (let i = a; i <= b; i += 3) l.push(i); return l; };
+  const px = await frames.pick(frames.fd ? [...step3(T.td, T.to), ...step3(T.to + 3, Math.min(to, T.to + Math.round(0.6 * fps))), to] : want);
   const get = i => px.get(i);
   const P = (k, n) => { const j = KP[n]; return k && Number.isFinite(k[j * 3]) ? [k[j * 3], k[j * 3 + 1]] : null; };
   const footAt = i => {
@@ -466,7 +469,10 @@ export async function measureGround({ frames, track, jump, boxes }) {
   const boardDets = dets.filter(x => x.d.corners.white), base = boardDets.length ? boardDets : dets;
   const ref = base[0].i, d0 = base[0].d;
   const farY = d0.far.m * (W / 2) + d0.far.c;
-  const g = await trackGround(get, W, H, { ref, from, to, groundY: () => farY - 150, box: i => boxes?.[i] });
+  // On the server the two directions from the reference frame and the cones run on threads of their
+  // own, reading the decoded file (2026-11-18: 12 s of a 43 s jump on one thread); the same numbers.
+  const threaded = frames.fd ? await groundThreads(frames, { ref, from, to, gy: farY - 150, boxes, cones: want }).catch(e => { console.error('ground threads failed:', e?.message || e); return null; }) : null;
+  const g = threaded?.g ?? await trackGround(get, W, H, { ref, from, to, groundY: () => farY - 150, box: i => boxes?.[i] });
   // The board again once the athlete has left it. During the contact the white shoe stands on
   // the white unit and the foul strip can't be read: on IMG_4677 (Ostrava, a white unit about
   // 40 cm wide) the line came out 10-17 cm too far up the runway, the 2 m ruler too long and
@@ -513,7 +519,7 @@ export async function measureGround({ frames, track, jump, boxes }) {
     // Cones anywhere in the frame: the analysis keeps those that land beside the runway. A band
     // from the tracked corners lost the 10.2 m cone on IMG_4677, where the tracking 10 m from
     // the board was tens of pixels off.
-    const c = get(+i) && detectCones(get(+i), W, H, { box: boxes?.[+i] });
+    const c = threaded ? threaded.cones[i] : get(+i) && detectCones(get(+i), W, H, { box: boxes?.[+i] });
     if (c?.length) cones[i] = c.map(p => p.map(x => +x.toFixed(1)));
   }
   const offs = lineDets.map(x => x.d.takeoff?.offPx).filter(Number.isFinite);
@@ -523,6 +529,29 @@ export async function measureGround({ frames, track, jump, boxes }) {
     lineOffsetPx: offs.length ? +[...offs].sort((a, b) => a - b)[offs.length >> 1].toFixed(1) : null,
     trackRms: +Math.max(...Object.values(g).map(v => v.rms)).toFixed(2), ms: Date.now() - t0,
   };
+}
+
+// trackGround's two directions and detectCones over `cones` (frame list) on worker threads.
+async function groundThreads(frames, { ref, from, to, gy, boxes, cones }) {
+  const fd = await frames.fd(), { W, H } = frames;
+  const { Worker } = await import('node:worker_threads');
+  const bx = Array.from({ length: to + 1 }, (_, i) => boxes?.[i] ?? null);
+  const run = task => new Promise((res, rej) => {
+    const w = new Worker(new URL('./ground-worker.mjs', import.meta.url), { workerData: { fd, W, H, task } });
+    w.once('message', m => (m.error ? rej(new Error(m.error)) : res(m.out)));
+    w.once('error', rej);
+  });
+  const parts = 5, size = Math.ceil(cones.length / parts);
+  const [fw, bw, ...cs] = await Promise.all([
+    run({ kind: 'track', ref, from, to, gy, boxes: bx, steps: [1] }),
+    run({ kind: 'track', ref, from, to, gy, boxes: bx, steps: [-1] }),
+    ...Array.from({ length: parts }, (_, k) => cones.slice(k * size, (k + 1) * size)).filter(l => l.length).map(list => run({ kind: 'cones', list, boxes: bx })),
+  ]);
+  // the same key order as one pass: ref first, then forward, then backward
+  const g = { [ref]: fw[ref] };
+  for (const k of Object.keys(fw)) if (+k !== ref) g[k] = fw[k];
+  for (const k of Object.keys(bw)) if (+k !== ref) g[k] = bw[k];
+  return { g, cones: Object.assign({}, ...cs) };
 }
 
 // ---------- a hand-held phone (RSI clips) ----------

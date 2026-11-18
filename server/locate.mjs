@@ -148,8 +148,8 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
       // landing tile was 0.23 s early on IMG_4951 (2026-11-16) and the sand never got shown.
       range(clamp(Math.min(Lok ?? Infinity, T + f(0.7)) - f(0.2)), clamp(Math.max(Lok ?? -Infinity, T + f(0.83)) + f(0.12)), per),
     ];
-    const sheets = [];
-    for (const w of windows) for (const part of chunks(w, 36)) sheets.push(await contactSheet(frames, part, { boxes, cols: 9, tileW: 160 }));
+    // the sheets at once, in the same order (they were built one after another)
+    const sheets = await Promise.all(windows.flatMap(w => chunks(w, 36)).map(part => contactSheet(frames, part, { boxes, cols: 9, tileW: 160 })));
     const ans = await ask(client, model, FRAMES_PROMPT, sheets, FRAMES_SCHEMA);
     const shown = new Set(windows.flat());
     return { ans, T, L, ground: (ans?.on_ground ?? []).filter(i => shown.has(i)), sand: shown.has(ans?.sand) ? ans.sand : null, runThrough: ans?.run_through === true };
