@@ -122,18 +122,24 @@ export function stepsOf(contacts, start) {
 // `edge` of the way from the trough's floor to T.
 // Bumped when the contact rule changes, so the phone knows which analyses to run again.
 // 3 (2026-11-18): the server keeps the phone's bob in the track's motion and fills a lost toe.
-export const SPRINT_ALGO = 3;
+// 4 (2026-11-18): 60 fps clips get their own thresholds (STANCE_60).
+export const SPRINT_ALGO = 4;
 const realToe = (motion, foot, a, b) => motion.slice(a, b + 1).some(m => m && m[foot] && !m[`${foot}f`]);
 export const STANCE = { T: 2.0, edge: 0.45, minLen: 5, wide: 3.2, xw: 1 };
-function footSpeed(motion, foot, fps, xw = STANCE.xw) {
+// 60 fps (2026-11-18, Stanley's runs of 4 July filmed at 60): the thresholds are speeds per 1/120 s
+// and a frame's match noise is the same in pixels at any rate, so at 60 it reads twice as fast and
+// the 120 fps T found a stance every 2 s. Set on 13 stances read by hand on toe-following crops of
+// five clips: 24 of 26 edges within a frame. 120 fps clips keep STANCE as it was.
+export const STANCE_60 = { T: 6.0, edge: 0.75, wide: 9.6, noise: 2 };
+function footSpeed(motion, foot, fps, xw = STANCE.xw, win = null) {
   const k = 120 / fps;
   const raw = motion.map(m => (m && m.g && m[foot] && (m[foot][2] ?? 1) >= 0.6 && m.h ? Math.hypot(xw * (m[foot][0] - m.g[0]), m[foot][1] - m.g[1]) / m.h * 100 * k : null));
-  const w = Math.max(2, Math.round((2 * fps) / 120));
+  const w = win ?? Math.max(2, Math.round((2 * fps) / 120));
   return raw.map((_, i) => { const v = raw.slice(Math.max(0, i - w), i + w + 1).filter(x => x != null); return v.length >= 3 ? median(v) : null; });
 }
-export function footStances(motion, foot, ts, fps, { T = STANCE.T, edge = STANCE.edge, minLen = STANCE.minLen, from = 0, to = Infinity } = {}) {
-  const m = footSpeed(motion, foot, fps), out = [];
-  const precise = footContacts(motion, foot, ts, fps, { ...SPRINT, floorPx: 0.6 });
+export function footStances(motion, foot, ts, fps, { T = STANCE.T, edge = STANCE.edge, minLen = STANCE.minLen, from = 0, to = Infinity, win = null, noise = 1 } = {}) {
+  const m = footSpeed(motion, foot, fps, STANCE.xw, win), out = [];
+  const precise = footContacts(motion, foot, ts, fps, { ...SPRINT, planted: SPRINT.planted * noise, floorPx: 0.6 * noise });
   const minN = Math.max(3, Math.round((minLen * fps) / 120));
   for (let i = Math.max(0, from); i < Math.min(m.length, to); i++) {
     if (m[i] == null || m[i] > T) continue;
@@ -170,7 +176,7 @@ function refineEdges(precise, motion, x, y) {
 // A gap of two steps or more hides stances the first pass missed: look for them there with a
 // looser T, both feet, keeping the ones that fit the stride (alternating, at least 0.7 of a step
 // from their neighbours), the clearest first.
-function fillGaps(contacts, motion, ts, fps) {
+function fillGaps(contacts, motion, ts, fps, wide = STANCE.wide, lo = null) {
   let list = [...contacts].sort((x, y) => x.td - y.td);
   const gaps = list.slice(1).map((c, i) => c.td - list[i].td).filter(g => g > 0.15 && g < 0.4);
   const T0 = gaps.length >= 3 ? median(gaps) : null;
@@ -180,7 +186,7 @@ function fillGaps(contacts, motion, ts, fps) {
   for (let i = 0; i + 1 < list.length; i++) {
     const c = list[i], n = list[i + 1];
     if (n.td - c.td < 1.6 * T0 || n.td - c.td > 6 * T0) continue;
-    const cand = ['l', 'r'].flatMap(f => footStances(motion, f, ts, fps, { T: STANCE.wide, from: idx(c.b), to: idx(n.a) }))
+    const cand = ['l', 'r'].flatMap(f => footStances(motion, f, ts, fps, { ...(lo ?? {}), T: wide, from: idx(c.b), to: idx(n.a) }))
       .filter(x => x.td > c.to && x.to < n.td).sort((x, y) => x.floor - y.floor);
     const seq = [c, n];
     for (const x of cand) {
@@ -195,7 +201,8 @@ function fillGaps(contacts, motion, ts, fps) {
 
 export function sprintFromMotion({ motion, ts, fps, o = SPRINT }) {
   if (!motion?.some(m => m?.g)) return { error: 'Vo videu sa nedala sledovať dráha vedľa bežca.' };
-  const contacts = fillGaps(['l', 'r'].flatMap(s => footStances(motion, s, ts, fps)), motion, ts, fps);
+  const lo = fps < 90 ? STANCE_60 : null;
+  const contacts = fillGaps(['l', 'r'].flatMap(s => footStances(motion, s, ts, fps, lo ?? {})), motion, ts, fps, lo?.wide ?? STANCE.wide, lo);
   const start = startOf(contacts, o);
   const steps = stepsOf(contacts, start);
   if (steps.length < 3) return { error: 'Vo videu som nenašiel dosť krokov. V zábere musia byť celé chodidlá aspoň počas štyroch krokov.' };
@@ -214,8 +221,11 @@ export function sprintFromMotion({ motion, ts, fps, o = SPRINT }) {
 // Stanley's 1.86 m a fly step tops out near 2.45 m, so 3.7 /s with 2.70 m is a misread.
 export const SANE = { freq: [3.6, 5.6], length: [0.85, 1.32], height: 1.8 };
 export const STEP_RANGE = { contact: [0.07, 0.25], flight: [0.05, 0.22], step: [0.17, 0.33], startContact: 0.32, startStep: 0.42, startFlight: 0.02, jump: 0.25, minRun: 3 };
-export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
-  const contactOk = (s, i) => s && (s.estContact || (s.contact >= o.contact[0] && s.contact <= (accel && i < 3 ? o.startContact : o.contact[1])));
+// fps: under 90 a frame is 17 ms, so a contact or a step reads up to a frame either way: the bounds
+// give that one frame (2026-11-18, Stanley's 60 fps runs; 120 fps clips keep the bounds as they were).
+export function cleanSteps(steps, { accel = false, o = STEP_RANGE, fps = 120 } = {}) {
+  const q = fps < 90 ? 1 / fps : 0;
+  const contactOk = (s, i) => s && (s.estContact || (s.contact >= o.contact[0] - q && s.contact <= (accel && i < 3 ? o.startContact : o.contact[1])));
   const ok = (s, i) => {
     const early = accel && i < 3, next = steps[i + 1];
     if (!contactOk(s, i)) return false;
@@ -230,7 +240,7 @@ export function cleanSteps(steps, { accel = false, o = STEP_RANGE } = {}) {
   let cur = [];
   steps.forEach((s, i) => {
     const prev = cur.at(-1);
-    if (ok(s, i) && (!prev || Math.abs(s.step - prev.step) <= o.jump * prev.step)) { cur.push(s); return; }
+    if (ok(s, i) && (!prev || Math.abs(s.step - prev.step) <= o.jump * prev.step + q)) { cur.push(s); return; }
     if (cur.length) runs.push(cur);
     cur = ok(s, i) ? [s] : [];
   });
@@ -426,7 +436,7 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
   const k0 = mode ?? (run ? modeOfRun(run) : video.modeGuess);
   const kind = k0 === 'rozbeh' ? 'fly' : k0;   // a run-up is analysed like a fly: steady steps at the end
   const raw = video.steps.filter(s => s.contact != null);
-  const all = cleanSteps(kind === 'fly' ? mendLateTouchdowns(raw) : raw, { accel: kind === 'accel' && !!video.start });
+  const all = cleanSteps(kind === 'fly' ? mendLateTouchdowns(raw) : raw, { accel: kind === 'accel' && !!video.start, fps: video.fps ?? 120 });
   const legs = runMetres(run) ? run.legs : [];
   const out = { kind, distance: legs.length ? legs.length * 10 : null, legs, who, dropped: raw.length - all.length };
   if (all.length < 3) return { ...out, steps: [], tooFew: true, legStats: legs.map(l => ({ time: l, speed: r3(10 / l), stepLength: null })), sides: sidesOf([]) };

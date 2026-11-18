@@ -549,7 +549,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // Only the analysis opened (2026-11-15 review: all of them at start meant ~250 MB on mobile data).
   async function rerunOld(only) {
     const since = Date.now() - 7 * 86400_000;
-    const ids = load().filter(r => r.id === only && !r.pending && r.hasClip && r.video && (r.video.algo ?? 1) < SPRINT_ALGO && r.at >= since && !r.rerun).map(r => r.id);
+    // uploaded in the last week (the id is the upload time; `at` is when it was filmed, and a clip of
+    // 4 July uploaded today never ran again: 2026-11-18)
+    const added = r => Number(String(r.id).slice(2)) || r.at;
+    const ids = load().filter(r => r.id === only && !r.pending && r.hasClip && r.video && (r.video.algo ?? 1) < SPRINT_ALGO && added(r) >= since && !r.rerun).map(r => r.id);
     for (const id of ids) {
       patch(id, x => { x.rerun = SPRINT_ALGO; });
       const r0 = load().find(r => r.id === id), blob = await loadClip?.(id).catch(() => null);
@@ -583,7 +586,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       const run = cleanLegs(rec.runKey ? runs().find(r => r.key === rec.runKey) ?? rec.run ?? null : rec.run ?? null);
       const who = run?.who ?? rec.who ?? null, k = rec.mode ?? (run ? modeOfRun(run) : rec.video.modeGuess);
       // the steps the result screen shows (impossible ones dropped), so list and screen agree
-      const steps = cleanSteps((rec.video.steps ?? []).filter(x => x.contact != null), { accel: k === 'accel' && !!rec.video.start });
+      const steps = cleanSteps((rec.video.steps ?? []).filter(x => x.contact != null), { accel: k === 'accel' && !!rec.video.start, fps: rec.video.fps ?? 120 });
       const contact = steps.length ? steps.reduce((a, x) => a + (x.contact ?? 0), 0) / steps.length : null;
       return {
         kind: 'sprint', id: rec.id, at: rec.at, who,

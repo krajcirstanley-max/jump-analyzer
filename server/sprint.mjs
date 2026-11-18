@@ -314,7 +314,8 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, who: kn
     timing.motionParts = motion?.stats;
     const who = await whoP;
     const sprint = sprintFromMotion({ motion, ts: meta.ts, fps: meta.fps });
-    if (sprint.error) return { error: sprint.error };
+    const dumpOf = () => ({ meta: { fps: meta.fps, W: meta.W, H: meta.H, N: meta.N }, ts: meta.ts, wire, motion, first: res.first, last: res.last });
+    if (sprint.error) return dump ? { result: { error: sprint.error, steps: [], dump: dumpOf() } } : { error: sprint.error };
     // how each step looks from the side (foot against the hips, shin, trunk, knee): the advice's
     // "ako to vyzerá"; null where the camera did not see the step from the side
     sprint.looks = sprintLooks(pose, sprint.steps);
@@ -328,7 +329,7 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, who: kn
       W: meta.W, H: meta.H, N: meta.N, fps: +meta.fps.toFixed(3), ms: Math.round(performance.now() - t0), timing,
     };
     // dump: the pose and the raw toe motion (with the toe's place) for the offline tests
-    if (dump) result.dump = { meta: { fps: meta.fps, W: meta.W, H: meta.H, N: meta.N }, ts: meta.ts, wire, motion, first: res.first, last: res.last };
+    if (dump) result.dump = dumpOf();
     return { result };
   } finally {
     frames.close();
