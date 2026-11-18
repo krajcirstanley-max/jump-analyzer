@@ -156,7 +156,10 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     let j = i, lvl = lowest(down[i]);
     while (j + 1 < n && down[j + 1] && lowest(down[j + 1]) <= lvl + STEP) { lvl = Math.max(lvl, lowest(down[j + 1])); j++; }
     const lv = [], used = new Set();
-    for (let k = i; k <= j; k++) for (const [s, l] of Object.entries(down[k])) if (l >= lvl - STEP) { used.add(s); lv.push(l); }
+    // a foot counts for the contact within the free-leg line (12 cm), not the 8 cm step: filmed a
+    // little from the side the foot nearer the phone sits lower (IMG_3519, 2026-11-18: both feet down,
+    // 9 cm apart in the picture, read as a single-leg drop jump)
+    for (let k = i; k <= j; k++) for (const [s, l] of Object.entries(down[k])) if (l >= lvl - 0.12 * pxM) { used.add(s); lv.push(l); }
     contacts.push({ td: i, to: j, level: Math.max(...lv), feet: [...used].sort().join('') });
     i = j;
   }
@@ -187,9 +190,15 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // A short "contact" well above the ground on both sides of it is the foot hanging in the air
   // (a CMJ with the feet drawn up, 2026-11-14): nobody lands 10 cm up and jumps back down in
   // under 0.3 s. A box is stood on longer, and is not higher than the contact before it.
-  for (let k = contacts.length - 2; k >= 1; k--) {
-    const c = contacts[k], up = 0.10 * pxM;
-    if ((c.to - c.td + 1) / fps < 0.3 && c.level < contacts[k - 1].level - up && c.level < contacts[k + 1].level - up) contacts.splice(k, 1);
+  // Later, not next: two such pieces in a row kept each other (2026-11-18, rsi.mp4: the rebound took
+  // the feet out of the top of the picture and the pose sat on someone behind the box, 177-199 and
+  // 206-214 some 30 cm "up", the landing on the floor at 217; the flight read 0.33 s for 0.66 s).
+  for (let again = true; again;) {
+    again = false;
+    for (let k = contacts.length - 2; k >= 1; k--) {
+      const c = contacts[k], up = 0.10 * pxM, later = Math.max(...contacts.slice(k + 1).map(x => x.level));
+      if ((c.to - c.td + 1) / fps < 0.3 && c.level < contacts[k - 1].level - up && c.level < later - up) { contacts.splice(k, 1); again = true; }
+    }
   }
   // The same at the top of the last flight, when the clip ends before a landing run is long enough
   // to count (Miška 15:01, 114112: the feet paused at the apex 184-196, the landing is at 227 of 228).
