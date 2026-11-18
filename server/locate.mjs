@@ -159,7 +159,8 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
   let coarse = guess.TD == null ? await overview : null;
   const T0 = guess.TD ?? coarse?.takeoff;
   if (T0 == null) return { events: {}, rejected: ['TD'], coarse, model, ms: Date.now() - t0 };
-  let seen = await read(T0, guess.TD != null ? guess.landing ?? null : coarse?.landing ?? null);
+  // a failed reading waits for the overview, so no call of this job is still out after it fails
+  let seen = await read(T0, guess.TD != null ? guess.landing ?? null : coarse?.landing ?? null).catch(async e => { await overview; throw e; });
   coarse ??= await overview;
   // The overview disagrees by more than half a second: the pose track picked the wrong place.
   if (coarse?.takeoff != null && Math.abs(coarse.takeoff - T0) > f(0.5)) seen = await read(coarse.takeoff, coarse.landing ?? null);
