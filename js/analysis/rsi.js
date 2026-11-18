@@ -36,7 +36,7 @@ function camLookup(cam, n) {
   }
   return inv;
 }
-function rawTrack(result, cam) {
+export function rawTrack(result, cam) {
   const n = result.fast?.length ?? 0, out = new Array(n);
   const inv = camLookup(cam, n);
   for (let i = 0; i < n; i++) {
@@ -51,7 +51,7 @@ function rawTrack(result, cam) {
 
 // Lowest point of a foot in the image (largest y): toes or ankle. From the front the heel is
 // hidden behind the forefoot and its keypoint is a guess, so it does not count.
-function footLow(kp, s) {
+export function footLow(kp, s) {
   const pts = ['bigtoe', 'smalltoe', 'ank'].map(n => at(kp, s + n)).filter(Boolean);
   return pts.length ? Math.max(...pts.map(p => p[1])) : NaN;
 }
@@ -219,24 +219,54 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     }
   }
 
+  // A sliver of one or two frames at the very start, right before the next contact, is the first
+  // frame of the clip read apart from the stand (2026-11-18, 1794925090410 on a second server run:
+  // 0-0 and 1-356, and the stand on the box no longer counted as one): it joins the stand.
+  if (contacts.length > 1 && contacts[0].td === 0 && contacts[0].to - contacts[0].td < 2 && contacts[1].td - contacts[0].to <= 2) { contacts[1].td = 0; contacts.shift(); }
   // The floor is the lowest level (largest y) used by contacts; a level well above it is a box.
   const floor = Math.max(...contacts.map(c => c.level));
   // On the box: standing there (300 ms or more) at the start, with the next contact a step lower.
   // Not "highest level in the clip": from the front a landing nearer the phone sits lower in the
   // picture, and the real floor contact then looked like a box (IMG_4186, IMG_3521).
   contacts.forEach(c => { c.ms = ((c.to - c.td + 1) / fps) * 1000; });
+  // Between leaving a stand and the next contact, the lower foot never rose more than 5 cm above
+  // the stand (known on most frames between). Off a box it only goes down to the floor; a jump
+  // from the floor with 0.35 s in the air lifts both feet g t^2 / 8 = 15 cm. The feet, not the hips:
+  // filmed close (only the legs), the hips are out of the picture (1794929272459).
+  const lowAt = i => Math.max(feet.l[i], feet.r[i]);
+  const riseOf = (c, b) => {
+    const ys = []; for (let i = c.to + 1; i < b; i++) ys.push(lowAt(i));
+    const known = ys.filter(Number.isFinite);
+    return !ys.length || known.length < 0.7 * ys.length ? NaN : (c.level - Math.min(...known)) / pxM;
+  };
+  const feetOnlyFall = (c, b) => riseOf(c, b) <= 0.05;
+  // a gap of T s in the stand was a hop only if the feet rose at least half of what that much time
+  // in the air takes (g T^2 / 8): a phone drifting while the athlete stands moved the feet 5 cm
+  // in 0.68 s (1794932274606), a hop that long lifts them 56 cm
+  const hopIn = (c, d) => { const T = gap(c, d) / 1000, r0 = riseOf(c, d.td); return T >= 0.06 && Number.isFinite(r0) && r0 > Math.max(0.05, (0.5 * 9.81 * T * T) / 8); };
+
   const gap = (a, b) => ((b.td - a.to - 1) / fps) * 1000;
   contacts.forEach((c, k) => {
     const next = contacts[k + 1], after = contacts[k + 2];
     // A clip that starts with the athlete already standing still counts what it shows of the stand.
-    const stood = c.ms >= 300 || (k === 0 && c.td <= 2 && c.ms >= 150);
+    // Pieces with under 0.1 s between them are one stand: nobody jumps or steps off a box and back
+    // in that time (2026-11-18, 1794929272459 on a second server run: the stand came as 0-92,
+    // 101-130, 133-183, 187-209 and the last piece, 192 ms, was not a stand).
+    let g0 = k;
+    while (g0 > 0 && gap(contacts[g0 - 1], contacts[g0]) < 100) g0--;
+    const groupMs = ((c.to - contacts[g0].td + 1) / fps) * 1000;
+    const stood = c.ms >= 300 || groupMs >= 300 || (g0 === 0 && contacts[0].td <= 2 && groupMs >= 150);
     const level = !noBox && stood && !!next && next.level - c.level > STEP;
     // Off a box by the timing alone: a stand, a short drop (stepping off 30 cm takes 0.13-0.15 s
     // here, a jump from the floor is 0.35 s or more in the air), then a rebound with a real flight
     // after it. A CMJ has no flight before its take-off. From a low phone the box top and the floor
     // in front of it sit at nearly the same height in the picture, and Claude, seeing only legs,
     // said "no box" (2026-11-17: Stanley's 15:17 drop jump came out as a pogo, Miška's 15:01 as a CMJ).
-    const byFlight = stood && !!next && !!after && gap(c, next) >= 60 && gap(c, next) <= 230 && next.ms < 600 && gap(next, after) >= 300;
+    // Off a higher box the fall is longer (free fall from 50 cm is 0.32 s; Miška's 50 cm stand to
+    // floor was 0.23 s, 2026-11-18), as long as a jump from the floor (0.35 s or more in the air) is
+    // told apart: off a box the feet only go down, from the floor they rise first.
+    const fall = !!next && gap(c, next);
+    const byFlight = stood && !!next && !!after && fall >= 60 && (fall <= 230 || (fall <= 450 && feetOnlyFall(c, next.td))) && next.ms < 600 && gap(next, after) >= 300;
     // The stand may come in pieces (close-up of the legs, a phone that moves): by the timing it
     // still counts when every piece before it is at the same level, so the athlete never left the box.
     const sameStand = contacts.slice(0, k).every(p => Math.abs(p.level - c.level) <= 1.5 * STEP);
@@ -249,6 +279,24 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     c.byFlight = c.onBox && byFlight;
     if (c.byFlight) for (let q = 0; q < k; q++) { contacts[q].onBox = true; contacts[q].byFlight = true; }
   });
+  // The drop jump as a sequence of phases (2026-11-18, research in the vault): a stand from the
+  // start of the clip with no hop in it, a fall of 0.06-0.45 s in which the lower foot only goes
+  // down, a contact of 0.08-0.6 s, and a flight of 0.3 s or more. Everything before the fall is the
+  // stand on the box, however the pose cut it into pieces or the moving phone shifted its level
+  // (1794932274606 on a second server run: 0-52, 134-185, 186-199 at levels 749, 777, 885).
+  if (!noBox && !contacts.some(c => c.onBox)) {
+    for (let r = 1; r < contacts.length - 1; r++) {
+      const R = contacts[r], before = contacts[r - 1], after = contacts[r + 1];
+      const span = ((before.to - contacts[0].td + 1) / fps) * 1000, drop = gap(before, R);
+      if (span < 300 || drop < 60 || drop > 450 || R.ms < 80 || R.ms > 600 || gap(R, after) < 300) continue;
+      if (!feetOnlyFall(before, R.td)) continue;
+      let hop = false;
+      for (let q = 1; q < r; q++) if (hopIn(contacts[q - 1], contacts[q])) hop = true;
+      if (hop) break;
+      for (let q = 0; q < r; q++) { contacts[q].onBox = true; contacts[q].byFlight = true; }
+      break;
+    }
+  }
   // Stepping off, the leading foot hangs still in front of the box for a moment before the drop
   // (Miška 2026-11-17 15:02, frames 230-252, one foot, then 0.14 s "in the air" and both feet
   // land): no contact, the drop goes on to the next one. A real single-leg landing off the box
@@ -330,6 +378,77 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
 // it lands, so a still-run rule misses it.
 // Edges move at most 8 frames: a toe that stood still on the box and then on the floor must not
 // pull the floor contact back to the start of the clip (IMG_4186).
+// Contact edges from the pixels of the shoes (2026-11-18, after the research in the vault note
+// "Jump Video Analyzer - exact timing, speed and playback research"). motion: per frame the toe
+// patch's motion to the next frame against the floor beside it (server/sprint.mjs). A falling foot
+// moves 15-25 px a frame and stops at once on the floor; a leaving toe goes from still to the
+// rising speed. Each edge is the sub-frame moment the toe's speed crosses a share of that speed,
+// interpolated between the two frames around it: touchdown where the second foot falls under 40 %
+// of its falling speed (first frame on the floor: the next whole frame), toe-off where the first
+// foot rises past 50 % of its rising speed (last frame on the floor: the whole frame before). The
+// same rule over 30-50 % (touchdown) and 40-60 % (toe-off) keeps all 24 touchdowns and landings and
+// all 14 toe-offs of the hand-checked set within one frame, on two server runs whose pose differed
+// by up to two frames. A phone that follows the athlete smears the stop over 2-3 frames: there the
+// pose's own edges stand.
+const PX_TD = 0.4, PX_TO = 0.5;
+function vyOf(motion) {
+  const by = new Map();
+  for (const m of motion ?? []) if (m?.g) by.set(m.f, { l: m.l ? m.l[1] - m.g[1] : NaN, r: m.r ? m.r[1] - m.g[1] : NaN });
+  return f => by.get(f) ?? { l: NaN, r: NaN };
+}
+const med4 = a => { const b = a.filter(Number.isFinite).sort((p, q) => p - q); return b.length >= 2 ? b[b.length >> 1] : NaN; };
+function stopAt(v, foot, c) {        // sub-frame time a falling toe stops, searched around frame c
+  for (let f = c - 6; f <= c + 5; f++) {
+    const fall = med4([v(f - 5)[foot], v(f - 4)[foot], v(f - 3)[foot], v(f - 2)[foot]]);
+    if (!(fall > 3)) continue;
+    const a = v(f - 1)[foot], b = v(f)[foot], th = PX_TD * fall;
+    if (a >= th && b < th) return f - 1 + (a - th) / (a - b);
+  }
+  return NaN;
+}
+function leaveAt(v, foot, c) {       // sub-frame time a toe leaves the floor, searched around frame c
+  for (let f = c - 4; f <= c + 6; f++) {
+    const rise = med4([v(f + 2)[foot], v(f + 3)[foot], v(f + 4)[foot]]);
+    if (!(rise < -3)) continue;
+    const a = v(f - 1)[foot], b = v(f)[foot], th = PX_TO * rise;
+    if (a > th && b <= th) return f - 1 + (a - th) / (a - b);
+  }
+  return NaN;
+}
+export function pixelEdges(r, motion, fps) {
+  if (!r?.events?.length || !motion?.length) return r;
+  const v = vyOf(motion), G0 = 9.81;
+  const fin = x => x.filter(Number.isFinite);
+  const events = r.events.map(e => {
+    if (e.onBox) return { ...e };
+    const tTD = Math.max(...fin([stopAt(v, 'l', e.td), stopAt(v, 'r', e.td)]));
+    const tTO = Math.min(...fin([leaveAt(v, 'l', e.to), leaveAt(v, 'r', e.to)]));
+    const td = Number.isFinite(tTD) ? Math.ceil(tTD) : e.td, to = Number.isFinite(tTO) ? Math.floor(tTO) : e.to;
+    return { ...e, td, to: to > td ? to : e.to, edges: Number.isFinite(tTD) || Number.isFinite(tTO) ? 'pixels' : 'pose' };
+  });
+  const jumps = r.jumps.map(j => {
+    const k = r.events.findIndex(e => e.td === j.td), e = events[k], next = events[k + 1];
+    if (!e || !next || e.onBox) return j;
+    const contactMs = ((e.to - e.td + 1) / fps) * 1000, flightMs = ((next.td - e.to - 1) / fps) * 1000;
+    if (!(contactMs > 40 && flightMs > 60)) return j;
+    const t = flightMs / 1000, h = (G0 * t * t) / 8;
+    return { ...j, raw: { td: j.td, to: j.to, contactMs: j.contactMs, flightMs: j.flightMs }, td: e.td, to: e.to,
+      contactMs, flightMs, heightCm: h * 100, rsi: h / (contactMs / 1000), ri: flightMs / contactMs, slow: contactMs > 250, edges: 'pixels' };
+  });
+  const standing = (r.standing ?? []).map(st => {
+    const k = r.events.findIndex(e => e.td === st.td), e = events[k], next = events[k + 1];
+    if (!e || !next) return st;
+    const flightMs = ((next.td - e.to - 1) / fps) * 1000;
+    if (!(flightMs > 100)) return st;
+    const t = flightMs / 1000;
+    return { ...st, raw: { to: st.to, flightMs: st.flightMs }, to: e.to, flightMs, heightCm: ((G0 * t * t) / 8) * 100, edges: 'pixels' };
+  });
+  const best = jumps.reduce((b, j) => (!b || j.rsi > b.rsi ? j : b), null);
+  const top5 = jumps.length >= 5 ? [...jumps].sort((a, b) => b.rsi - a.rsi).slice(0, 5) : null;
+  const best5 = top5 && { rsi: top5.reduce((a, j) => a + j.rsi, 0) / 5, ri: top5.reduce((a, j) => a + j.ri, 0) / 5, contactMs: top5.reduce((a, j) => a + j.contactMs, 0) / 5 };
+  return { ...r, jumps, standing, best, best5, events: events.map(e => ({ ...e, ms: Math.round(((e.to - e.td + 1) / fps) * 1000) })) };
+}
+
 export function refineEdges(r, toe, fps, land = toe) {
   if (!r?.events?.length || !toe?.length) return r;
   const G0 = 9.81, W = 8;

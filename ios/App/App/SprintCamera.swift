@@ -49,6 +49,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "saveVideo", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pickVideo", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "viewCopy", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "trimJump", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
     private var galleryDelegate: GalleryPickerDelegate?
@@ -85,6 +86,26 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         let t0 = CACurrentMediaTime()
         ViewCopy.make(src, to: dst) { err in
             if let err = err { call.reject(err) } else { call.resolve(["path": dst.path, "ms": Int((CACurrentMediaTime() - t0) * 1000)]) }
+        }
+    }
+
+    /// The drop jump alone (2026-11-18, Stanley: "prečo ho neorezať predtým ako ho pošleš na
+    /// server"): a clip over 3.5 s is cut to 1.8 s before its biggest motion (the rebound and its
+    /// landing) and 1.0 s after, written like the watching copy. Standing still is all that is cut;
+    /// the server measures the rest, and the app sends the whole clip when no jump comes back.
+    /// Resolves { path, from, to, dur, ms } or { trimmed: false, dur }.
+    @objc func trimJump(_ call: CAPPluginCall) {
+        guard let p = call.getString("path") else { call.reject("No path"); return }
+        let src = p.hasPrefix("file://") ? (URL(string: p) ?? URL(fileURLWithPath: p)) : URL(fileURLWithPath: p)
+        let t0 = CACurrentMediaTime()
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let w = JumpWindow.find(src) else { call.resolve(["trimmed": false]); return }
+            if !w.cut { call.resolve(["trimmed": false, "dur": w.dur]); return }
+            let dst = FileManager.default.temporaryDirectory.appendingPathComponent("jump-\(UUID().uuidString).mp4")
+            ViewCopy.make(src, to: dst, range: CMTimeRange(start: CMTime(seconds: w.from, preferredTimescale: 600), end: CMTime(seconds: w.to, preferredTimescale: 600))) { err in
+                if let err = err { call.reject(err) }
+                else { call.resolve(["trimmed": true, "path": dst.path, "from": w.from, "to": w.to, "dur": w.dur, "ms": Int((CACurrentMediaTime() - t0) * 1000)]) }
+            }
         }
     }
 
@@ -1118,7 +1139,7 @@ final class GalleryPickerDelegate: NSObject, PHPickerViewControllerDelegate {
 // MARK: - The copy for watching
 
 enum ViewCopy {
-    static func make(_ src: URL, to dst: URL, done: @escaping (String?) -> Void) {
+    static func make(_ src: URL, to dst: URL, range: CMTimeRange? = nil, done: @escaping (String?) -> Void) {
         let q = DispatchQueue(label: "viewcopy", qos: .userInitiated)
         q.async {
             let asset = AVURLAsset(url: src)
@@ -1154,8 +1175,9 @@ enum ViewCopy {
                 i.expectsMediaDataInRealTime = false
                 if reader.canAdd(o) && writer.canAdd(i) { reader.add(o); writer.add(i); aOut = o; aIn = i }
             }
+            if let range = range { reader.timeRange = range }
             guard reader.startReading(), writer.startWriting() else { done(reader.error?.localizedDescription ?? writer.error?.localizedDescription ?? "Kópia zlyhala."); return }
-            writer.startSession(atSourceTime: .zero)
+            writer.startSession(atSourceTime: range?.start ?? .zero)
             let group = DispatchGroup()
             func pump(_ input: AVAssetWriterInput, _ output: AVAssetReaderTrackOutput, _ label: String) {
                 group.enter()
@@ -1174,5 +1196,65 @@ enum ViewCopy {
                 writer.finishWriting { done(writer.status == .completed ? nil : (writer.error?.localizedDescription ?? "Zápis zlyhal.")) }
             }
         }
+    }
+}
+
+
+// MARK: - Where the jump is
+
+/// The biggest motion in the clip, from the luma at 1/15 of the size: each frame against the one
+/// two before, after the best shift of up to 3 samples (the hand's shake), smoothed over 0.1 s.
+/// Checked on 8 RSI clips (2026-11-18): the peak is the rebound's flight or its landing.
+enum JumpWindow {
+    struct W { let from: Double; let to: Double; let dur: Double; let cut: Bool }
+    static func find(_ src: URL) -> W? {
+        let asset = AVURLAsset(url: src)
+        guard let vt = asset.tracks(withMediaType: .video).first, let reader = try? AVAssetReader(asset: asset) else { return nil }
+        let dur = CMTimeGetSeconds(asset.duration)
+        if !(dur > 3.5) { return W(from: 0, to: dur, dur: dur, cut: false) }
+        let out = AVAssetReaderTrackOutput(track: vt, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange])
+        out.alwaysCopiesSampleData = false
+        guard reader.canAdd(out) else { return nil }
+        reader.add(out)
+        guard reader.startReading() else { return nil }
+        let step = 15
+        var frames: [[Float]] = [], times: [Double] = []
+        var gw = 0, gh = 0
+        while let sb = out.copyNextSampleBuffer() {
+            guard let pb = CMSampleBufferGetImageBuffer(sb) else { continue }
+            CVPixelBufferLockBaseAddress(pb, .readOnly)
+            let w = CVPixelBufferGetWidthOfPlane(pb, 0), h = CVPixelBufferGetHeightOfPlane(pb, 0), row = CVPixelBufferGetBytesPerRowOfPlane(pb, 0)
+            if let base = CVPixelBufferGetBaseAddressOfPlane(pb, 0)?.assumingMemoryBound(to: UInt8.self) {
+                gw = w / step; gh = h / step
+                var g = [Float](repeating: 0, count: gw * gh)
+                for y in 0..<gh { for x in 0..<gw {
+                    let o = (y * step) * row + x * step
+                    g[y * gw + x] = (Float(base[o]) + Float(base[o + 1]) + Float(base[o + row]) + Float(base[o + row + 1])) / 4
+                } }
+                frames.append(g); times.append(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sb)))
+            }
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+        }
+        let n = frames.count
+        guard n > 10, gw > 10, gh > 10 else { return nil }
+        var m = [Float](repeating: 0, count: n)
+        for i in 2..<n {
+            let a = frames[i - 2], b = frames[i]; var best = Float.greatestFiniteMagnitude
+            for dy in -3...3 { for dx in -3...3 {
+                var s: Float = 0, c: Float = 0
+                for y in 4..<(gh - 4) { for x in 4..<(gw - 4) { s += abs(a[y * gw + x] - b[(y + dy) * gw + x + dx]); c += 1 } }
+                best = min(best, s / c)
+            } }
+            m[i] = best
+        }
+        var pk = 0, top: Float = -1
+        for i in 0..<n {
+            var s: Float = 0, c: Float = 0
+            for k in max(0, i - 6)...min(n - 1, i + 6) { s += m[k]; c += 1 }
+            if s / c > top { top = s / c; pk = i }
+        }
+        let t = times[pk] - (times.first ?? 0)
+        let from = max(0, t - 1.8), to = min(dur, t + 1.0)
+        return W(from: from, to: to, dur: dur, cut: to - from < 0.8 * dur)
     }
 }

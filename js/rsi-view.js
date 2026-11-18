@@ -2,8 +2,8 @@
 // names the drill, and the screen shows contact time, flight, jump height and both RSI forms.
 // Results are kept per athlete in this browser (numbers only, no video) for the trend. The server
 // tells who is in the clip (no athlete switch since 2026-11-12); a tap on the name moves a result.
-import { withPath } from './viewcopy.js';
-import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
+import { withPath, trimJump } from './viewcopy.js';
+import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 // 2: contact edges against the frames by hand, the stand's last piece on the box (2026-11-18)
 const RSI_ALGO = 2;
 
@@ -404,6 +404,13 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     if (!cloudReady()) { prog.classList.remove('hidden'); prog.textContent = 'Najprv ulož prístupový kľúč v nastaveniach.'; if (filmed) cam.finalize({ id: filmed.id, marks: [] }).catch(() => {}); return; }
     busy = true; $('rsi-pick').classList.add('disabled');
     prog.classList.remove('hidden'); prog.textContent = filmed ? 'Rozoberám natočené video…' : 'Nahrávam video…';
+    // a long clip goes to the server as the jump alone (2026-11-18: "orezať pred serverom"); the
+    // whole clip follows only when no jump comes back from the cut one
+    let full = null, cutFrom = 0;
+    if (!retry && file?.nativePath) {
+      const t = await trimJump(file.nativePath);
+      if (t) { full = file; file = t.file; cutFrom = t.from; }
+    }
     let pid = retry?.id ?? null, pwho = retry?.who ?? who.id;
     if (!pid) {
       pid = `rsi${Date.now()}`;
@@ -419,8 +426,15 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     }
     let lastStage = '';
     try {
-      const { result } = await analyzeInCloud(file, {
-        sex: who.sex, name: who.name, height: who.height, mode: 'rsi', boxCm: null, athletes: await roster(),
+      const athletesNow = await roster();
+      // the numbers as soon as they exist (2026-11-18); the drill's name follows in the final result
+      const early = ({ result }) => {
+        if (!result?.naming || !(result.jumps?.length || result.standing?.length)) return;
+        const x = patch(pwho, pid, r => Object.assign(r, record(result, file), { id: pid, pending: false, naming: true, error: null, algo: RSI_ALGO }));
+        if (x && current?.rec.id === pid) show(x, pwho);
+      };
+      const cloud = f => analyzeInCloud(f, {
+        sex: who.sex, name: who.name, height: who.height, mode: 'rsi', boxCm: null, athletes: athletesNow, onResult: early,
         onProgress: p => {
           const t = `${p.stage}${p.total > 1 ? ` ${Math.round((100 * p.done) / p.total)} %` : ''}…`;
           if (t === lastStage) return;
@@ -430,6 +444,13 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
           if (box) box.innerHTML = pendingSteps({ ...current.rec, stage: t });
         },
       });
+      let { result } = await cloud(file);
+      // the cut clip came back without a jump: the whole clip, kept as the clip from now on
+      if (full && (result?.error || !(result?.jumps?.length || result?.standing?.length))) {
+        file = full; cutFrom = 0;
+        ({ result } = await cloud(full));
+        if (saveClip) saveClip(pid, full).catch(() => {});
+      }
       if (result?.error) throw new CloudError(result.error);
       const old = load(pwho).find(r => r.id === pid);
       const rec = { ...record(result, file), id: pid, at: old?.at ?? new Date().toISOString(), hasClip: !!old?.hasClip, algo: RSI_ALGO };
@@ -444,7 +465,8 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       renderHistory();
       onDone({ rec, who: id }, { quiet: true });
       // the filmed clip goes to Photos now, once, with the numbers on it
-      if (filmed) cam.finalize({ id: filmed.id, marks: rsiMarks(result) }).catch(() => {});
+      // the marks go on the whole recording: times in a cut clip start cutFrom later there
+      if (filmed) cam.finalize({ id: filmed.id, marks: rsiMarks(result).map(m => ({ ...m, from: m.from + cutFrom, to: m.to + cutFrom })) }).catch(() => {});
     } catch (err) {
       const msg = err?.message || 'Analýza zlyhala. Skús to znova.';
       prog.textContent = msg;
@@ -461,7 +483,8 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     if (file) analyze(file);
   });
   if (cam) {
-    $('rsi-film').addEventListener('click', () => cam.open({ fps: 240, mode: 'rsi', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`)));
+    // the server starts while the athlete films, so the numbers don't wait for it (2026-11-18)
+    $('rsi-film').addEventListener('click', () => { if (cloudReady()) warmCloud(); cam.open({ fps: 240, mode: 'rsi', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`)); });
     // Filmed clips, one at a time; the camera can stay open meanwhile.
     const queue = [];
     cam.on('recorded', async d => {

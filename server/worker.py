@@ -131,7 +131,8 @@ def process_job(job_id, owner, params, *, jobs, clips_dir, reload_clips, commit_
     def on_result(msg):
         nonlocal got_result, fallback
         got_result, fallback = True, msg.get("coachFallback")
-        update(state="running", stage="coach", done=0, total=1, result=msg["result"])
+        # RSI numbers first, while Claude still names the drill (they come again, named, at the end)
+        update(state="running", stage="naming" if msg["result"].get("naming") else "coach", done=0, total=1, result=msg["result"])
 
     try:
         reload_clips()

@@ -7,14 +7,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { rsiAnalysis, refineEdges, touchdowns } from '../js/analysis/rsi.js';
-import { footContacts, SPRINT } from '../js/analysis/sprint.js';
+import { rsiAnalysis, pixelEdges } from '../js/analysis/rsi.js';
 import { fromWire } from '../js/cloud.js';
 import { applyH, invertH } from '../js/analysis/homography.js';
 
-const DIR = new URL('./real/rsi17/', import.meta.url);
-const have = existsSync(new URL('named.json', DIR));
+// Two server runs of the same clips (2026-11-17 and 2026-11-18): the pose moves by up to two
+// frames between runs, so every rule has to hold on both.
+const RUNS = ['./real/rsi17/', './real/rsi17_run1/'].map(p => new URL(p, import.meta.url)).filter(u => existsSync(new URL('named.json', u)));
+let DIR = RUNS[0];
+const have = RUNS.length > 0;
 const NAMED = have ? JSON.parse(readFileSync(new URL('named.json', DIR))) : {};
+const eachRun = f => () => { for (const u of RUNS) { DIR = u; f(); } };
 
 // the steps of server/rsi.mjs analyzeRsiClip after the pose, on a dump
 function replay(id) {
@@ -25,22 +28,22 @@ function replay(id) {
   let rsi = rsiAnalysis(fromWire(d.wire), d.ts, { sex, height, cam });
   if (rsi.error) return rsi;
   const follows = !!camera && camera.moved > 0.1 * Math.min(d.meta.W, d.meta.H);
-  let toe = null, land = null;
+  let motion = null;
   if (!follows && d.motion) {
+    motion = d.motion;
+    // dumps from before 2026-11-18 have no ground motion where the floor strip missed: the camera's
     const keys = Object.keys(cam?.h ?? {}).map(Number).sort((a, b) => a - b);
-    for (const m of d.motion) {
+    for (const m of motion) {
       if (!m || m.g) continue;
       const a = keys.findLast(k => k <= m.f), b = keys.find(k => k > m.f), p = m.l?.slice(3, 5) ?? m.r?.slice(3, 5);
       if (!cam) m.g = [0, 0];
       else if (a != null && b != null && p) { const q = applyH(invertH(cam.h[a]), p), pa = applyH(cam.h[a], q), pb = applyH(cam.h[b], q); m.g = [(pb[0] - pa[0]) / (b - a), (pb[1] - pa[1]) / (b - a)]; }
     }
-    toe = ['l', 'r'].flatMap(s => footContacts(d.motion, s, d.ts, d.meta.fps, { ...SPRINT, planted: 0.12 }));
-    land = ['l', 'r'].flatMap(s => touchdowns(d.motion, s, d.meta.fps));
-    rsi = refineEdges(rsi, toe, d.meta.fps, land);
+    rsi = pixelEdges(rsi, motion, d.meta.fps);
   }
   if (NAMED[id]?.named?.box === false && (rsi.events ?? []).some(e => e.onBox)) {
     const again = rsiAnalysis(fromWire(d.wire), d.ts, { sex, height, cam, noBox: true });
-    if (!again.error) rsi = toe ? refineEdges(again, toe, d.meta.fps, land) : again;
+    if (!again.error) rsi = motion ? pixelEdges(again, motion, d.meta.fps) : again;
   }
   return rsi;
 }
@@ -59,7 +62,7 @@ const HAND = {
   // the box came in pieces, a 0.03 RSI "rebound" on it, touchdowns 3-4 frames early
   1794929272459: [239, 262, 347],
   1794932202395: [309, 331, 411],
-  1794932274606: [216, 245, 328],
+  1794932274606: [214, 245, 328],  // touchdown re-read 2026-11-18 on a tighter crop: sole down at 214, not 216
   1794924114112: [131, 157, 227],  // Miška, legs at the top edge, the landing in the last frames
   // 2026-11-18, an older clip uploaded: Miška off 50 cm, filmed from the front, the phone tilting
   // down while she stood. The last piece of the stand (one foot, 844-861) read as a rebound of RSI
@@ -69,7 +72,7 @@ const HAND = {
 // still phone (toe edges): every edge within one frame (2026-11-18, Stanley: "nepresne")
 const STILL = ['1794924872722', '1794924921055', '1794924995468', '1794925041151', '1794925090410', '1794932384646', '1794991005508'];
 
-test('gym 2026-11-17: every drop jump is a drop jump off the box, edges within 2 frames', { skip: !have }, () => {
+test('gym 2026-11-17: every drop jump is a drop jump off the box, edges within 2 frames', { skip: !have }, eachRun(() => {
   for (const [id, [td, to, landing]] of Object.entries(HAND)) {
     const r = replay(id);
     assert.ok(!r.error, `${id}: ${r.error}`);
@@ -80,17 +83,17 @@ test('gym 2026-11-17: every drop jump is a drop jump off the box, edges within 2
     assert.ok(Math.abs(j.td - td) <= 2 && Math.abs(j.to - to) <= 2, `${id} contact ${j.td}-${j.to}, by eye ${td}-${to}`);
     if (landing != null) { const L = j.to + 1 + Math.round(j.flightMs * 120 / 1000); assert.ok(Math.abs(L - landing) <= 2, `${id} landing ${L}, by eye ${landing}`); }
   }
-});
+}));
 
-test('gym 2026-11-17: Miška\'s other drop jumps are drop jumps too', { skip: !have }, () => {
+test('gym 2026-11-17: Miška\'s other drop jumps are drop jumps too', { skip: !have }, eachRun(() => {
   for (const id of ['1794924056156', '1794932342732', '1794932429138']) {
     const r = replay(id);
     assert.equal(r.kind, 'drop_jump', `${id} kind ${r.kind}`);
     assert.equal(r.jumps.length, 1, id);
   }
-});
+}));
 
-test('still phone: contact edges and the landing within one frame of the hand frames', { skip: !have }, () => {
+test('still phone: contact edges and the landing within one frame of the hand frames', { skip: !have }, eachRun(() => {
   for (const id of STILL) {
     const [td, to, landing] = HAND[id], j = replay(id).jumps[0];
     assert.ok(Math.abs(j.td - td) <= 1 && Math.abs(j.to - to) <= 1, `${id} contact ${j.td}-${j.to}, by eye ${td}-${to}`);
@@ -98,4 +101,4 @@ test('still phone: contact edges and the landing within one frame of the hand fr
   }
   const j = replay('1794991005508').jumps[0];
   assert.ok(Math.abs(j.rsi - 2.05) <= 0.05, `Miška 18 Nov RSI ${j.rsi}`);
-});
+}));

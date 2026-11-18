@@ -12,7 +12,7 @@ import { CHIPS } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { legsFormHtml, readLegs } from './freelap-view.js';
 import { sprintAdvice, runSummary } from './analysis/sprint-advice.js';
-import { analyzeInCloud, cloudReady, CloudError } from './cloud.js';
+import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 import { analyzeSprint, pairRun, modeOfRun, runMetres, cleanSteps, SPRINT_ALGO } from './analysis/sprint.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -259,6 +259,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     if (on) unsub = freelap.onRun(send);   // runs heard while the camera is open go to it
     // The recorder also hears the chips itself, to time each run exactly; it names them from this.
     const chips = Object.fromEntries(Object.entries(CHIPS).map(([chip, who]) => [chip, athletes[who]?.name ?? chip]));
+    if (cloudReady()) warmCloud();   // the server starts while the athlete runs (2026-11-18)
     try { await cam.open({ fps: 120, freelap: on, chips }); } catch (e) { unsub?.(); unsub = null; alert(`Kameru sa nepodarilo otvoriť: ${e?.message ?? e}`); }
   }
 

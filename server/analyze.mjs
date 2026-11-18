@@ -192,7 +192,7 @@ async function serve() {
       // RSI drills: contacts and flights only, no coaching text, so the numbers are the end.
       // RSI and sprint jobs: numbers only, no coaching text, so the numbers are the end.
       const out = job.mode === 'rsi'
-        ? await analyzeRsiClip(engine, { clip: job.clip, sex: job.sex, height: job.height ?? null, boxCm: job.boxCm ?? null, athletes: job.athletes ?? null, client: coachClient({ token: claudeToken }), onProgress })
+        ? await analyzeRsiClip(engine, { clip: job.clip, sex: job.sex, height: job.height ?? null, boxCm: job.boxCm ?? null, athletes: job.athletes ?? null, client: coachClient({ token: claudeToken }), onProgress, onResult: r => say({ id: job.id, result: r, coachFallback: null }) })
         : job.mode === 'sprint'
         ? await analyzeSprintClip(engine, { clip: job.clip, athletes: job.athletes ?? null, who: job.who ?? null, client: coachClient({ token: claudeToken }), onProgress })
         : await analyzeClip(engine, {

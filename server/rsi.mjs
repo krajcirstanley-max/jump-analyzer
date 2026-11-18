@@ -4,9 +4,8 @@
 import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
-import { rsiAnalysis, refineEdges, touchdowns } from '../js/analysis/rsi.js';
-import { footContacts, SPRINT } from '../js/analysis/sprint.js';
-import { measureMotion } from './sprint.mjs';
+import { rsiAnalysis, pixelEdges } from '../js/analysis/rsi.js';
+import { measureMotionRaw, smoothGround } from './sprint.mjs';
 import { applyH, invertH } from '../js/analysis/homography.js';
 import { contactSheet } from './grid.mjs';
 import { probe, openFrames } from './frames.mjs';
@@ -45,34 +44,68 @@ async function nameExercise({ frames, first, last, boxes, client, focus = null }
   return JSON.parse(res.content?.find(b => b.type === 'text')?.text ?? 'null');
 }
 
-export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null, boxCm = null, athletes = null, client, onProgress }) {
+// The toe is read only around the contacts (2026-11-18: reading every frame took 12 s of a 33 s
+// job, and only the frames at the contacts are used). Each stretch starts a few frames early so
+// the ground's predicted motion is warm, as in one pass; stretches are kept apart by a null, so a
+// contact never runs from one into the next.
+export async function motionNearContacts({ frames, W, H, track, events, first, last, pad = 16, warm = 10 }) {
+  const ranges = [];
+  for (const e of events ?? []) {
+    if (e.onBox) continue;
+    const a = Math.max(first, e.td - pad), b = Math.min(last, e.to + pad);
+    if (ranges.length && a - warm <= ranges.at(-1)[1] + 1) ranges.at(-1)[1] = Math.max(ranges.at(-1)[1], b);
+    else ranges.push([a, b]);
+  }
+  const out = [];
+  for (const [a, b] of ranges) {
+    const s0 = Math.max(first, a - warm);
+    const it = frames.sequential(s0, b, 1);
+    let at = -1, cur = null;
+    const getRGBA = async f => { while (at < f) { const x = await it.next(); if (x.done) throw new Error('clip ended'); at = x.value.i; cur = x.value.rgba; } return cur; };
+    let raw;
+    try { raw = await measureMotionRaw({ getRGBA, W, H, track, from: s0, to: b }); } finally { await it.return?.(); }
+    if (out.length) out.push(null);
+    out.push(...smoothGround(raw).slice(a - s0));
+  }
+  return out;
+}
+
+export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null, boxCm = null, athletes = null, client, onProgress, onResult = null, dump = false }) {
   const t0 = performance.now();
   const meta = probe(clip);
   const frames = openFrames(clip, meta);
   try {
     const res = await runPipeline(frames, engine, { onProgress, rejoinS: 1.2 });
-    if (res.error) return { error: 'Vo videu som nenašiel športovca. Skontroluj, či sú v zábere celé nohy.' };
+    if (res.error) return { error: 'Appka vo videu nenašla športovca. Je to chyba rozboru.' };
     const wire = toWire(res, meta.ts);
     // The phone may be hand-held: follow its motion over the background, then read the feet in
     // one fixed frame. Under 1.5 px of motion it was on a tripod and nothing changes.
     onProgress?.({ stage: 'camera', done: 0, total: 1 });
     let camera = null, cameraError = null;
-    try { camera = await trackCamera(frames, { from: res.first, to: res.last, boxes: res.boxes }); } catch (e) { cameraError = String(e?.message || e).slice(0, 200); }
+    // Who is in the clip asks Claude while the camera is followed (2026-11-18: the two ran one after
+    // the other, 3.5 s more before any number). The camera every 4th frame at 120 fps: a hand's
+    // shake is slow, and every 2nd took 7 s of a 3.8 s clip.
+    const whoP = client && athletes?.length > 1
+      ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, athletes, client }).catch(e => ({ id: null, error: String(e?.message || e).slice(0, 200) }))
+      : null;
+    try { camera = await trackCamera(frames, { from: res.first, to: res.last, boxes: res.boxes, rate: 30 }); } catch (e) { cameraError = String(e?.message || e).slice(0, 200); }
     const cam = camera && camera.moved >= 1.5 ? camera : null;
-    // Who is in the clip (no athlete switch in the app): their sex and height go into the numbers.
-    let who = null;
-    if (client && athletes?.length > 1) {
-      try { who = await identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, athletes, client }); }
-      catch (e) { who = { id: null, error: String(e?.message || e).slice(0, 200) }; }
-      const a = athletes.find(x => x.id === who.id);
-      if (a) ({ sex, height = null } = a);
-      who = { id: a?.id ?? null, said: who.said ?? null, ms: who.ms, error: who.error };
-    }
     onProgress?.({ stage: 'rsi', done: 0, total: 1 });
+    // A first reading with the athlete the app sent: it places the toe reading and Claude's naming
+    // while Claude still says who is in the clip (2026-11-18: waiting for that came before both).
     let rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
     if (rsi.error) return { error: rsi.error };
-    // Contact edges from the toe against the floor, as for sprints (refineEdges explains why).
-    let motion = null, toeError = null, toe = null, land = null;
+    // the drill's name from Claude, asked now on the pose's contacts (the toe moves them a frame or two)
+    const nameP = client ? (async () => {
+      const ev = rsi.events ?? [];
+      const first = Math.max(0, (ev[0]?.td ?? res.first) - Math.round(meta.fps * 0.4));
+      const last = Math.min(meta.N - 1, (ev.at(-1)?.to ?? res.last) + Math.round(meta.fps * 0.3));
+      const focus = ev.find(e => !e.onBox)?.td ?? null;
+      try { return { named: await nameExercise({ frames, first, last, boxes: res.boxes, client, focus }), nameError: null }; }
+      catch (e) { return { named: null, nameError: String(e?.message || e).slice(0, 200) }; }
+    })() : null;
+    // Contact edges from the pixels of the shoes against the floor (pixelEdges explains the rule).
+    let motion = null, toeError = null;
     // A phone that follows the athlete (hops over a row of cones, filmed from the side while turning:
     // IMG_2213, the frame centre moved 1916 px) leaves no steady floor for the toe to stand on, and
     // the toe edges cut contacts short: 0.083 s for a contact of 0.150 s by the frames (382-390 at
@@ -81,10 +114,20 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     const follows = !!camera && camera.moved > 0.1 * Math.min(meta.W, meta.H);
     if (!follows) try {
       const track = fromWire(wire).clean;
-      const it = frames.sequential(res.first, res.last, 1);
-      let at = -1, cur = null;
-      const getRGBA = async f => { while (at < f) { const x = await it.next(); if (x.done) throw new Error('clip ended'); at = x.value.i; cur = x.value.rgba; } return cur; };
-      try { motion = await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); } finally { await it.return?.(); }
+      motion = await motionNearContacts({ frames, W: meta.W, H: meta.H, track, events: rsi.events, first: res.first, last: res.last });
+    } catch (e) { toeError = String(e?.message || e).slice(0, 200); motion = null; }
+    // Who is in the clip (no athlete switch in the app): their sex and height go into the numbers,
+    // so the contacts are read again with them.
+    let who = null;
+    if (whoP) {
+      who = await whoP;
+      const a = athletes.find(x => x.id === who.id);
+      if (a) ({ sex, height = null } = a);
+      who = { id: a?.id ?? null, said: who.said ?? null, ms: who.ms, error: who.error };
+      const again = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
+      if (!again.error) rsi = again;
+    }
+    if (motion) try {
       // Filmed close from the front, no floor strip fits beside the feet while they are down
       // (IMG_3521, frames 96-125). There the camera's own motion, from the whole background, stands
       // in for the floor's: a still phone moved nothing.
@@ -103,52 +146,54 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       // Tighter than for sprints: the phone hardly moves on a drop jump, so the floor estimate is
       // clean, and 0.55 %h took a toe still sinking for planted (IMG_3521 frame 94). 0.12 gives
       // 250 ms / 642 ms there; Stanley counted 240 / 640 by hand (2026-11-14).
-      toe = ['l', 'r'].flatMap(s => footContacts(motion, s, meta.ts, meta.fps, { ...SPRINT, planted: 0.12 }));
-      land = ['l', 'r'].flatMap(s => touchdowns(motion, s, meta.fps));
-      rsi = refineEdges(rsi, toe, meta.fps, land);
+      rsi = pixelEdges(rsi, motion, meta.fps);
     } catch (e) { toeError = String(e?.message || e).slice(0, 200); }
-    // Claude names the drill; the pattern of contacts is the fallback and the cross-check.
-    let named = null, nameError = null;
-    if (client) {
+    // Claude names the drill; the pattern of contacts is the fallback and the cross-check. Asked
+    // while the toe is read (started above), answered here.
+    // The numbers go out before Claude has named the drill (2026-11-18: the name kept them back
+    // about 10 s): the pattern's name first, Claude's when it comes.
+    const build = (named, nameError, rsi0) => {
+      let rsi = rsi0;
+      // Claude saw no box but the pattern found one: the camera following the athlete (hurdle hops
+      // filmed from the side, 2026-11-16) made the standing start look higher than the floor, and the
+      // clip became a drop jump from 27 cm. The analysis runs again without a box.
+      if (named?.box === false && (rsi.events ?? []).some(e => e.onBox)) {
+        const again = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam, noBox: true });
+        if (!again.error) rsi = motion ? pixelEdges(again, motion, meta.fps) : again;
+      }
+      // Claude's name wins, 'other' included (a clip that is not a drill); without Claude, the pattern
+      // A row of rebounds is hops whatever the picture looked like: Claude called hops over cones,
+      // filmed from the side, "other" (IMG_2213, 11 rebounds), and the screen then said it was no drill.
+      // A drop off the box that the timing shows (stand, 0.06-0.23 s down, rebound, flight) wins over
+      // a name without a box: filmed low, Claude saw legs and called Stanley's drop jump a pogo and
+      // Miška's a row of hops (2026-11-17).
+      const dropSeen = String(rsi.kind).startsWith('drop_jump') && !String(named?.exercise ?? '').startsWith('drop_jump');
+      const exercise = dropSeen || (named?.exercise === 'other' && rsi.jumps.length >= 3) ? rsi.kind : named?.exercise ?? rsi.kind;
+      const usesBox = dropSeen || (named?.box ?? Boolean(rsi.boxEstCm));
+      // The box height read off the video (printed label or estimate), in cm, unless the app sent one.
+      // Only a printed height counts: Claude's estimates of the same 30 cm box ran from 15 to 45 cm
+      // (2026-11-17), so without a label the app asks once and remembers the athlete's box.
+      const boxSeen = usesBox && named?.boxCm > 0 && named.boxFrom === 'label' ? { cm: Math.round(named.boxCm), from: named.boxFrom } : null;
       const ev = rsi.events ?? [];
-      const first = Math.max(0, (ev[0]?.td ?? res.first) - Math.round(meta.fps * 0.4));
-      const last = Math.min(meta.N - 1, (ev.at(-1)?.to ?? res.last) + Math.round(meta.fps * 0.3));
-      const focus = ev.find(e => !e.onBox)?.td ?? null;
-      try { named = await nameExercise({ frames, first, last, boxes: res.boxes, client, focus }); } catch (e) { nameError = String(e?.message || e).slice(0, 200); }
-    }
-    // Claude saw no box but the pattern found one: the camera following the athlete (hurdle hops
-    // filmed from the side, 2026-11-16) made the standing start look higher than the floor, and the
-    // clip became a drop jump from 27 cm. The analysis runs again without a box.
-    if (named?.box === false && (rsi.events ?? []).some(e => e.onBox)) {
-      const again = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam, noBox: true });
-      if (!again.error) rsi = toe ? refineEdges(again, toe, meta.fps, land) : again;
-    }
-    // Claude's name wins, 'other' included (a clip that is not a drill); without Claude, the pattern
-    // A row of rebounds is hops whatever the picture looked like: Claude called hops over cones,
-    // filmed from the side, "other" (IMG_2213, 11 rebounds), and the screen then said it was no drill.
-    // A drop off the box that the timing shows (stand, 0.06-0.23 s down, rebound, flight) wins over
-    // a name without a box: filmed low, Claude saw legs and called Stanley's drop jump a pogo and
-    // Miška's a row of hops (2026-11-17).
-    const dropSeen = String(rsi.kind).startsWith('drop_jump') && !String(named?.exercise ?? '').startsWith('drop_jump');
-    const exercise = dropSeen || (named?.exercise === 'other' && rsi.jumps.length >= 3) ? rsi.kind : named?.exercise ?? rsi.kind;
-    const usesBox = dropSeen || (named?.box ?? Boolean(rsi.boxEstCm));
-    // The box height read off the video (printed label or estimate), in cm, unless the app sent one.
-    // Only a printed height counts: Claude's estimates of the same 30 cm box ran from 15 to 45 cm
-    // (2026-11-17), so without a label the app asks once and remembers the athlete's box.
-    const boxSeen = usesBox && named?.boxCm > 0 && named.boxFrom === 'label' ? { cm: Math.round(named.boxCm), from: named.boxFrom } : null;
-    const ev = rsi.events ?? [];
-    const noRebound = !rsi.jumps?.length && ev.some(e => e.onBox) && ev.some(e => !e.onBox && e.flightAfter == null);
-    const result = {
-      ...rsi, exercise, named, nameError, usesBox, noRebound, ...(boxCm == null && boxSeen ? { boxCm: boxSeen.cm, boxFrom: boxSeen.from } : {}), ...(who ? { who } : {}),
-      edges: follows ? 'pose' : toeError ? 'pose' : 'toe',
-      camera: camera && { moved: camera.moved, rms: camera.rms, tracked: camera.tracked, step: camera.step, ms: camera.ms, used: !!cam }, cameraError,
-      // RSI = jump height / contact time: the box never enters it. Its height is still noted, and
-      // asked for only when the video could not show it (Stanley 2026-11-13: "ak nie tak treba
-      // napísať že nevieš, treba dopísať").
-      askBox: usesBox && boxCm == null && !boxSeen,
-      toeError, motion: motion?.map(m => m && { f: m.f, h: +m.h.toFixed(1), g: m.g && m.g.map(v => +v.toFixed(2)), l: m.l && m.l.slice(0, 3).map(v => +v.toFixed(2)), r: m.r && m.r.slice(0, 3).map(v => +v.toFixed(2)) }),
-      W: meta.W, H: meta.H, N: meta.N, ts: wire.ts, ms: Math.round(performance.now() - t0),
+      const noRebound = !rsi.jumps?.length && ev.some(e => e.onBox) && ev.some(e => !e.onBox && e.flightAfter == null);
+      return {
+        ...rsi, exercise, named, nameError, usesBox, noRebound, ...(boxCm == null && boxSeen ? { boxCm: boxSeen.cm, boxFrom: boxSeen.from } : {}), ...(who ? { who } : {}),
+        edges: follows ? 'pose' : toeError ? 'pose' : 'pixels',
+        camera: camera && { moved: camera.moved, rms: camera.rms, tracked: camera.tracked, step: camera.step, ms: camera.ms, used: !!cam }, cameraError,
+        // RSI = jump height / contact time: the box never enters it. Its height is still noted, and
+        // asked for only when the video could not show it (Stanley 2026-11-13: "ak nie tak treba
+        // napísať že nevieš, treba dopísať").
+        askBox: usesBox && boxCm == null && !boxSeen,
+        toeError, motion: motion?.map(m => m && { f: m.f, h: +m.h.toFixed(1), g: m.g && m.g.map(v => +v.toFixed(2)), l: m.l && m.l.slice(0, 3).map(v => +v.toFixed(2)), r: m.r && m.r.slice(0, 3).map(v => +v.toFixed(2)) }),
+        W: meta.W, H: meta.H, N: meta.N, ts: wire.ts, ms: Math.round(performance.now() - t0),
+      };
     };
+    if (nameP && onResult) onResult({ ...build(null, null, rsi), naming: true });
+    let named = null, nameError = null;
+    if (nameP) ({ named, nameError } = await nameP);
+    const result = build(named, nameError, rsi);
+    // for the offline tests (tests/rsi-gym.test.mjs): the pose, the camera and the toe as used here
+    if (dump) result.dump = { meta: { fps: meta.fps, W: meta.W, H: meta.H, N: meta.N }, ts: meta.ts, wire, camera, motion, stats: res.stats };
     return { result };
   } finally {
     frames.close();

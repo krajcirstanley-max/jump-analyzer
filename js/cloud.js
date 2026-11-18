@@ -146,6 +146,7 @@ const STAGES = {
   contacts: 'Hľadám kontakty so zemou',
   analysis: 'Počítam výsledky',
   coach: 'Píšem odporúčania',
+  naming: 'Dopĺňam názov cviku',
 };
 export const stageLabel = s => STAGES[s] || s || 'Pracujem';
 
@@ -168,9 +169,11 @@ async function follow(id, { signal, onProgress, onResult, t0 }) {
   const started = Date.now();
   let have = null;
   // Once, as soon as the numbers exist; the coaching text comes later.
+  // RSI: the numbers come first with naming: true, then again with the drill's name (2026-11-18).
   const announce = wire => {
-    if (have) return;
+    if (have && !have.naming) return;
     if (wire.error) throw new CloudError(wire.error);
+    if (have && wire.naming) return;
     have = fromWire(wire);
     onResult?.({ result: have, ms: Date.now() - t0 });
   };
