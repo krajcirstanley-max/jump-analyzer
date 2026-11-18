@@ -482,6 +482,11 @@ export function pixelEdges(r, motion, fps) {
     if (!e || !next) return st;
     const flightMs = ((next.td - e.to - 1) / fps) * 1000;
     if (!(flightMs > 100)) return st;
+    // the pixels may move an edge of a standing jump by two frames at most: with the phone tracked
+    // on 59 % of the frames the floor's motion put the toe-off at 128 for 124 by hand (pose 124;
+    // 2026-11-18, IMG_5320 live, 58.7 cm for 63)
+    const poseLand = st.to + 1 + Math.round((st.flightMs / 1000) * fps);
+    if (Math.abs(e.to - st.to) > 2 || Math.abs(next.td - poseLand) > 2) return st;
     const t = flightMs / 1000;
     return { ...st, raw: { to: st.to, flightMs: st.flightMs }, to: e.to, flightMs, heightCm: ((G0 * t * t) / 8) * 100, edges: 'pixels' };
   });
