@@ -156,6 +156,17 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     contacts.push({ td: i, to: j, level: Math.max(...lv), feet: [...used].sort().join('') });
     i = j;
   }
+  // A sliver under 60 ms that runs straight into a lower contact is the same landing: one foot sat
+  // a few cm higher in the picture and came down two frames before the other (1794929272459,
+  // server run of 2026-11-18: left foot 236-237, both on the floor from 238, by eye 239). Split, the
+  // drop jump read as nothing, or as one leg. Its foot joins the contact; the touchdown stays.
+  for (let k = contacts.length - 2; k >= 0; k--) {
+    const a = contacts[k], b = contacts[k + 1];
+    if ((a.to - a.td + 1) / fps < 0.06 && b.td <= a.to + 1 && b.level > a.level + STEP && (b.to - b.td + 1) > (a.to - a.td + 1)) {
+      b.feet = [...new Set((a.feet + b.feet).split(''))].sort().join('');
+      contacts.splice(k, 1);
+    }
+  }
   // A flight lifts the feet. Standing still on the box, filmed close with only the legs in the
   // picture and the phone moving, the foot points wander and the stillness rule broke the stand into
   // pieces with "flights" of 0.06-0.39 s between them, during which the lowest foot never rose
@@ -513,6 +524,35 @@ export function touchdowns(motion, foot, fps) {
   const out = [];
   for (let i = 2; i < motion.length; i++) {
     if (vy[i] != null && vy[i] <= 0.2 && vy[i - 1] > 0.4 && vy[i - 2] > 0.4) out.push({ foot, a: motion[i].f, b: motion[i].f });
+  }
+  return out;
+}
+
+// The stretches an RSI clip needs frame by frame, from contacts found on a coarse pose (every 4th
+// frame, the rest filled in): each contact on the floor with `pad` frames either side; the first
+// from `before` frames ahead (the fall off the box decides it is a drop jump); the last on to
+// tailS after it, where the landing must be (a landing in the clip's last frames was missed on
+// the coarse pose, IMG Miška 1794924114112). Checked on the 2026-11-17/18 hand set, two server
+// runs, with 3-6 frame steps, before 24-48 and pad 16-28: every edge as on the full pose.
+// The first also from `pad` frames before the stand on the box ends: a fall longer than `before`
+// (1794929272459 on the 2026-11-18 server run: off the box at 209, on the floor at 238) left the
+// stand's end on the coarse pose, and the stand broke up into a 2-frame contact before the real one.
+export function denseWindows(events, fps, { before = 40, pad = 24, tailS = 0.8 } = {}) {
+  const all = events ?? [], floor = all.filter(e => !e.onBox);
+  return floor.map((e, k) => {
+    const box = k === 0 ? all.filter(x => x.onBox && x.to < e.td).at(-1) : null;
+    const a = k === 0 ? Math.min(e.td - before, box ? box.to - pad : Infinity) : e.td - pad;
+    return [a, k === floor.length - 1 ? e.to + Math.round(tailS * fps) : e.to + pad];
+  });
+}
+// The contacts on the floor whose edges (16 frames either side, as the pixel reading uses) are not
+// all on posed frames: the stretch to add before the numbers can stand.
+export function unposedAround(events, posedAt, first, last, pad = 16) {
+  const out = [];
+  for (const e of events ?? []) {
+    if (e.onBox) continue;
+    const a = Math.max(first, e.td - pad), b = Math.min(last, e.to + pad);
+    for (let i = a; i <= b; i++) if (!posedAt(i)) { out.push([a, b]); break; }
   }
   return out;
 }

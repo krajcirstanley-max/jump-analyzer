@@ -7,7 +7,7 @@
 // pairs it with the Freelap run heard while it was filmed and draws the analysis
 // (js/analysis/sprint.js). Freelap times stay in the phone.
 
-import { withPath } from './viewcopy.js';
+import { withPath, trimRange } from './viewcopy.js';
 import { CHIPS } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { legsFormHtml, readLegs } from './freelap-view.js';
@@ -33,6 +33,9 @@ const MAX = 60;
 const store = v => { try { localStorage.setItem(KEY, JSON.stringify(v.slice(0, MAX))); } catch { /* storage blocked */ } };
 const FOOT = { l: 'L', r: 'P' };
 const KIND = { accel: 'akcelerácia', fly: 'letmých', rozbeh: 'rozbeh' };
+// the cut around the Freelap stretch: before the start (a standing start's first move and the
+// hearing's delay, which is a guess) and after the finish
+const CUT_BEFORE = 0.8, CUT_AFTER = 0.5;
 const LATENCY = 0.2; // s from the chip crossing the last cone to the phone hearing it (SprintOverlay, a guess until measured)
 const CHIPS_BY_NAME = athletes => Object.fromEntries(Object.entries(athletes).map(([id, a]) => [a.name, id]));
 
@@ -202,6 +205,13 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
   // Uploads go one at a time, but the next one starts as soon as the last is on the server, not
   // when its analysis ends (2026-11-15: a run waited up to 5 minutes behind the one before).
   const queue = [], started = new Set();
+  const cutWindow = d => {
+    const heard = d.freelap !== false ? (d.times ?? []).filter(t => t.arrived != null && t.lap > 0) : [];
+    if (!heard.length) return null;
+    const from = Math.min(...heard.map(t => t.arrived - LATENCY - t.lap)) - CUT_BEFORE;
+    const to = Math.max(...heard.map(t => t.arrived - LATENCY)) + CUT_AFTER;
+    return to > from ? { from: Math.max(0, from), to } : null;
+  };
   async function autoAnalyze(d) {
     if (started.has(d.raw)) return;
     started.add(d.raw);
@@ -212,7 +222,16 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       try {
         const src = globalThis.Capacitor?.convertFileSrc?.(job.raw) ?? job.raw;
         const blob = await (await fetch(src)).blob();
-        const file = withPath(new File([blob], 'sprint.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() }), job.raw);
+        let file = withPath(new File([blob], 'sprint.mov', { type: 'video/quicktime', lastModified: job.recordedAt ?? Date.now() }), job.raw);
+        // Only the Freelap stretch goes to the server when the run was heard before Stop (2026-11-18,
+        // Stanley: "orezanie videa predtým ako ide na server"): from the start, which is the finish
+        // heard minus the lap, to just after the finish, with room for the hearing's delay and a
+        // standing start's first move. A 13 s clip becomes 2-4 s. Heard later or not at all: whole.
+        const cut = cutWindow(job);
+        if (cut) {
+          const t = await trimRange(job.raw, cut.from, cut.to);
+          if (t) { file = t.file; job.cut = t.from; }
+        }
         let onServer;
         const sent = new Promise(res => { onServer = res; });
         const done = upload(file, job, null, onServer);
@@ -233,7 +252,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       x.run = runs().find(r => r.key === t.key) ?? cleanLegs({ key: t.key, lap: t.lap, legs: t.legs ?? [], who: CHIPS_BY_NAME(athletes)[t.name] ?? null });
       x.runKey = x.run.key; x.who = x.run.who ?? x.who;
     }
-    if (!x.pending && x.video && x.video.finishAt == null && t.arrived != null) x.video.finishAt = +(t.arrived - LATENCY).toFixed(3);
+    if (!x.pending && x.video && x.video.finishAt == null && t.arrived != null) x.video.finishAt = +(t.arrived - LATENCY - (x.cut ?? 0)).toFixed(3);
     store(l);
     if (current === x.id) draw();
   }
@@ -320,7 +339,8 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
       // what the recorder heard stays on the record, so a retry pairs the run the same way
       const pend = { id: `sp${Date.now()}`, at, pending: true, stage: 'Nahrávam video', video: null, run: run0, runKey: run0?.key ?? null, who: run0?.who ?? getAthlete()?.id ?? null, mode: null,
         filmed: filmed ? { times: filmed.times ?? null, recordedAt: filmed.recordedAt ?? null, freelap: filmed.freelap !== false, raw: filmed.raw ?? null } : null,
-        raw: filmed?.raw ?? null };   // the camera's path for this clip: late times find the record by it
+        raw: filmed?.raw ?? null,   // the camera's path for this clip: late times find the record by it
+        cut: filmed?.cut ?? 0 };     // s cut off the start of the clip: clip times are that much earlier
       const l = load(); l.unshift(pend);
       for (const old of l.slice(MAX)) if (old.hasClip) dropClip?.(old.id);
       store(l.slice(0, MAX));
@@ -361,7 +381,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         // the run the recorder heard: the athlete's own when two ran, else the first
         const who = result.who?.id, heard = filmed.times;
         const t = heard.find(x => who && CHIPS_BY_NAME(athletes)[x.name] === who) ?? heard[0];
-        video.finishAt = +(t.arrived - LATENCY).toFixed(3);
+        video.finishAt = +(t.arrived - LATENCY - (x0?.cut ?? 0)).toFixed(3);
         run = runs().find(r => r.key === t.key) ?? cleanLegs({ key: t.key, lap: t.lap, legs: t.legs, who: CHIPS_BY_NAME(athletes)[t.name] ?? who ?? null, at: video.recordedAt + t.arrived * 1000 });
       } else run = pairRun(runs(), video, null);
       // run again: the run already paired and the finish already heard stay as they were

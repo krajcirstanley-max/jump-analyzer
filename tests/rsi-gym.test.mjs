@@ -11,9 +11,10 @@ import { rsiAnalysis, pixelEdges } from '../js/analysis/rsi.js';
 import { fromWire } from '../js/cloud.js';
 import { applyH, invertH } from '../js/analysis/homography.js';
 
-// Two server runs of the same clips (2026-11-17 and 2026-11-18): the pose moves by up to two
-// frames between runs, so every rule has to hold on both.
-const RUNS = ['./real/rsi17/', './real/rsi17_run1/'].map(p => new URL(p, import.meta.url)).filter(u => existsSync(new URL('named.json', u)));
+// Server runs of the same clips (2026-11-17, 2026-11-18, and two on 2026-11-18 with the coarse pose:
+// every 4th frame, every frame only around the contacts): the pose moves by up to two frames
+// between runs, so every rule has to hold on all of them.
+const RUNS = ['./real/rsi18d/', './real/rsi18c/', './real/rsi17/', './real/rsi17_run1/'].map(p => new URL(p, import.meta.url)).filter(u => existsSync(new URL('named.json', u)));
 let DIR = RUNS[0];
 const have = RUNS.length > 0;
 const NAMED = have ? JSON.parse(readFileSync(new URL('named.json', DIR))) : {};

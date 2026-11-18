@@ -8,6 +8,7 @@ import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ort from 'onnxruntime-node';
 import { PoseEngine } from '../js/pose/engine.js';
+import { MODELS, boxToCenterScale } from '../js/pose/models.js';
 import { runPipeline, DEFAULTS } from '../js/pose/pipeline.js';
 import { analyzeJump } from '../js/analysis/jump.js';
 import { toWire, fromWire } from '../js/cloud.js';
@@ -164,6 +165,8 @@ export async function selftest(engine) {
     await engine.detect(rgba, W, H);
     await engine.pose(rgba, W, H, [100, 100, 300, 400], DEFAULTS.fast);
     await engine.pose(rgba, W, H, [100, 100, 300, 400], DEFAULTS.accurate);
+    // the heavy model's batch size (pipeline.js), so the first job does not pick its kernels
+    { const m = MODELS[DEFAULTS.accurate], cs = boxToCenterScale([100, 100, 300, 400], m.w, m.h); await engine.poseBatch(new Float32Array(DEFAULTS.batch * 3 * m.w * m.h), [cs], DEFAULTS.accurate, DEFAULTS.batch); }
     if (i === 0) engine.ms = {}; // first run includes kernel setup on the GPU
   }
   for (const [k, m] of Object.entries(engine.ms)) report[k] = Math.round(m.total / m.n);

@@ -14,7 +14,7 @@ export class PoseEngine {
     }
   }
 
-  #time(k, t0) { const m = this.ms[k] || (this.ms[k] = { n: 0, total: 0 }); m.n++; m.total += performance.now() - t0; }
+  #time(k, t0, n = 1) { const m = this.ms[k] || (this.ms[k] = { n: 0, total: 0 }); m.n += n; m.total += performance.now() - t0; }
 
   // People in the frame (or in roi = [x, y, w, h]) -> [[x1, y1, x2, y2, score]].
   async detect(rgba, W, H, roi) {
@@ -39,5 +39,22 @@ export class PoseEngine {
     return kp;
   }
 }
+
+// Several crops in one run (the pose models take a batch; on the GPU one run of 16 costs about what
+// one crop does). input: n crops already laid out by poseInput at offsets k·3·w·h; css: their
+// centre/scale. -> keypoints per crop, as pose() gives them.
+// full: run the whole buffer whatever n is (the rest is stale crops, never decoded). The GPU picks
+// its kernels anew for every batch size it has not seen, about a second each: one size, always
+// (2026-11-18: a batch of 3 at the end made 115 crops take 2.7 s instead of 0.2).
+PoseEngine.prototype.poseBatch = async function (input, css, key, full = 0) {
+  const t0 = performance.now();
+  const m = MODELS[key], n = css.length, b = Math.max(n, full);
+  if (!n) return [];
+  const r = await this.sessions[key].run({ input: new this.ort.Tensor('float32', input.subarray(0, b * 3 * m.w * m.h), [b, 3, m.h, m.w]) });
+  const [, K, Wx] = r.simcc_x.dims;
+  const out = css.map((cs, k) => decodeSimcc(r.simcc_x.data, r.simcc_y.data, Wx, r.simcc_y.dims[2], K, k, cs, m.w, m.h, m.map));
+  const t = this.ms[key] || (this.ms[key] = { n: 0, total: 0 }); t.n += n; t.total += performance.now() - t0;
+  return out;
+};
 
 export const meanScore = kp => { let s = 0; for (let j = 0; j < J.length; j++) s += kp[j * 3 + 2]; return s / J.length; };

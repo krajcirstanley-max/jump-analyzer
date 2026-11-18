@@ -86,22 +86,49 @@ export async function measureMotion(args) { return smoothGround(await measureMot
 // seven idled). Each part starts a few frames early so the ground's predicted motion (g0) is warm
 // at its first frame as it would be in one pass; the early frames are dropped. Frames come from
 // the decoded file (frames.mjs 'disk'), which every worker reads on its own.
-export async function measureMotionParallel({ fd, W, H, track, from, to, parts = Math.max(1, Math.min(6, os.cpus().length - 1)), warm = 10 }) {
+// The frames are handed out in pieces of `chunk` to whichever thread is free (2026-11-18: six equal
+// parts of a cut sprint took 0.35 s to 5.8 s, as the runner grows in the picture and a frame's cost
+// with them). Each piece starts `warm` frames early, those dropped, so the joined pieces are the
+// one pass's numbers.
+export async function measureMotionParallel({ fd, W, H, track, from, to, parts = Math.max(1, Math.min(7, os.cpus().length - 1)), warm = 10, chunk = 40 }) {
   const n = to - from;
-  if (parts < 2 || n < 200) return null;
+  if (parts < 2 || n < 60) return null;   // a clip cut to the Freelap stretch is 250-500 frames
+  const pieces = [];
+  for (let a = from; a < to; a += chunk) pieces.push([a, Math.min(to, a + chunk)]);
+  const out = await motionPool({ fd, W, H, track, pieces, warm, threads: Math.min(parts, pieces.length) });
+  const all = smoothGround(out.flat());
+  all.stats = { pieces: out.length, threads: Math.min(parts, pieces.length), cpuMs: out.stats.reduce((x, m) => x + m.all, 0), readMs: out.stats.reduce((x, m) => x + m.read, 0) };
+  return all;
+}
+
+// Runs measureMotionRaw over pieces [a, b, floor?) on `threads` worker threads, each piece from
+// a - warm (not before its floor, else `floor`) with the warm frames dropped. -> one array of
+// records per piece, in order.
+export async function motionPool({ fd, W, H, track, pieces, warm = 10, threads = 6, floor = null }) {
   const { Worker } = await import('node:worker_threads');
-  const per = Math.ceil(n / parts);
-  const jobs = Array.from({ length: parts }, (_, k) => {
-    const a = from + k * per, b = Math.min(to, a + per);
-    if (a >= b) return Promise.resolve([]);
-    const s0 = Math.max(from, a - warm);
-    return new Promise((res, rej) => {
-      const w = new Worker(new URL('./motion-worker.mjs', import.meta.url), { workerData: { fd, W, H, from: s0, to: b, track: track.slice(s0, b + 1), base: s0 } });
-      w.once('message', m => (m.error ? rej(new Error(m.error)) : res(m.out.slice(a - s0))));
-      w.once('error', rej);
-    });
+  const lo = floor ?? Math.min(...pieces.map(p => p[0]));
+  const out = new Array(pieces.length);
+  let next = 0;
+  const stats = [];
+  const run = () => new Promise((res, rej) => {
+    const w = new Worker(new URL('./motion-worker.mjs', import.meta.url), { workerData: { fd, W, H } });
+    const give = () => {
+      if (next >= pieces.length) { w.postMessage(null); return; }
+      const k = next++, [a, b, f0] = pieces[k], s0 = Math.max(f0 ?? lo, a - warm);
+      w.once('message', m => {
+        if (m.error) { w.terminate(); return rej(new Error(m.error)); }
+        out[k] = m.out.slice(a - s0); stats.push(m.ms);
+        give();
+      });
+      w.postMessage({ from: s0, to: b, track: track.slice(s0, b + 1), base: s0 });
+    };
+    w.once('exit', () => res());
+    w.once('error', rej);
+    give();
   });
-  return smoothGround((await Promise.all(jobs)).flat());
+  await Promise.all(Array.from({ length: threads }, run));
+  out.stats = stats;
+  return out;
 }
 
 // getRows(f, oy, rh): only the rows oy..oy+rh of frame f (a part reading the file needs the band
@@ -238,11 +265,14 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, who: kn
     let motion = null;
     if (frames.fd) {
       await frames.get(res.last);   // the file holds every frame the parts will read
-      motion = await measureMotionParallel({ fd: await frames.fd(), W: meta.W, H: meta.H, track, from: res.first, to: res.last }).catch(e => { console.error('parallel motion failed, one pass instead:', e); return null; });
+      timing.cpus = os.cpus().length;
+      motion = await measureMotionParallel({ fd: await frames.fd(), W: meta.W, H: meta.H, track, from: res.first, to: res.last }).catch(e => { console.error('parallel motion failed, one pass instead:', e); timing.motionError = String(e?.message || e).slice(0, 300); return null; });
+      timing.parallel = !!motion;
     }
     try { motion ??= await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); }
     finally { await it.return?.(); }
     timing.motion = Math.round(performance.now() - tM);
+    timing.motionParts = motion?.stats;
     const who = await whoP;
     const sprint = sprintFromMotion({ motion, ts: meta.ts, fps: meta.fps });
     if (sprint.error) return { error: sprint.error };

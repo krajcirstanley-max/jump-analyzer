@@ -273,12 +273,28 @@ function nccAt(L, W, tpl, x, y) {
   for (let dy = -HALF; dy <= HALF; dy++) { const row = (y + dy) * W; for (let dx = -HALF; dx <= HALF; dx++) { const v = L[row + x + dx]; s += tpl[k++] * v; sum += v; sq += v * v; } }
   const varB = sq - (sum * sum) / PN; return varB > 1 ? s / (tpl.norm * Math.sqrt(varB)) : -1;
 }
+// The sums and squares of each window come from running sums over the searched area (whole
+// numbers, so exactly what nccAt adds up): only the product with the template is left per
+// position, about half the work (2026-11-18: the camera thread had become the job's longest leg).
+const RS = 2 * (HALF + SEARCH) + 1, IS = new Float64Array((RS + 1) ** 2), IQ = new Float64Array((RS + 1) ** 2);
 function matchPatch(L, W, H, tpl, px, py) {
   const X = Math.round(px), Y = Math.round(py), m = HALF + SEARCH + 1;
   if (X < m || Y < m || X > W - m - 1 || Y > H - m - 1) return null;
+  const R = HALF + SEARCH, ox = X - R, oy = Y - R, S1 = RS + 1;
+  for (let y = 0; y < RS; y++) {
+    let rs = 0, rq = 0; const row = (oy + y) * W + ox;
+    for (let x = 0; x < RS; x++) { const v = L[row + x]; rs += v; rq += v * v; IS[(y + 1) * S1 + x + 1] = IS[y * S1 + x + 1] + rs; IQ[(y + 1) * S1 + x + 1] = IQ[y * S1 + x + 1] + rq; }
+  }
+  const P = 2 * HALF + 1;
   let best = -2, bx = 0, by = 0; const sc = new Float32Array((2 * SEARCH + 1) ** 2);
   for (let dy = -SEARCH; dy <= SEARCH; dy++) for (let dx = -SEARCH; dx <= SEARCH; dx++) {
-    const v = nccAt(L, W, tpl, X + dx, Y + dy); sc[(dy + SEARCH) * (2 * SEARCH + 1) + dx + SEARCH] = v;
+    const x0 = dx + SEARCH, y0 = dy + SEARCH;   // window's top-left in the searched area
+    const sum = IS[(y0 + P) * S1 + x0 + P] - IS[y0 * S1 + x0 + P] - IS[(y0 + P) * S1 + x0] + IS[y0 * S1 + x0];
+    const sq = IQ[(y0 + P) * S1 + x0 + P] - IQ[y0 * S1 + x0 + P] - IQ[(y0 + P) * S1 + x0] + IQ[y0 * S1 + x0];
+    let s = 0, k = 0;
+    for (let yy = -HALF; yy <= HALF; yy++) { const row = (Y + dy + yy) * W + X + dx; for (let xx = -HALF; xx <= HALF; xx++) s += tpl[k++] * L[row + xx]; }
+    const varB = sq - (sum * sum) / PN, v = varB > 1 ? s / (tpl.norm * Math.sqrt(varB)) : -1;
+    sc[(dy + SEARCH) * (2 * SEARCH + 1) + dx + SEARCH] = v;
     if (v > best) { best = v; bx = dx; by = dy; }
   }
   if (Math.abs(bx) === SEARCH || Math.abs(by) === SEARCH) return { score: best, edge: true };
@@ -516,6 +532,21 @@ export async function measureGround({ frames, track, jump, boxes }) {
 // into nonsense on a panning clip (6 million px at the frame centre). Tracked at about `rate` Hz (shake is far
 // slower) and decoded once, in order. Returns { h: { [frame]: H ref->frame }, ref, moved, rms,
 // tracked } or null when the background has too little texture.
+// The same on a worker thread (camera-worker.mjs), from the decoded file: every frame up to `to`
+// has to be on disk first. boxes: the athlete's box per frame (an array or a Map), kept out.
+export async function trackCameraThread(frames, { from, to, boxes, rate = 60 }) {
+  if (!frames.fd) return trackCamera(frames, { from, to, boxes, rate });
+  await frames.get(to);
+  const fd = await frames.fd();
+  const { Worker } = await import('node:worker_threads');
+  const list = Array.from({ length: to + 1 }, (_, i) => (boxes?.get ? boxes.get(i) : boxes?.[i]) ?? null);
+  return new Promise((res, rej) => {
+    const w = new Worker(new URL('./camera-worker.mjs', import.meta.url), { workerData: { fd, W: frames.W, H: frames.H, fps: frames.fps, from, to, boxes: list, rate } });
+    w.once('message', m => (m.error ? rej(new Error(m.error)) : res(m.camera)));
+    w.once('error', rej);
+  });
+}
+
 export async function trackCamera(frames, { from, to, boxes, rate = 60 }) {
   const t0 = Date.now(), { W, H } = frames;
   const k = Math.max(1, Math.round(frames.fps / rate));

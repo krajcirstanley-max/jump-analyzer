@@ -23,7 +23,12 @@ HIDDEN_FROM_NODE = {"JUMP_CLAUDE_TOKENS", "JUMP_TOKENS", "VAPID_PRIVATE", "VAPID
 
 
 def daemon_env():
-    return {k: v for k, v in os.environ.items() if k not in HIDDEN_FROM_NODE}
+    env = {k: v for k, v in os.environ.items() if k not in HIDDEN_FROM_NODE}
+    # Node's pool of 4 threads is shared by file reads and the GPU runs: with the camera thread and
+    # the frame reads queued in it, a batch of the heavy model took 20 ms a crop for 1.8 ms on its
+    # own (2026-11-18, A100). More threads, so a model run never waits behind a read.
+    env.setdefault("UV_THREADPOOL_SIZE", "24")
+    return env
 
 
 def claude_token_for(owner, raw):

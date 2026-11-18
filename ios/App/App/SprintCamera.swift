@@ -50,6 +50,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "pickVideo", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "viewCopy", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "trimJump", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "trimRange", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
     private var galleryDelegate: GalleryPickerDelegate?
@@ -106,6 +107,21 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 if let err = err { call.reject(err) }
                 else { call.resolve(["trimmed": true, "path": dst.path, "from": w.from, "to": w.to, "dur": w.dur, "ms": Int((CACurrentMediaTime() - t0) * 1000)]) }
             }
+        }
+    }
+
+    /// A stretch of a clip by time (from, to in s of the clip), written like the watching copy. A
+    /// sprint filmed with Freelap on is cut to its timed stretch before the upload (2026-11-18,
+    /// Stanley: "orezanie videa predtým ako ide na server"). Resolves { path, from, to, ms }.
+    @objc func trimRange(_ call: CAPPluginCall) {
+        guard let p = call.getString("path"), let from = call.getDouble("from"), let to = call.getDouble("to"), to > from else { call.reject("No path or range"); return }
+        let src = p.hasPrefix("file://") ? (URL(string: p) ?? URL(fileURLWithPath: p)) : URL(fileURLWithPath: p)
+        let t0 = CACurrentMediaTime()
+        let dst = FileManager.default.temporaryDirectory.appendingPathComponent("cut-\(UUID().uuidString).mp4")
+        let a = max(0, from)
+        ViewCopy.make(src, to: dst, range: CMTimeRange(start: CMTime(seconds: a, preferredTimescale: 600), end: CMTime(seconds: to, preferredTimescale: 600))) { err in
+            if let err = err { call.reject(err) }
+            else { call.resolve(["path": dst.path, "from": a, "to": to, "ms": Int((CACurrentMediaTime() - t0) * 1000)]) }
         }
     }
 

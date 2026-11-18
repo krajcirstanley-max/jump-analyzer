@@ -25,3 +25,14 @@ export async function trimJump(path, cap = globalThis.Capacitor) {
     return { file: new File([blob], 'rsi.mp4', { type: 'video/mp4' }), from: r.from, to: r.to, dur: r.dur };
   } catch (e) { console.warn('trim failed', e); return null; }
 }
+
+// A stretch of a clip by time, in s (SprintCamera.trimRange), written like the watching copy. The
+// first frame kept is the first one at or after `from`, so times in the cut clip are `from` less.
+export async function trimRange(path, from, to, cap = globalThis.Capacitor) {
+  if (!path || !cap?.isNativePlatform?.() || !cap.nativePromise) return null;
+  try {
+    const r = await cap.nativePromise('SprintCamera', 'trimRange', { path, from, to });
+    const blob = await (await fetch(cap.convertFileSrc(r.path))).blob();
+    return { file: withPath(new File([blob], 'cut.mp4', { type: 'video/mp4' }), r.path), from: r.from, to: r.to };
+  } catch (e) { console.warn('trim failed', e); return null; }
+}

@@ -65,12 +65,47 @@ export function boxToCenterScale(box, inW, inH, padding = 1.25) {
 }
 
 // Crops the region into a normalized NCHW float tensor for the pose model.
+// Same numbers as sampling each pixel with sample() (float32 sums in the same tap order, black
+// outside the image), with the column taps worked out once per crop instead of once per pixel:
+// 4.4 ms a heavy crop in Node before (2026-11-18), the biggest CPU cost left in a batched pass.
 export function poseInput(rgba, W, H, cs, inW, inH, out = new Float32Array(3 * inW * inH), offset = 0) {
+  const plane = inW * inH;
+  const sx = cs.sw / inW, sy = cs.sh / inH;
+  const f = Math.fround;
+  // Same mapping as mmpose's get_warp_matrix + cv2.warpAffine: output pixel i samples
+  // cx + (i - inW/2)·s, the inverse of the decode below.
+  const X0 = new Int32Array(inW), FX = new Float64Array(inW);
+  for (let i = 0; i < inW; i++) { const x = cs.cx + (i - inW / 2) * sx; X0[i] = Math.floor(x); FX[i] = x - X0[i]; }
+  for (let j = 0; j < inH; j++) {
+    const y = cs.cy + (j - inH / 2) * sy, y0 = Math.floor(y), fy = y - y0;
+    const in0 = y0 >= 0 && y0 < H, in1 = y0 + 1 >= 0 && y0 + 1 < H, r0 = y0 * W, r1 = (y0 + 1) * W;
+    for (let i = 0; i < inW; i++) {
+      const x0 = X0[i], fx = FX[i], a0 = x0 >= 0 && x0 < W, a1 = x0 + 1 >= 0 && x0 + 1 < W;
+      let r = 0, g = 0, b = 0;
+      if (in0) {
+        const wy = 1 - fy;
+        if (a0) { const w = wy * (1 - fx), p = (r0 + x0) * 4; r = f(r + rgba[p] * w); g = f(g + rgba[p + 1] * w); b = f(b + rgba[p + 2] * w); }
+        if (a1) { const w = wy * fx, p = (r0 + x0 + 1) * 4; r = f(r + rgba[p] * w); g = f(g + rgba[p + 1] * w); b = f(b + rgba[p + 2] * w); }
+      }
+      if (in1) {
+        const wy = fy;
+        if (a0) { const w = wy * (1 - fx), p = (r1 + x0) * 4; r = f(r + rgba[p] * w); g = f(g + rgba[p + 1] * w); b = f(b + rgba[p + 2] * w); }
+        if (a1) { const w = wy * fx, p = (r1 + x0 + 1) * 4; r = f(r + rgba[p] * w); g = f(g + rgba[p + 1] * w); b = f(b + rgba[p + 2] * w); }
+      }
+      const k = offset + j * inW + i;
+      out[k] = (r - MEAN[0]) / STD[0];
+      out[k + plane] = (g - MEAN[1]) / STD[1];
+      out[k + 2 * plane] = (b - MEAN[2]) / STD[2];
+    }
+  }
+  return out;
+}
+
+// The per-pixel version poseInput replaced, kept to check that it gives the same numbers.
+export function poseInputSlow(rgba, W, H, cs, inW, inH, out = new Float32Array(3 * inW * inH), offset = 0) {
   const px = new Float32Array(3);
   const plane = inW * inH;
   const sx = cs.sw / inW, sy = cs.sh / inH;
-  // Same mapping as mmpose's get_warp_matrix + cv2.warpAffine: output pixel i samples
-  // cx + (i - inW/2)·s, the inverse of the decode below.
   for (let j = 0; j < inH; j++) {
     const y = cs.cy + (j - inH / 2) * sy;
     for (let i = 0; i < inW; i++) {

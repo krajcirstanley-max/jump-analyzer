@@ -4,12 +4,12 @@
 import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
-import { rsiAnalysis, pixelEdges } from '../js/analysis/rsi.js';
-import { measureMotionRaw, smoothGround } from './sprint.mjs';
+import { rsiAnalysis, pixelEdges, denseWindows, unposedAround } from '../js/analysis/rsi.js';
+import { measureMotionRaw, smoothGround, motionPool } from './sprint.mjs';
 import { applyH, invertH } from '../js/analysis/homography.js';
 import { contactSheet } from './grid.mjs';
 import { probe, openFrames } from './frames.mjs';
-import { trackCamera } from './ground.mjs';
+import { trackCameraThread } from './ground.mjs';
 
 export const RSI_MODEL = 'claude-sonnet-5-5'; // naming a drill from a strip of frames is easy
 export const EXERCISES = ['drop_jump', 'drop_jump_single', 'pogo', 'repeated_hops', 'hurdle_hops', 'cmj', 'squat_jump', 'single_leg_hops', 'other'];
@@ -57,6 +57,20 @@ export async function motionNearContacts({ frames, W, H, track, events, first, l
     else ranges.push([a, b]);
   }
   const out = [];
+  // On worker threads where the frames are in a file (the server): every stretch cut into pieces
+  // of about 30 frames, each started `warm` frames early and those dropped, so the joined pieces
+  // are the one pass's numbers (2026-11-18: 3.3 s on one core while seven idled).
+  if (frames.fd && ranges.length) {
+    await frames.get(Math.min(last, ranges.at(-1)[1] + 1));
+    const fd = await frames.fd();
+    // every stretch cut into pieces of 30 frames, all handed to one pool of threads; a piece warms
+    // up from its own stretch's start at the earliest
+    const stretches = ranges.map(([a, b]) => { const s0 = Math.max(first, a - warm), cuts = []; for (let c = s0; c < b; c += 30) cuts.push([c, Math.min(b, c + 30), s0]); return { a, s0, cuts }; });
+    const flat = await motionPool({ fd, W, H, track, pieces: stretches.flatMap(x => x.cuts), warm, threads: 7 });
+    let k = 0;
+    stretches.forEach((x, i) => { const mine = flat.slice(k, k + x.cuts.length); k += x.cuts.length; if (i) out.push(null); out.push(...smoothGround(mine.flat()).slice(x.a - x.s0)); });
+    return out;
+  }
   for (const [a, b] of ranges) {
     const s0 = Math.max(first, a - warm);
     const it = frames.sequential(s0, b, 1);
@@ -72,28 +86,64 @@ export async function motionNearContacts({ frames, W, H, track, events, first, l
 
 export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null, boxCm = null, athletes = null, client, onProgress, onResult = null, dump = false }) {
   const t0 = performance.now();
+  // where the seconds go (kept on the result, so the speed work is measured, not guessed)
+  const timing = {};
+  const mark = k => { timing[k] = Math.round(performance.now() - t0); };
   const meta = probe(clip);
   const frames = openFrames(clip, meta);
+  mark('probe');
   try {
-    const res = await runPipeline(frames, engine, { onProgress, rejoinS: 1.2 });
+    engine.ms = {};
+    let stage = null, camP = null, whoP = null;
+    // The phone's motion over the background on its own thread from the moment the athlete's place
+    // is known, so it is ready when the pose is (it took 4.6 s after the pose before).
+    const onGuide = ({ first, last, guide }) => {
+      const t = performance.now();
+      camP = trackCameraThread(frames, { from: first, to: last, boxes: guide, rate: 30 })
+        .then(camera => ({ camera, ms: Math.round(performance.now() - t) }), e => ({ camera: null, error: String(e?.message || e).slice(0, 200) }));
+      // who is in the clip, asked as early: it needs only frames cropped around the athlete
+      if (client && athletes?.length > 1) {
+        const boxes = Array.from({ length: last + 1 }, (_, i) => guide.get(i) ?? null);
+        whoP = identifyAthlete({ frames, boxes, first, last, fps: meta.fps, athletes, client }).catch(e => ({ id: null, error: String(e?.message || e).slice(0, 200) }));
+      }
+    };
+    let res = await runPipeline(frames, engine, { onProgress: p => { if (p?.stage !== stage) { if (stage) mark(stage); stage = p?.stage; } onProgress?.(p); }, rejoinS: 1.2, onGuide, coarse: 4 });
+    mark('pose');
+    timing.models = Object.fromEntries(Object.entries(engine.ms).map(([k, m]) => [k, { n: m.n, ms: Math.round(m.total) }]));
     if (res.error) return { error: 'Appka vo videu nenašla športovca. Je to chyba rozboru.' };
-    const wire = toWire(res, meta.ts);
+    // The pose ran on every 4th frame: the contacts it finds say where every frame is needed (the
+    // fall, each contact, the flight to the landing), and only those go through the models
+    // (2026-11-18: every frame of a 3.8 s clip was 11 s of a 19 s job). Without a contact, all.
+    {
+      const r0 = rsiAnalysis(fromWire(toWire(res, meta.ts)), meta.ts, { sex, height, boxCm, cam: null });
+      res = await res.densify(r0.error || !r0.events?.some(e => !e.onBox) ? [[res.first, res.last]] : denseWindows(r0.events, meta.fps));
+      mark('dense');
+    }
+    let wire = toWire(res, meta.ts);
     // The phone may be hand-held: follow its motion over the background, then read the feet in
     // one fixed frame. Under 1.5 px of motion it was on a tripod and nothing changes.
     onProgress?.({ stage: 'camera', done: 0, total: 1 });
     let camera = null, cameraError = null;
-    // Who is in the clip asks Claude while the camera is followed (2026-11-18: the two ran one after
-    // the other, 3.5 s more before any number). The camera every 4th frame at 120 fps: a hand's
-    // shake is slow, and every 2nd took 7 s of a 3.8 s clip.
-    const whoP = client && athletes?.length > 1
-      ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, athletes, client }).catch(e => ({ id: null, error: String(e?.message || e).slice(0, 200) }))
-      : null;
-    try { camera = await trackCamera(frames, { from: res.first, to: res.last, boxes: res.boxes, rate: 30 }); } catch (e) { cameraError = String(e?.message || e).slice(0, 200); }
+    // The camera every 4th frame at 120 fps: a hand's shake is slow, and every 2nd took 7 s of a
+    // 3.8 s clip.
+    if (camP) { const c = await camP; camera = c.camera; cameraError = c.error ?? null; timing.cameraThread = c.ms; }
+    mark('camera');
     const cam = camera && camera.moved >= 1.5 ? camera : null;
     onProgress?.({ stage: 'rsi', done: 0, total: 1 });
     // A first reading with the athlete the app sent: it places the toe reading and Claude's naming
     // while Claude still says who is in the clip (2026-11-18: waiting for that came before both).
     let rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
+    // With the camera the contacts can move: every one on the floor must stand on posed frames.
+    for (let k = 0; k < 2 && !rsi.error; k++) {
+      const miss = unposedAround(rsi.events, res.posedAt, res.first, res.last);
+      if (!miss.length) break;
+      res = await res.densify([...denseWindows(rsi.events, meta.fps), ...miss]);
+      wire = toWire(res, meta.ts);
+      rsi = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
+      timing.densifyAgain = (timing.densifyAgain ?? 0) + 1;
+    }
+    timing.posed = `${res.posed}/${res.last - res.first + 1}`;
+    timing.passes = res.stats.spent;
     if (rsi.error) return { error: rsi.error };
     // the drill's name from Claude, asked now on the pose's contacts (the toe moves them a frame or two)
     const nameP = client ? (async () => {
@@ -116,6 +166,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       const track = fromWire(wire).clean;
       motion = await motionNearContacts({ frames, W: meta.W, H: meta.H, track, events: rsi.events, first: res.first, last: res.last });
     } catch (e) { toeError = String(e?.message || e).slice(0, 200); motion = null; }
+    mark('toe');
     // Who is in the clip (no athlete switch in the app): their sex and height go into the numbers,
     // so the contacts are read again with them.
     let who = null;
@@ -188,10 +239,12 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
         W: meta.W, H: meta.H, N: meta.N, ts: wire.ts, ms: Math.round(performance.now() - t0),
       };
     };
+    mark('numbers');
     if (nameP && onResult) onResult({ ...build(null, null, rsi), naming: true });
     let named = null, nameError = null;
     if (nameP) ({ named, nameError } = await nameP);
-    const result = build(named, nameError, rsi);
+    mark('named');
+    const result = { ...build(named, nameError, rsi), timing };
     // for the offline tests (tests/rsi-gym.test.mjs): the pose, the camera and the toe as used here
     if (dump) result.dump = { meta: { fps: meta.fps, W: meta.W, H: meta.H, N: meta.N }, ts: meta.ts, wire, camera, motion, stats: res.stats };
     return { result };

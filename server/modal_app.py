@@ -18,8 +18,10 @@ ORT_BIN = "/app/server/node_modules/onnxruntime-node/bin/napi-v6/linux/x64"
 # health-checks the restored process and starts a fresh one if it came back broken.
 SNAPSHOT = False
 
-# The one place the GPU is chosen, e.g. "H100" or "L4". Both run the CUDA 13 build below.
-GPU = "H100"
+# The one place the GPU is chosen. A list is tried in order: on 2026-11-18 no H100 was free in the
+# EU for over ten minutes and every job would have waited, so the A100 and L40S stand in (all run
+# the CUDA 13 build below).
+GPU = ["H100", "A100-80GB", "L40S"]
 # Pinned: 2.1.280+ is needed for claude-opus-5-5, and the build checks it still has --safe-mode.
 CLAUDE_CODE = "2.1.314"
 
