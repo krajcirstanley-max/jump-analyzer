@@ -7,18 +7,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { rsiAnalysis, pixelEdges } from '../js/analysis/rsi.js';
+import { rsiAnalysis, pixelEdges, phoneFollows } from '../js/analysis/rsi.js';
 import { fromWire } from '../js/cloud.js';
 import { applyH, invertH } from '../js/analysis/homography.js';
 
 // Server runs of the same clips (2026-11-17, 2026-11-18, and two on 2026-11-18 with the coarse pose:
 // every 4th frame, every frame only around the contacts): the pose moves by up to two frames
 // between runs, so every rule has to hold on all of them.
-const RUNS = ['./real/rsi18d/', './real/rsi18c/', './real/rsi17/', './real/rsi17_run1/'].map(p => new URL(p, import.meta.url)).filter(u => existsSync(new URL('named.json', u)));
+const RUNS = ['./real/rsi18e/', './real/rsi18d/', './real/rsi18c/', './real/rsi17/', './real/rsi17_run1/'].map(p => new URL(p, import.meta.url)).filter(u => existsSync(new URL('named.json', u)));
 let DIR = RUNS[0];
 const have = RUNS.length > 0;
-const NAMED = have ? JSON.parse(readFileSync(new URL('named.json', DIR))) : {};
-const eachRun = f => () => { for (const u of RUNS) { DIR = u; f(); } };
+let NAMED = have ? JSON.parse(readFileSync(new URL('named.json', DIR))) : {};
+const eachRun = f => () => { for (const u of RUNS) { DIR = u; NAMED = JSON.parse(readFileSync(new URL('named.json', DIR))); f(); } };
 
 // the steps of server/rsi.mjs analyzeRsiClip after the pose, on a dump
 function replay(id) {
@@ -28,7 +28,7 @@ function replay(id) {
   const camera = d.camera, cam = camera && camera.moved >= 1.5 ? camera : null;
   let rsi = rsiAnalysis(fromWire(d.wire), d.ts, { sex, height, cam });
   if (rsi.error) return rsi;
-  const follows = !!camera && camera.moved > 0.1 * Math.min(d.meta.W, d.meta.H);
+  const follows = phoneFollows(camera, rsi.events, d.meta.W, d.meta.H);
   let motion = null;
   if (!follows && d.motion) {
     motion = d.motion;
@@ -103,3 +103,19 @@ test('still phone: contact edges and the landing within one frame of the hand fr
   const j = replay('1794991005508').jumps[0];
   assert.ok(Math.abs(j.rsi - 2.05) <= 0.05, `Miška 18 Nov RSI ${j.rsi}`);
 }));
+
+// 2026-11-18: Miška's clip cut to the jump on the phone (0.27.0), as the server got it. The phone
+// tilted while she stood, 112 px over the cut clip against a limit of 108 for the whole clip, and
+// the pose's edges replaced the pixels': toe-off 2 frames late, RSI 1,78. Only the phone's motion
+// within the contacts decides now. IMG_2213 (hops, the phone swinging after the athlete) keeps the
+// pose's edges.
+const E = new URL('./real/rsi18e/', import.meta.url);
+test('cut clip with a phone tilting during the stand: pixel edges, RSI as by hand', { skip: !existsSync(new URL('rsimiska18trim.json', E)) }, () => {
+  DIR = E; NAMED = JSON.parse(readFileSync(new URL('named.json', DIR)));
+  const j = replay('miska18trim').jumps[0];
+  assert.ok(Math.abs(j.td - 121) <= 1 && Math.abs(j.to - 143) <= 1, `contact ${j.td}-${j.to}, by eye 121-143`);
+  assert.ok(Math.abs(j.rsi - 2.05) <= 0.05, `RSI ${j.rsi}`);
+  const h = JSON.parse(readFileSync(new URL('rsihop2213.json', E)));
+  const r = rsiAnalysis(fromWire(h.wire), h.ts, { sex: 'male', height: 186, cam: h.camera });
+  assert.ok(phoneFollows(h.camera, r.events, h.meta.W, h.meta.H), 'IMG_2213: the phone follows');
+});

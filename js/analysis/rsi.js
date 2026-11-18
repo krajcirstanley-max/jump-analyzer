@@ -56,6 +56,10 @@ export function footLow(kp, s) {
   return pts.length ? Math.max(...pts.map(p => p[1])) : NaN;
 }
 const med3 = y => y.map((v, i) => median([y[i - 1], v, y[i + 1]]));
+// Five frames, not three: the toe point of a close-up, followed foot on the box jumps 30-60 px for
+// one or two frames at a time (1794929272459, fifth server run: 144-146, 150-151), and a three-frame
+// median let that break the stand into a "rebound". A median keeps a touchdown's steady fall.
+const med5 = y => y.map((v, i) => median([y[i - 2], y[i - 1], v, y[i + 1], y[i + 2]]));
 
 // Pixels per metre at the athlete from the leg (thigh + shank = 0.491 x height, Winter).
 function scaleAt(track, sex, height) {
@@ -130,7 +134,7 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   const fps = (ts.length - 1) / (ts.at(-1) - ts[0]);
   const pxM = scaleAt(track, sex, height);
   if (!(pxM > 0)) return { error: 'Appka na videu nenašla nohy na meranie. Je to chyba rozboru.' };
-  const feet = { l: med3(track.map(kp => footLow(kp, 'l'))), r: med3(track.map(kp => footLow(kp, 'r'))) };
+  const feet = { l: med5(track.map(kp => footLow(kp, 'l'))), r: med5(track.map(kp => footLow(kp, 'r'))) };
   const runs = { l: footRuns(feet.l, fps, pxM), r: footRuns(feet.r, fps, pxM) };
 
   // Ground contacts of the body: any foot down. Each keeps which feet were down and its level.
@@ -555,4 +559,25 @@ export function unposedAround(events, posedAt, first, last, pad = 16) {
     for (let i = a; i <= b; i++) if (!posedAt(i)) { out.push([a, b]); break; }
   }
   return out;
+}
+
+// Whether the shoe pixels can be trusted for the edges, from the phone's motion where it matters:
+// within each floor contact (16 frames either side). A phone swinging after the athlete (IMG_2213
+// hops, the frame moving 16-22 % of its short side in a contact) or one whose tracking was lost
+// there after it had moved a lot (1794924961224) leaves no steady floor: there the pose's edges.
+// The whole clip's motion was the rule before, and a phone tilting while the athlete stood
+// (Miška 2026-11-18, 112 px against a limit of 108 once cut to the jump) lost the pixel edges for
+// nothing: toe-off 2 frames late, RSI 1,78 for 2,05. Checked on 14 hand-read clips (2026-11-18).
+export function phoneFollows(camera, events, W, H) {
+  if (!camera?.h) return false;
+  const side = Math.min(W, H), keys = Object.keys(camera.h).map(Number).sort((a, b) => a - b);
+  const centre = k => applyH(camera.h[k], [W / 2, H / 2]);
+  for (const e of events ?? []) {
+    if (e.onBox) continue;
+    const ks = keys.filter(k => k >= e.td - 16 && k <= e.to + 16);
+    if (ks.length < 2) { if (camera.moved > 0.1 * side) return true; continue; }
+    const p0 = centre(ks[0]);
+    for (const k of ks) { const p = centre(k); if (Math.hypot(p[0] - p0[0], p[1] - p0[1]) > 0.1 * side) return true; }
+  }
+  return false;
 }

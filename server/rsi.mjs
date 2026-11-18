@@ -4,7 +4,7 @@
 import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
-import { rsiAnalysis, pixelEdges, denseWindows, unposedAround } from '../js/analysis/rsi.js';
+import { rsiAnalysis, pixelEdges, denseWindows, unposedAround, phoneFollows } from '../js/analysis/rsi.js';
 import { measureMotionRaw, smoothGround, motionPool } from './sprint.mjs';
 import { applyH, invertH } from '../js/analysis/homography.js';
 import { contactSheet } from './grid.mjs';
@@ -161,8 +161,8 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
     // the toe edges cut contacts short: 0.083 s for a contact of 0.150 s by the frames (382-390 at
     // 60 fps), RSI 4.46. There the pose's own contacts stand (383-391). A hand-held, still phone
     // moves a few tens of px (the CMJ: 37) and keeps the toe edges.
-    const follows = !!camera && camera.moved > 0.1 * Math.min(meta.W, meta.H);
-    if (!follows) try {
+    const follows = phoneFollows(camera, rsi.events, meta.W, meta.H);
+    if (!follows || dump) try {   // dump: read for the tests on every clip
       const track = fromWire(wire).clean;
       motion = await motionNearContacts({ frames, W: meta.W, H: meta.H, track, events: rsi.events, first: res.first, last: res.last });
     } catch (e) { toeError = String(e?.message || e).slice(0, 200); motion = null; }
@@ -178,7 +178,7 @@ export async function analyzeRsiClip(engine, { clip, sex = 'male', height = null
       const again = rsiAnalysis(fromWire(wire), meta.ts, { sex, height, boxCm, cam });
       if (!again.error) rsi = again;
     }
-    if (motion) try {
+    if (motion && !follows) try {
       // Filmed close from the front, no floor strip fits beside the feet while they are down
       // (IMG_3521, frames 96-125). There the camera's own motion, from the whole background, stands
       // in for the floor's: a still phone moved nothing.
