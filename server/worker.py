@@ -117,7 +117,7 @@ class Daemon:
                 return msg
 
 
-def process_job(job_id, owner, params, *, jobs, clips_dir, reload_clips, commit_clips, daemon, push, claude_token=None, tmp="/tmp", now=time.time):
+def process_job(job_id, owner, params, *, jobs, clips_dir, reload_clips, commit_clips, daemon, push, claude_token=None, tmp="/tmp", now=time.time, spawn_coach=None):
     """Runs one job start to finish. Only ordinary failures land here: if the container is
     preempted the clip stays put, so Modal's retry can run the job again.
     claude_token goes to the Node process only; it is never put in the job record."""
@@ -147,6 +147,10 @@ def process_job(job_id, owner, params, *, jobs, clips_dir, reload_clips, commit_
         if not daemon.alive():
             daemon.start()
         job = {"clip": str(clip), "out": str(out), **params}
+        # A jump's coaching text goes to a CPU container: the GPU is free for the next clip as soon
+        # as the numbers exist (2026-11-19: ten jumps queued 25-60 min behind 1-3 min of text each).
+        if spawn_coach and params.get("mode", "jump") == "jump":
+            job["deferCoach"] = True
         if claude_token:
             job["claudeToken"] = claude_token
         daemon.run(job, on_result=on_result,
@@ -156,6 +160,17 @@ def process_job(job_id, owner, params, *, jobs, clips_dir, reload_clips, commit_
             outcome = {"state": "error", "error": data["error"]}
         elif not (data.get("result") or got_result):
             outcome = {"state": "error", "error": LOST_RESULT}
+        elif data.get("coachInput") is not None and spawn_coach:
+            outcome = {"state": "running", "stage": "coach", "done": 0, "total": 1, "ms": data.get("ms")}
+            if data.get("result"):
+                outcome["result"] = data["result"]
+            try:
+                (Path(clips_dir) / f"{job_id}.coach.json").write_text(json.dumps(data["coachInput"]))
+                commit_clips()
+                spawn_coach(job_id, owner)
+            except Exception as e:   # the numbers stand; the template coach is the text
+                print(f"job {job_id}: coaching not started:", repr(e))
+                outcome.update(state="done", stage="done", done=1, coach=data["coachInput"].get("coachFallback"))
         else:
             outcome = {"state": "done", "stage": "done", "done": 1, "total": 1, "coach": data.get("coach"), "ms": data.get("ms")}
             if data.get("result"):
@@ -184,6 +199,41 @@ def process_job(job_id, owner, params, *, jobs, clips_dir, reload_clips, commit_
     except Exception as e:
         print(f"job {job_id}: push failed:", repr(e))
     return outcome
+
+
+COACH_LIMIT_S = 240  # two 90 s attempts and the CLI start, under the API's 6 min stale limit
+
+
+def process_coach(job_id, owner, *, jobs, clips_dir, reload_clips, commit_clips, claude_token=None, now=time.time, node=("node", "/app/server/coach-run.mjs"), cwd="/app"):
+    """The coaching text for a jump whose numbers are already in the job record (CPU container).
+    The token goes to Node over stdin only. Any failure ends the job with the template coach."""
+    key = job_key(job_id)
+    src = Path(clips_dir) / f"{job_id}.coach.json"
+    out = Path("/tmp") / f"{job_id}.coach-out.json"
+    coach = None
+    try:
+        reload_clips()
+        fallback = json.loads(src.read_text()).get("coachFallback")
+        coach = fallback
+        r = subprocess.run([*node, str(src), str(out)], input=(claude_token or ""), text=True, cwd=cwd,
+                           capture_output=True, timeout=COACH_LIMIT_S, env=daemon_env())
+        if r.returncode == 0 and out.exists():
+            coach = json.loads(out.read_text()).get("coach") or fallback
+        else:
+            print(f"coach {job_id}: exit {r.returncode}", (r.stderr or "")[-500:])
+    except Exception as e:
+        print(f"coach {job_id} failed:", repr(e))
+    finally:
+        try:
+            src.unlink(missing_ok=True)
+            commit_clips()
+        except Exception as e:
+            print(f"coach {job_id}: cleanup failed:", repr(e))
+        out.unlink(missing_ok=True)
+    record = jobs.get(key) or {"owner": owner}
+    record.update(state="done", stage="done", done=1, total=1, coach=coach, updatedAt=now())
+    jobs.put(key, record)
+    return coach
 
 
 def _watching(jobs, job_id, t):

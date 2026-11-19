@@ -24,7 +24,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.29.0';
+const APP_VERSION = '0.29.1';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -510,27 +510,9 @@ function detachRunning() {
   detachable = null;
   abort = null;                   // clearResult must not cancel the upload or the job
   held = null;                    // nor drop its clip
-  background.set(d.ctx.id, d.ctx);
-  bgStatus();
-  d.promise.then(out => saveInBackground(d.ctx, out), e => {
-    console.warn('Background jump failed', e);
-    background.delete(d.ctx.id);
-    hist.dropIfOrphan(d.ctx.id);
-    bgStatus('Jeden skok sa nepodarilo dokončiť.');
-  });
-}
-async function saveInBackground(ctx, out) {
-  background.delete(ctx.id);
-  const result = out?.result;
-  const a = result?.who?.id in ATHLETES ? result.who.id : ctx.athlete, who = ATHLETES[a];
-  const j = result && !result.error ? analyzeJump(result, who.sex, result.ts ?? null, { height: who.height, pb: profiles[a].pb }) : { error: 'no result' };
-  if (j.error) { hist.dropIfOrphan(ctx.id); bgStatus('V jednom videu sa skok nenašiel.'); return; }
-  j.coach = out.coach ?? coaching(j.metrics, who.sex, { name: who.name });
-  const rec = hist.attemptRecord(j, { athlete: a, ...ctx.clip });
-  await hist.saveAttempt(rec, { clip: ctx.file, pose: result });
-  if (rec.id !== ctx.id) hist.dropIfOrphan(ctx.id);
-  renderLists(); refreshFeeds();
-  bgStatus(`Skok (${who.name}) je hotový v Histórii.`);
+  // it gets its row in the lists like any background jump, and the same saving: numbers, then coach
+  bgSet(d.ctx.id, { athlete: d.ctx.athlete, clip: d.ctx.clip, at: Date.parse(d.ctx.clip?.recordedAt) || Date.now(), stage: 'server počíta', error: false });
+  followBackground(d.ctx, () => d.promise);
 }
 
 // The coach for a saved attempt, whether or not it is still on screen. No coach from the
@@ -1048,7 +1030,7 @@ setTimeout(drawFreelapMini, 1500);   // a Start left on comes back on by itself
 
 async function feedItems() {
   const jumps = (await Promise.all(Object.keys(ATHLETES).map(a => hist.listAttempts(a)))).flat().map(r => jumpSummary(r, ATHLETES));
-  return [...jumps, ...sprintView.records().map(r => sprintView.summary(r)), ...rsiView.records().map(r => rsiView.summary(r))]
+  return [...jumps, ...bgRows(), ...sprintView.records().map(r => sprintView.summary(r)), ...rsiView.records().map(r => rsiView.summary(r))]
     .filter(it => Number.isFinite(it.at));
 }
 async function refreshFeeds() {
@@ -1101,6 +1083,7 @@ function openRun(key) {
 document.addEventListener('click', e => {
   const it = e.target.closest('[data-item]');
   if (!it) return;
+  if (it.dataset.item === 'skok' && it.dataset.id.startsWith('bg:')) return void bgTap(it.dataset.id.slice(3));
   if (it.dataset.item === 'skok') return void openAttempt(it.dataset.id);
   openDetail(it.dataset.item, it.dataset.id, it.dataset.who);
 });
@@ -1238,26 +1221,86 @@ async function waitInBackground(file, a) {
   if (r.verdict === VERDICT.RENDERED) { bgStatus(`${file.name}: video má len ${fmt(r.timing.fpsFromGap, 0)} fps, skok potrebuje spomalené.`); return null; }
   const clip = { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null };
   const id = hist.attemptId(a, clip.file);
+  bgSet(id, { athlete: a, clip, at: Date.parse(clip.recordedAt) || Date.now(), stage: 'čaká v rade', error: false });
   try { await hist.storeClip(id, file); } catch { /* the upload still goes; only a resume needs the stored clip */ }
   bgJobs.add({ id, athlete: a, clip, jobId: null });
   return { id, file, clip, athlete: a };
 }
 async function cloudJumpInBackground(file, clip, a) {
   const id = hist.attemptId(a, clip.file), ctx = { id, athlete: a, file, clip };
+  bgSet(id, { athlete: a, clip, at: Date.parse(clip.recordedAt) || Date.now(), stage: 'posiela sa', error: false });
+  try { await hist.storeClip(id, file); } catch { /* only a resume needs it */ }
+  const who = ATHLETES[a], athletes = await roster();
+  await followBackground(ctx, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history: athletes.find(x => x.id === a)?.history ?? [], athletes, ...opts }));
+}
+// A background jump from its job to the history: the numbers are saved as soon as the server has
+// them, and the coaching text lands on the saved jump when it comes (it is written on its own
+// container since 2026-11-19, so it can be a minute or two behind). start(opts) is the upload or
+// the resume of a job; opts carries onJob, onProgress and onResult.
+async function followBackground(ctx, start) {
+  const { id, athlete: a } = ctx;
   background.set(id, ctx);
   bgStatus();
+  let jobId = null, saving = null;
+  const saveOnce = result => (saving ??= saveNumbers(ctx, result, jobId));
   try {
-    await hist.storeClip(id, file);
-    const who = ATHLETES[a], athletes = await roster();
-    const onJob = jobId => bgJobs.add({ id, athlete: a, clip, jobId });
-    const out = await analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history: athletes.find(x => x.id === a)?.history ?? [], athletes, onJob });
-    await saveInBackground(ctx, out);
+    const out = await start({
+      onJob: j => { jobId = j; bgJobs.add({ id, athlete: a, clip: ctx.clip, jobId: j }); bgSet(id, { stage: 'čaká na server' }); },
+      onProgress: q => { if (!saving) bgSet(id, { stage: q?.stage === 'queued' ? 'čaká na server' : 'server počíta' }); },
+      onResult: ({ result }) => { saveOnce(result); },
+    });
+    const t = await saveOnce(out?.result);
+    if (t) await landCoach(t, out?.coach ?? null);
   } catch (e) {
     console.warn('Background jump failed', e);
+    const t = saving ? await saving : null;
+    if (t) await landCoach(t, null);
+    else bgSet(id, { stage: 'nepodarilo sa · ťukni a skús znova', error: true });
+  } finally {
     background.delete(id);
-    hist.dropIfOrphan(id);
-    bgStatus('Jeden skok sa nepodarilo dokončiť.');
-  } finally { bgJobs.drop(id); }
+    bgJobs.drop(id);
+    bgStatus();
+  }
+}
+// The numbers of a background jump saved as an attempt, its coaching still to come. null when no
+// jump came out: the row stays, with its stored clip, so it can be tried again.
+async function saveNumbers(ctx, result, jobId) {
+  const a = result?.who?.id in ATHLETES ? result.who.id : ctx.athlete, who = ATHLETES[a];
+  const j = result && !result.error ? analyzeJump(result, who.sex, result.ts ?? null, { height: who.height, pb: profiles[a].pb }) : { error: 'no result' };
+  if (j.error) { bgSet(ctx.id, { stage: 'skok sa nenašiel · ťukni a skús znova', error: true }); return null; }
+  j.coach = null;
+  const rec = hist.attemptRecord(j, { athlete: a, ...ctx.clip });
+  rec.coachPending = true;
+  rec.coachJob = jobId;
+  await hist.saveAttempt(rec, { clip: ctx.file, pose: result });
+  if (rec.id !== ctx.id) hist.dropIfOrphan(ctx.id);
+  bgDone(ctx.id);
+  renderLists();
+  bgStatus(`Skok (${who.name}) je hotový.`);
+  return { id: rec.id, athlete: a, jump: j, job: jobId, saved: Promise.resolve() };
+}
+// Rows for jumps on their way, in Tréning and História like sprint's and RSI's: one per clip,
+// saying where it is. A failed one stays with "skúsiť znova" instead of vanishing.
+const bgState = new Map();   // clip id -> { id, athlete, clip, at, stage, error }
+let feedTimer = null;
+const feedSoon = () => { clearTimeout(feedTimer); feedTimer = setTimeout(refreshFeeds, 250); };
+function bgSet(id, patch) { bgState.set(id, { ...(bgState.get(id) ?? { id, added: Date.now() }), ...patch }); feedSoon(); }
+function bgDone(id) { bgState.delete(id); feedSoon(); }
+function bgRows() {
+  return [...bgState.values()].filter(s => s.clip).map(s => ({
+    // listed at the upload, so it shows under Dnes while it is on its way (the saved jump then
+    // sits on the day it was filmed)
+    kind: 'skok', id: `bg:${s.id}`, who: s.athlete, at: s.added,
+    title: `Skok · ${s.clip.file.name}`, sub: s.stage, value: s.error ? '!' : '…', valueSub: s.error ? 'znova' : '',
+  }));
+}
+async function bgTap(id) {
+  const s = bgState.get(id);
+  if (!s?.error || background.has(id)) return;
+  const file = cloudReady() ? await hist.loadOriginal(id) : null;
+  if (!file) { bgSet(id, { stage: 'video sa v telefóne nenašlo, nahraj ho znova' }); return; }
+  bgSet(id, { stage: 'posiela sa', error: false });
+  await runQueue([{ id, file, clip: s.clip, athlete: s.athlete }]);
 }
 // Background jumps in flight, kept so they finish after iOS closed the app: a batch of ten waits
 // up to 25 min for the server, longer than the phone stays awake.
@@ -1281,15 +1324,10 @@ async function resumeBackground() {
     const file = job ? await hist.loadOriginal(e.id) : null;
     if (!file) { bgJobs.drop(e.id); hist.dropIfOrphan(e.id); continue; }
     const ctx = { id: e.id, athlete: e.athlete, file, clip: e.clip };
-    background.set(e.id, ctx);
-    bgStatus();
-    resumeCloudJob(e.jobId).then(out => saveInBackground(ctx, out), err => {
-      console.warn('Background jump failed', err);
-      background.delete(e.id);
-      hist.dropIfOrphan(e.id);
-      bgStatus('Jeden skok sa nepodarilo dokončiť.');
-    }).finally(() => bgJobs.drop(e.id));
+    bgSet(e.id, { athlete: e.athlete, clip: e.clip, at: Date.parse(e.clip?.recordedAt) || Date.now(), stage: 'server počíta', error: false });
+    followBackground(ctx, opts => resumeCloudJob(e.jobId, opts));
   }
+  for (const w of waiting) bgSet(w.id, { athlete: w.athlete, clip: w.clip, at: Date.parse(w.clip?.recordedAt) || Date.now(), stage: 'čaká v rade', error: false });
   if (waiting.length) { bgStatus(); await runQueue(waiting); }
 }
 // Until jump run `run` is uploading (it can then finish in the background) or is over.

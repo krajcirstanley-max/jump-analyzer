@@ -205,11 +205,31 @@ class Analyzer:
         push = make_push(jobs, os.environ.get("VAPID_PRIVATE"), os.environ.get("VAPID_SUB"))
         with self.lock:
             return process_job(job_id, owner, params, jobs=jobs, clips_dir=CLIPS, reload_clips=clips.reload, commit_clips=clips.commit, daemon=self.daemon, push=push,
-                               claude_token=claude_token_for(owner, os.environ.get("JUMP_CLAUDE_TOKENS")))
+                               claude_token=claude_token_for(owner, os.environ.get("JUMP_CLAUDE_TOKENS")),
+                               spawn_coach=lambda jid, own: coach_job.spawn(jid, own))
 
     @modal.exit()
     def stop(self):
         self.daemon.stop()
+
+
+# A jump's coaching text, on a CPU container after the GPU job has saved the numbers.
+coach_image = (
+    chat_image
+    .add_local_file(ROOT / "package.json", "/app/package.json")
+    .add_local_dir(ROOT / "js", "/app/js")
+    .add_local_file(ROOT / "server/coach.mjs", "/app/server/coach.mjs")
+    .add_local_file(ROOT / "server/claude-cli.mjs", "/app/server/claude-cli.mjs")
+    .add_local_file(ROOT / "server/coach-run.mjs", "/app/server/coach-run.mjs")
+)
+
+
+@app.function(image=coach_image, region="eu", cpu=1.0, memory=2048, volumes={CLIPS: clips}, secrets=[claude_secret], timeout=300, scaledown_window=120)
+def coach_job(job_id, owner):
+    from worker import claude_token_for, process_coach
+
+    process_coach(job_id, owner, jobs=jobs, clips_dir=CLIPS, reload_clips=clips.reload, commit_clips=clips.commit,
+                  claude_token=claude_token_for(owner, os.environ.get("JUMP_CLAUDE_TOKENS")))
 
 
 @app.function(image=recap_image, region="eu", cpu=8.0, memory=16384, volumes={CLIPS: clips, MUSIC: music}, timeout=900, scaledown_window=60)

@@ -57,7 +57,10 @@ export function coachClient({ token, localLogin = false } = {}) {
 // or lose the numbers. coachFallback is what to show if the coaching step never comes back.
 // athletes: [{ id, sex, name, height, history }] when the app leaves it to the server to tell who
 // is in the clip; the one found replaces sex, name, height and history.
-export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, pb = null, history = [], athletes = null, client, onProgress, onResult }) {
+// deferCoach: the coaching text is written elsewhere (a CPU container, worker.process_coach), so this
+// GPU job ends with the numbers and the phase snapshots (2026-11-19: a job held its GPU 1-3 min for
+// the text, ten jumps queued 25-60 min, and the GPU was paid while idle).
+export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, pb = null, history = [], athletes = null, client, onProgress, onResult, deferCoach = false }) {
   const t = { start: performance.now() };
   const mark = k => { t[k] = Math.round(performance.now() - t.start); };
   const meta = probe(clip);
@@ -125,6 +128,11 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     await onResult?.({ result, coachFallback, ms: t });
 
     let coach = null;
+    if (!jump.error && deferCoach) {
+      const snapshots = await phaseSnapshots(frames, jump, res.last).catch(() => null);
+      mark('snapshots');
+      return { result, coach: null, coachInput: { jump, snapshots, name, sex, history, coachFallback }, jumpError: undefined, decode: frames.mode, provider, ms: t };
+    }
     if (!jump.error) {
       onProgress?.({ stage: 'coach', done: 0, total: 1 });
       try {

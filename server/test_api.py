@@ -321,6 +321,38 @@ def test_coaching_crash_keeps_the_result_and_uses_the_fallback():
         assert left == [] and pushes == [("s", "j", True)]
 
 
+def test_jump_coaching_goes_to_its_own_container_and_frees_the_gpu():
+    d = tempfile.TemporaryDirectory(); p = Path(d.name)
+    jobs = Store(); jobs.put(A.job_key("j"), {"state": "queued", "owner": "s", "updatedAt": 1})
+    (p / "j").write_bytes(b"c")
+    spawned = []
+    daemon = FakeDaemon({"result": {"N": 5}, "coachInput": {"jump": {"metrics": []}, "coachFallback": {"source": "template"}}}, result={"N": 5})
+    o = W.process_job("j", "s", {"sex": "male"}, jobs=jobs, clips_dir=p, reload_clips=lambda: None, commit_clips=lambda: None,
+                      daemon=daemon, push=None, tmp=d.name, now=lambda: 100.0, spawn_coach=lambda jid, own: spawned.append((jid, own)))
+    assert daemon.ran[0]["deferCoach"] is True and spawned == [("j", "s")]
+    rec = jobs[A.job_key("j")]
+    assert rec["state"] == "running" and rec["stage"] == "coach" and rec["result"] == {"N": 5}
+    assert (p / "j.coach.json").exists() and not (p / "j").exists()   # the clip goes, the coach input stays
+    # the coaching container: a stub Node that writes the text; the token arrives on stdin only
+    stub = "import sys,json; t=sys.stdin.read(); json.dump({'coach': {'source': 'claude', 'tok': len(t)}}, open(sys.argv[2], 'w'))"
+    c = W.process_coach("j", "s", jobs=jobs, clips_dir=p, reload_clips=lambda: None, commit_clips=lambda: None,
+                        claude_token="secret", now=lambda: 200.0, node=(sys.executable, "-c", stub), cwd=d.name)
+    rec = jobs[A.job_key("j")]
+    assert rec["state"] == "done" and rec["coach"]["source"] == "claude" and rec["coach"]["tok"] == 6 and "secret" not in json.dumps(rec)
+    assert not (p / "j.coach.json").exists()
+    # a failed run ends with the template coach, never stuck
+    (p / "k.coach.json").write_text(json.dumps({"coachFallback": {"source": "template"}}))
+    jobs.put(A.job_key("k"), {"state": "running", "owner": "s", "result": {"N": 1}})
+    W.process_coach("k", "s", jobs=jobs, clips_dir=p, reload_clips=lambda: None, commit_clips=lambda: None, node=(sys.executable, "-c", "raise SystemExit(3)"), cwd=d.name)
+    assert jobs[A.job_key("k")]["state"] == "done" and jobs[A.job_key("k")]["coach"] == {"source": "template"}
+    # RSI and sprint never defer: they have no coaching text
+    d2 = FakeDaemon({"result": {"N": 1}}, result={"N": 1})
+    (p / "j").write_bytes(b"c")
+    W.process_job("j", "s", {"mode": "rsi"}, jobs=jobs, clips_dir=p, reload_clips=lambda: None, commit_clips=lambda: None,
+                  daemon=d2, push=None, tmp=d.name, now=lambda: 100.0, spawn_coach=lambda *a: spawned.append(a))
+    assert "deferCoach" not in d2.ran[0] and len(spawned) == 1
+
+
 def test_claude_token_reaches_only_the_node_job():
     d = FakeDaemon({"result": {"N": 1}}, result={"N": 1})
     o, rec, *_ = run_job(d, token="fake-secret-token")
