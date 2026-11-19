@@ -128,7 +128,9 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
   const tor = flightIdx.map(i => segLen(track[i], SEGS[0])).filter(Number.isFinite);
   const depth = tor.length >= 12 ? median(tor.slice(-6)) / median(tor.slice(0, 6)) : NaN;
   const scaleWhy = scaleOk ? null : fitSeconds < 0.35 ? 'short' : !angleOk && Math.abs(depth - 1) > 0.15 ? 'depth' : !angleOk ? 'fit' : 'torso';
-  const apexOk = angleOk && tUp > t[0] + 0.03 && tUp < t.at(-1) - 0.08;
+  // and a short arc can't place the apex at all (2026-11-19, IMG_1083: 0.24 s seen to the sand, apex
+  // at 0.104 s for the hips' 0.142 s, a 3.8° take-off for about 8°)
+  const apexOk = angleOk && fitSeconds >= 0.3 && tUp > t[0] + 0.03 && tUp < t.at(-1) - 0.08;
   const flightTime = landing != null ? ts[landing] - ts[T.to] : NaN;
   // Takeoff distance: centre of mass ahead of the toe at toe-off (Hay's partition).
   const takeoffDist = rel.at(-1)[0] / (pxPerM * zoom(T.to));

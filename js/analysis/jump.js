@@ -73,7 +73,7 @@ function withGround(f, g) {
     // The fit's own gate (3 cm) is for a gravity scale; here it only has to place the apex, and a
     // far, panning phone leaves a few cm of wobble on the arc (IMG_4677: 3.0 cm, apex at 0.24 s of
     // 0.68 s seen, angle hidden for no good reason). 5 cm with the apex well inside the arc.
-    ...((f.apexOk || (f.fitRmsM < 0.05 && f.tUp > 0.05 && f.tUp < f.fitSeconds - 0.08)) && Number.isFinite(f.vyTO)
+    ...((f.apexOk || (f.fitRmsM >= 0 && f.fitRmsM < 0.05 && f.fitSeconds >= 0.3 && f.tUp > 0.05 && f.tUp < f.fitSeconds - 0.08)) && Number.isFinite(f.vyTO)
       ? { takeoffAngle: (Math.atan2(f.vyTO, g.vxTO) * 180) / Math.PI, angleOk: true, apexOk: true } : {}),
     takeoffSpeed: Math.hypot(g.vxTO, f.vyTO),
     takeoffDist: g.takeoffDist, flightDistance: g.vxTO * g.flightTime, landingReach: g.landingReach, estDistance: g.jump,
@@ -391,7 +391,11 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // Faster than any human jump (2026-11-17, a rerun of the sprint IMG_4866: the server named a
   // "take-off" mid-stride and it read vy 7.0, 66 m/s, a 5.8 m apex). Every checked jump leaves the
   // board at vy 1.6-2.7 and 6.6-8.6 m/s, so 4.5 and 13 sit far above any jump.
-  if (!flight.error && ((flight.angleOk || flight.apexOk) && flight.vyTO > 4.5 || flight.vxTO > 13)) {
+  // The horizontal ceiling holds for the runway's speed, or the arc of a full jump. A pop-up's short
+  // arc gives no speed to trust (2026-11-19, IMG_1083: 14.5 m/s from the arc, refused before the
+  // server's first pass could measure the runway); its metres stay hidden by the scale checks.
+  const vxTrusted = (ground && !ground.error) || !(popUp || (preGround && !result.ground));
+  if (!flight.error && ((flight.angleOk || flight.apexOk) && flight.vyTO > 4.5 || (vxTrusted && flight.vxTO > 13))) {
     return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: flight.vxTO, vy: flight.vyTO } };
   }
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no

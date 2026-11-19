@@ -307,10 +307,15 @@ export function keyFrames(track, contacts, fps, sex = 'male', opts = {}) {
   // Claude's sand frame, when wrong, has been early (IMG_4954 778 for 800, a rerun of IMG_4677 780
   // for 799: feet over the sand before they touch it), and gravity's frame was never more than 2
   // frames late on 11 checked jumps (up to 13 early), so the frame may sit 0.1 s before gravity's.
-  if (named != null && physLanding != null && (named < physLanding - Math.round(0.1 * fps) || named > physLanding + near)) named = null;
+  // A run-through comes down on one foot and runs on: gravity's landing (a fall to a third of the
+  // height below the take-off) and the feet's stop belong to a full jump. There the first touch of
+  // the sand is the landing (2026-11-19, Miška's IMG_1084: sand 1067, moved to 1105 in the running
+  // out, and the flight fit over it gave a 4.5° take-off for about 17°).
+  const popUp = o.events?.kind === 'runthrough' && named != null;
+  if (!popUp && named != null && physLanding != null && (named < physLanding - Math.round(0.1 * fps) || named > physLanding + near)) named = null;
   let landing = named ?? physLanding;
   const tight = Math.round(0.05 * fps);
-  if (apex != null) {
+  if (apex != null && !popUp) {
     const low = i => { const kp = track[i]; if (!kp) return NaN; const a = footLow(kp, 'l'), b = footLow(kp, 'r'); return Math.max(a?.[1] ?? -Infinity, b?.[1] ?? -Infinity); };
     const ys = [];
     for (let i = apex; i <= Math.min(N - 1, apex + Math.round(0.8 * fps)); i++) ys.push(low(i));
