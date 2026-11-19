@@ -43,7 +43,7 @@ test('a run-up is read as a run-through even when the server called it a full ju
 // Stanley's and Miška's first real run-ups (2026-11-19, indoor hall, filmed from the board end, the
 // start of the run-up far and small). Board touchdown and toe-off by eye on toe-following crops.
 const rb = new URL('./real/rb19/', import.meta.url);
-const HAND = { 4653: [1495, 1507], 4654: [881, 897], 4655: [1978, 1990], 4656: [769, 783], 4657: [688, 702] };
+const HAND = { 4653: [1495, 1507], 4654: [881, 897], 4655: [1978, 1990], 4656: [769, 783], 4657: [688, 702], 4658: [1042, 1056] };
 test('real run-ups: every take-off found, board edges within 2 frames', { skip: !existsSync(new URL('IMG_4653.json', rb)) }, () => {
   for (const [id, [td, to]] of Object.entries(HAND)) {
     const r = fromWire(JSON.parse(readFileSync(new URL(`IMG_${id}.json`, rb))).result);
@@ -60,8 +60,10 @@ test('real run-ups: the last 10-12 steps walked back from the take-off by rhythm
     const a = r.who?.id === 'miska' ? ['female', 171] : ['male', 186];
     const n = rozbehNumbers(r, ...a);
     assert.ok(n.steps.length >= 10 && n.steps.length <= 13, `${id}: ${n.steps.length} steps`);   // IMG_4656 showed 3 before
+    assert.ok(!n.steps.some(x => x.missing), `${id}: a step marked missing`);
     const tds = n.ts;
-    for (let i = 1; i < tds.length; i++) { const p = tds[i] - tds[i - 1]; assert.ok(p > 0.17 && p < 0.36, `${id} step ${i} period ${p.toFixed(3)}`); }
+    // the last step into the board is short (IMG_4658: 0.13-0.17 s against about 0.24 s)
+    for (let i = 1; i < tds.length; i++) { const p = tds[i] - tds[i - 1], lo = i === tds.length - 1 ? 0.12 : 0.17; assert.ok(p > lo && p < 0.36, `${id} step ${i} period ${p.toFixed(3)}`); }
   }
 });
 

@@ -10,7 +10,7 @@ import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob } from './c
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 3;
+const RB_ALGO = 4;
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,9 +42,14 @@ export function stepsBack(clean, first, last, fps, takeoff, pen, { backS = 2.6 }
   const raw = detectContacts(clean, first, last, fps).filter(c => c.to >= c.td && c.td < takeoff.td - 2).sort((a, b) => a.td - b.td);
   const cs = [];
   for (const c of raw) { const p = cs.at(-1); if (p && c.td <= p.to + 1) { if (c.to - c.td > p.to - p.td) cs[cs.length - 1] = c; continue; } cs.push(c); }
+  // the running rhythm from the contacts of the last 2.5 s (one pair can be wrong: IMG_4658's pen and
+  // take-off were named 18 frames apart for a 28-frame step, and the walk stopped after one step)
+  const near = cs.filter(c => (takeoff.td - c.td) / fps < 2.5);
+  const gaps = near.slice(1).map((c, i) => c.td - near[i].td).filter(g => g / fps > 0.17 && g / fps < 0.36).sort((a, b) => a - b);
+  let period = gaps.length >= 3 ? gaps[gaps.length >> 1] : pen ? takeoff.td - pen.td : Math.round(0.26 * fps);
   const out = [{ td: takeoff.td, to: takeoff.to, foot: takeoff.foot }];
-  if (pen) out.unshift({ td: pen.td, to: pen.to, foot: pen.foot });
-  let period = pen ? takeoff.td - pen.td : Math.round(0.25 * fps);
+  // the last step is short (IMG_4658: 0.15 s against 0.24 s for the steps before), so the pen counts from half a period
+  if (pen && takeoff.td - pen.td > 0.45 * period) out.unshift({ td: pen.td, to: pen.to, foot: pen.foot });
   for (let k = cs.length - 1; k >= 0; k--) {
     const c = cs[k], next = out[0];
     if (c.td >= next.td - 2) continue;
@@ -78,6 +83,11 @@ export function splitSteps(steps, ts, splits) {
     return { label, steps: inside.length, rate, length: rate && v ? v / rate : null, seen, contact: inside.filter(s => s.contact != null).reduce((x, s, _, l) => x + s.contact / l.length, 0) || null };
   });
 }
+
+// Both athletes take off from the right foot (Stanley 2026-11-19: "odraz je z pravej"); the pose
+// swaps left and right in a side view, so the feet are named from the take-off back, alternating.
+export const TAKEOFF_FOOT = { stanley: 'r', miska: 'r' };
+export const footOf = (i, len, who) => { const t = TAKEOFF_FOOT[who] ?? 'r'; return (len - 1 - i) % 2 === 0 ? t : (t === 'r' ? 'l' : 'r'); };
 
 export function rozbehNumbers(result, sex, height) {
   const res = { ...result, events: result?.events ? { ...result.events, kind: 'runthrough' } : result?.events };
@@ -253,17 +263,21 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const steps = rec.steps ?? [];
     if (!steps.length) return '';
     const total = runOf(rec)?.steps ?? RUNUP_STEPS, scale = 520;
-    const sure = c => c != null && c >= 0.07;   // shorter is a flicker of the tracking, not a contact
+    // contact and flight only near the board: further back the athlete is small and a touchdown came
+    // 8 frames late by eye (IMG_4654, 718 for about 710); there the step itself and its rhythm stand
+    const tTake = rec.ts?.at(-1);
+    const nearBoard = i => !(Number.isFinite(tTake) && Number.isFinite(rec.ts?.[i])) || tTake - rec.ts[i] <= 1.05;
+    const sureAt = (c, i) => c != null && c >= 0.07 && nearBoard(i);
     const rows = steps.map((s, i) => {
       const n = total - (steps.length - 1 - i), last = i === steps.length - 1, pen = i === steps.length - 2;
       if (s.missing) return `<div class="sp-row rb-row"><span class="sp-i">${n}</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n" style="width:84px">nezachytený</span></div>`;
-      return `<div class="sp-row rb-row${last || pen ? ' hl' : ''}"><span class="sp-i">${n}</span><span class="sp-f">${FOOT[s.foot] ?? ''}</span>
-        <span class="sp-bar">${sure(s.contact) ? `<span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>` : ''}${!last && s.air != null && sure(s.contact) ? `<span class="fl" style="width:${(s.air * scale).toFixed(0)}px"></span>` : ''}</span>
-        <span class="sp-n">${sure(s.contact) ? n3(s.contact) : '–'}</span><span class="sp-n">${last ? 'odraz' : s.air != null && sure(s.contact) ? n3(s.air) : '–'}</span></div>`;
+      return `<div class="sp-row rb-row${last || pen ? ' hl' : ''}"><span class="sp-i">${n}</span><span class="sp-f">${FOOT[footOf(i, steps.length, rec.who)]}</span>
+        <span class="sp-bar">${sureAt(s.contact, i) ? `<span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>` : ''}${!last && s.air != null && sureAt(s.contact, i) ? `<span class="fl" style="width:${(s.air * scale).toFixed(0)}px"></span>` : ''}</span>
+        <span class="sp-n">${sureAt(s.contact, i) ? n3(s.contact) : '–'}</span><span class="sp-n">${last ? 'odraz' : s.air != null && sureAt(s.contact, i) ? n3(s.air) : '–'}</span></div>`;
     }).join('');
     return card(`Kroky ${total - steps.length + 1}–${total}`, `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let</p>
       <div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}
-      <p class="note s">Rozbeh ${total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${total} odraz, ${total - 1} predposledný. Začiatok rozbehu je na videu príliš ďaleko, preto len posledné kroky.</p>`);
+      <p class="note s">Rozbeh ${total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${total} odraz, ${total - 1} predposledný. Čas na zemi a let len pri posledných krokoch, ďalej od dosky je postava na videu príliš malá.</p>`);
   }
   let shownSig = '';
   function draw() {
@@ -271,10 +285,10 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     if (rec) shownSig = `${!!rec.pending}|${rec.error ?? ''}|${(rec.typed ?? []).join(',')}`;
     if (!rec) { root.innerHTML = '<div class="card"><p class="note">Rozbeh sa nenašiel.</p></div>'; return; }
     const name = athletes[rec.who]?.name ?? '';
-    const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox" data-rb-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div></section>` : '';
+    const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox player" data-rb-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div></section>` : '';
     const state = rec.pending ? `<section class="card"><p class="note" data-rb-state>◌ ${esc(rec.stage ?? 'analýza beží')}… Video si môžeš pozrieť hneď, čísla sa doplnia samé.</p></section>`
       : rec.error ? `<section class="card"><p class="banner bad">${esc(rec.error)}</p><button class="btn" data-rb-retry="${esc(rec.id)}">Skúsiť znova</button></section>` : '';
-    const n = runOf(rec)?.steps;
+    const n = runOf(rec)?.steps ?? RUNUP_STEPS;
     root.innerHTML = `<h2 class="ath-name">${esc(name)}${name ? ' · ' : ''}rozbeh${n ? ` ${n} kr.` : ''}</h2>${video}${state}
       ${rec.pending || rec.error ? '' : freelapHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
       <section class="card"><button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
@@ -287,7 +301,13 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const blob = await loadClip(rec.id).catch(() => null);
     if (!blob || current !== rec.id) { if (!blob) box.innerHTML = '<p class="note">Video sa v telefóne nenašlo.</p>'; return; }
     box.innerHTML = '';
-    try { const p = await makePlayer(box, blob); player = { id: rec.id, el: box, p }; } catch { box.innerHTML = '<p class="note">Video sa nedá prehrať.</p>'; }
+    try {
+      const p = await makePlayer(box, blob);
+      player = { id: rec.id, el: box, p };
+      // opens at the last steps: the start of the clip is the far, empty run-up
+      const at = rec.frames?.penTD ?? rec.frames?.TD;
+      if (Number.isFinite(at)) await p.player?.show?.(Math.max(0, at - 90));
+    } catch { box.innerHTML = '<p class="note">Video sa nedá prehrať.</p>'; }
   }
   const parse = s => { const v = parseFloat(String(s ?? '').replace(',', '.')); return Number.isFinite(v) && v > 0.3 && v < 3 ? v : null; };
   root.addEventListener('click', e => {
