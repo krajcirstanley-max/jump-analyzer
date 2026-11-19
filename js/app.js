@@ -25,7 +25,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.30.0';
+const APP_VERSION = '0.30.2';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -126,7 +126,7 @@ const rozbehView = initRozbeh({
   onChange: () => { clearTimeout(rbFeedTimer); rbFeedTimer = setTimeout(() => { refreshFeeds(); rozbehView.refresh(); }, 250); },
   onDeleted: () => { refreshFeeds(); renderLists(); showTab(backTo); },
   saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); },
-  loadClip: hist.loadClip, loadOriginal: hist.loadOriginal, dropClip: hist.deleteMedia, storePose: hist.storePose,
+  loadClip: hist.loadClip, loadOriginal: hist.loadOriginal, dropClip: hist.deleteMedia, storePose: hist.storePose, loadPose: id => hist.loadMedia(id).then(m => m.pose),
   makePlayer: clipPlayer,
 });
 // Two jumps side by side: each its own player with its skeleton and angles, lined up on the jump.
@@ -1234,10 +1234,21 @@ async function pickFromGallery() {
   }
 }
 // Two background jumps at a time from a list of stored, listed clips.
+// All of them go to the server at once and wait in its queue (2026-11-19: two at a time, the rest
+// waited on a locked phone while the server sat idle).
 async function runQueue(list) {
   const worker = async () => { for (let w; (w = list.shift());) { background.delete(w.id); await cloudJumpInBackground(w.file, w.clip, w.athlete); } };
-  await Promise.all([worker(), worker()]);
+  await Promise.all(Array.from({ length: Math.min(8, list.length) }, worker));
 }
+// The screen stays on while anything is on its way, so iOS does not pause the app mid-upload.
+let awake = false;
+function keepAwakeWhileBusy() {
+  const busy = background.size > 0 || rozbehView.busy() || rozbehView.records().some(r => r.pending);
+  if (busy === awake) return;
+  awake = busy;
+  globalThis.Capacitor?.nativePromise?.('SprintCamera', 'keepAwake', { on: busy }).catch(() => {});
+}
+setInterval(keepAwakeWhileBusy, 3000);
 // A jump that never takes the screen (a batch past its first clip): read the clip, store it on the
 // phone and list it as waiting. null when it can't be analysed.
 async function waitInBackground(file, a) {

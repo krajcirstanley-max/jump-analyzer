@@ -39,3 +39,17 @@ test('a run-up is read as a run-through even when the server called it a full ju
   const n = rozbehNumbers(fromWire(raw), 'male', 186);
   assert.ok(!n.error && Math.abs(n.frames.TD - 459) <= 2 && Math.abs(n.frames.TO - 477) <= 2);
 });
+
+// Stanley's and Miška's first real run-ups (2026-11-19, indoor hall, filmed from the board end, the
+// start of the run-up far and small). Board touchdown and toe-off by eye on toe-following crops.
+const rb = new URL('./real/rb19/', import.meta.url);
+const HAND = { 4653: [1495, 1507], 4654: [881, 897], 4655: [1978, 1990], 4656: [769, 783], 4657: [688, 702] };
+test('real run-ups: every take-off found, board edges within 2 frames', { skip: !existsSync(new URL('IMG_4653.json', rb)) }, () => {
+  for (const [id, [td, to]] of Object.entries(HAND)) {
+    const r = fromWire(JSON.parse(readFileSync(new URL(`IMG_${id}.json`, rb))).result);
+    const a = r.who?.id === 'miska' ? ['female', 171] : ['male', 186];
+    const n = rozbehNumbers(r, ...a);
+    assert.ok(!n.error, `${id}: ${n.error}`);   // IMG_4655: no runway and a −11 m/s arc, the take-off still stands
+    assert.ok(Math.abs(n.frames.TD - td) <= 2 && Math.abs(n.frames.TO - to) <= 2, `${id} board ${n.frames.TD}-${n.frames.TO}, by eye ${td}-${to}`);
+  }
+});

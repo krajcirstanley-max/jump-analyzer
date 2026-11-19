@@ -8,6 +8,8 @@ import { pairRun } from './analysis/sprint.js';
 import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob } from './cloud.js';
 
 const KEY = 'jump.rozbeh';
+// Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
+const RB_ALGO = 2;
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (x, dp) => (Number.isFinite(x) ? Number(x).toFixed(dp).replace('.', ',') : '–');
@@ -31,7 +33,7 @@ export function splitsOf(legs) {
 // take-off. A rozbeh never lands, so the answer is read as a run-through whatever the server said.
 export function rozbehNumbers(result, sex, height) {
   const res = { ...result, events: result?.events ? { ...result.events, kind: 'runthrough' } : result?.events };
-  const j = analyzeJump(res, sex, res.ts ?? null, { height });
+  const j = analyzeJump(res, sex, res.ts ?? null, { height, trustTakeoff: true });
   if (j.error) return { error: j.error };
   const m = Object.fromEntries((j.metrics ?? []).map(x => [x.key, x.status === 'hidden' ? null : x.value]));
   const g = j.flight?.ground && !j.flight.ground.error ? j.flight.ground : null;
@@ -46,7 +48,7 @@ export function rozbehNumbers(result, sex, height) {
   };
 }
 
-export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspect, onProgress = () => {}, onChange = () => {}, onDeleted = () => {}, saveClip, loadClip, loadOriginal, dropClip, storePose, makePlayer }) {
+export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspect, onProgress = () => {}, onChange = () => {}, onDeleted = () => {}, saveClip, loadClip, loadOriginal, dropClip, storePose, loadPose, makePlayer }) {
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
   const store = l => { try { localStorage.setItem(KEY, JSON.stringify(l.slice(0, MAX))); } catch { /* storage full or blocked */ } };
   const patch = (id, f) => { const l = load(), x = l.find(r => r.id === id); if (x) { f(x); store(l); } onChange(); return x; };
@@ -81,8 +83,10 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     pump();
     return id;
   }
+  // Every clip goes to the server at once and waits in its queue there (2026-11-19: sent two at a
+  // time, three run-ups waited half an hour on a locked phone while the server sat idle).
   function pump() {
-    while (running < 2 && queue.length) {
+    while (running < 8 && queue.length) {
       const job = queue.shift();
       running++;
       run(job).finally(() => { running--; pump(); });
@@ -101,8 +105,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       const nums = rozbehNumbers(result, a.sex, a.height);
       storePose?.(id, result).catch(() => {});
       patch(id, x => Object.assign(x, nums.error
-        ? { who, pending: false, error: 'Odraz sa vo videu nenašiel. Ťukni a skús znova.', stage: null }
-        : { who, pending: false, error: null, stage: null, ...nums, hasPose: true }));
+        ? { who, pending: false, error: 'Odraz sa vo videu nenašiel. Ťukni a skús znova.', stage: null, hasPose: true, algo: RB_ALGO }
+        : { who, pending: false, error: null, stage: null, ...nums, hasPose: true, algo: RB_ALGO }));
     };
     try {
       patch(id, x => { x.stage = jobId ? 'server počíta' : 'posiela sa'; x.error = null; });
@@ -126,6 +130,14 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   }
   // After iOS closed the app: jobs on the server are followed again, clips that never left go now.
   async function resume() {
+    // read again with today's code from the stored answer (no new upload)
+    for (const r of load().filter(x => !x.pending && (x.hasPose || x.error) && (x.algo ?? 1) < RB_ALGO)) {
+      const pose = await loadPose?.(r.id).catch(() => null);
+      if (!pose) continue;
+      const a = athletes[r.who] ?? getAthlete();
+      const nums = rozbehNumbers(pose, a.sex, a.height);
+      patch(r.id, x => Object.assign(x, nums.error ? { error: 'Odraz sa vo videu nenašiel. Ťukni a skús znova.', algo: RB_ALGO } : { ...nums, error: null, hasPose: true, algo: RB_ALGO }));
+    }
     for (const r of load().filter(x => x.pending)) {
       if (inFlight.has(r.id)) continue;
       // a job already on the server is followed first: it is the nearest to done
@@ -152,7 +164,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const at = rec.pending || rec.error ? rec.at : rec.recordedAt ?? rec.at;
     if (rec.pending || rec.error) return { kind: 'rozbeh', id: rec.id, who: rec.who, at, title: `Rozbeh · ${rec.file ?? ''}`, sub: rec.error ? 'nepodarilo sa · ťukni a skús znova' : rec.stage ?? 'analýza beží…', value: rec.error ? '!' : '…', valueSub: '' };
     const s = splitsOf(runOf(rec)?.legs);
-    const steps = rec.stepCount ? ` ${rec.stepCount} kr.` : '';
+    const n = runOf(rec)?.steps, steps = n ? ` ${n} kr.` : '';
     const sub = [s?.s21_11 != null ? `11–21 ${num(s.s21_11, 2)}` : null, rec.take?.contact != null ? `odraz ${num(rec.take.contact, 3)} s` : null].filter(Boolean).join(' · ');
     return { kind: 'rozbeh', id: rec.id, who: rec.who, at, title: `${name}${name ? ' · ' : ''}rozbeh${steps}`, sub, value: s?.s1_11 != null ? num(s.s1_11, 2) : '–', valueSub: s?.s1_11 != null ? '1–11 m' : 'bez Freelapu' };
   }
@@ -182,14 +194,16 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const t = rec.take ?? {};
     return card('Odraz', `<div class="sp-g3">${cell('Na doske', t.contact != null ? `${num(t.contact, 3)} s` : '–', rec.pen?.contact != null ? `predposl. ${num(rec.pen.contact, 3)} s` : '')}
       ${cell('Koleno pri odraze', t.kneeTO != null ? `${num(t.kneeTO, 0)}°` : '–', t.kneeTD != null ? `dopad ${num(t.kneeTD, 0)}°` : '')}
-      ${cell('Uhol odrazu', t.angle != null ? `${num(t.angle, 0)}°` : '–', t.angle != null ? '' : 'krátky let do piesku')}</div>
+      ${cell('Uhol odrazu', t.angle != null ? `${num(t.angle, 0)}°` : '–', t.angle != null ? '' : 'let je príliš krátky')}</div>
       ${rec.speeds?.pen != null ? `<p class="note s">Rýchlosť z dráhy: predposledný ${num(rec.speeds.pen, 2)} m/s, odraz ${num(rec.speeds.take, 2)} m/s.</p>` : '<p class="note s">Rýchlosť posledných krokov len keď appka nájde dosku a čiary dráhy.</p>'}`);
   }
   function stepsHtml(rec) {
     const steps = rec.steps ?? [];
     if (!steps.length) return '';
-    const shown = steps.slice(-8), first = steps.length - shown.length, total = rec.stepCount ?? null, scale = 520;
-    const num0 = i => (total ? total - (steps.length - 1 - i) : i + 1);
+    // numbered from the board (1 = the take-off): the start of a run-up filmed from the board end is
+    // far and small, so the video never counts the whole run-up (2026-11-19: 2 steps counted for 18)
+    const shown = steps.slice(-8), first = steps.length - shown.length, scale = 520;
+    const num0 = i => steps.length - i;
     const rows = shown.map((s, k) => {
       const i = first + k, last = i === steps.length - 1, pen = i === steps.length - 2;
       return `<div class="sp-row rb-row${last || pen ? ' hl' : ''}"><span class="sp-i">${num0(i)}</span><span class="sp-f">${FOOT[s.foot] ?? ''}</span>
@@ -198,7 +212,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     }).join('');
     return card('Posledné kroky', `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let</p>
       <div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}
-      <p class="note s">Zvýraznený predposledný krok a odraz.${total ? ` ${total} krokov napočítaných z videa${rec.stepSeen ? '' : ' (začiatok rozbehu nie je na videu)'}.` : ''}</p>`);
+      <p class="note s">Kroky číslované od dosky: 1 odraz, 2 predposledný.${runOf(rec)?.steps ? ` Rozbeh ${runOf(rec).steps} krokov podľa Freelapu.` : ''}</p>`);
   }
   let shownSig = '';
   function draw() {
@@ -209,7 +223,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox" data-rb-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div></section>` : '';
     const state = rec.pending ? `<section class="card"><p class="note" data-rb-state>◌ ${esc(rec.stage ?? 'analýza beží')}… Video si môžeš pozrieť hneď, čísla sa doplnia samé.</p></section>`
       : rec.error ? `<section class="card"><p class="banner bad">${esc(rec.error)}</p><button class="btn" data-rb-retry="${esc(rec.id)}">Skúsiť znova</button></section>` : '';
-    root.innerHTML = `<h2 class="ath-name">${esc(name)}${name ? ' · ' : ''}rozbeh${rec.stepCount ? ` ${rec.stepCount} kr.` : ''}</h2>${video}${state}
+    const n = runOf(rec)?.steps;
+    root.innerHTML = `<h2 class="ath-name">${esc(name)}${name ? ' · ' : ''}rozbeh${n ? ` ${n} kr.` : ''}</h2>${video}${state}
       ${rec.pending || rec.error ? '' : freelapHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
       <section class="card"><button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
     mountVideo(rec);

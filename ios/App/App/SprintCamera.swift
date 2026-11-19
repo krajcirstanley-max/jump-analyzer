@@ -51,6 +51,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "viewCopy", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "trimJump", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "trimRange", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "keepAwake", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
     private var galleryDelegate: GalleryPickerDelegate?
@@ -60,6 +61,16 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     /// galérie"). The web file input hands over a re-encoded copy without the slow-motion frames;
     /// PHPicker with the .current representation gives the asset as it is. Resolves
     /// { files: [{ path, name }] }, empty when the picker is closed.
+    /// The screen stays on while uploads or analyses are on their way (2026-11-19: the phone locked,
+    /// iOS paused the app, and three of five run-ups waited half an hour to be sent).
+    @objc func keepAwake(_ call: CAPPluginCall) {
+        let on = call.getBool("on") ?? false
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = on
+            call.resolve(["on": on])
+        }
+    }
+
     @objc func pickVideo(_ call: CAPPluginCall) {
         let limit = max(0, call.getInt("limit") ?? 1)
         DispatchQueue.main.async {

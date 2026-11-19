@@ -272,7 +272,10 @@ export function poseContacts(result) {
   return result.clean && fps > 0 ? detectContacts(result.clean, result.first, result.last, fps) : [];
 }
 // preGround: the server's pass before the runway is measured; the horizontal-speed floor waits for it.
-export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null, edges = null, preGround = false } = {}) {
+// trustTakeoff: the take-off the server named stands even when the flight's speeds look wrong
+// (Rozbeh only, 2026-11-19: a run-up has no flight to measure; Miška's IMG_4655 read vx −11 m/s
+// from its short arc and lost a clear take-off). Skok never passes it.
+export function analyzeJump(result, sex, ts, { height = null, pb = null, runup = null, tape = null, tapeFrom = null, split = null, edges = null, preGround = false, trustTakeoff = false } = {}) {
   const clean = result.clean, smooth = result.smooth;
   if (!clean || !smooth) return { error: 'Chýba vyčistený záznam pohybu.' };
   const fps = result.fps ?? (ts ? (ts.length - 1) / (ts.at(-1) - ts[0]) : NaN);
@@ -359,7 +362,8 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // A run-through's arc is too short and low to read the vertical speed from (2026-11-19, two server
   // runs of Miška's IMG_1084: vy 0.59 and −0.19 m/s), so only the horizontal floor holds there.
   const popUp = result.events?.kind === 'runthrough';
-  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(vxSeen) && ((!popUp && air.vyTO < 0.5) || (!(preGround && !result.ground) && vxSeen < 2.5))) {
+  const keepTakeoff = trustTakeoff && result.events?.TD != null;
+  if (!keepTakeoff && !air.error && Number.isFinite(air.vyTO) && Number.isFinite(vxSeen) && ((!popUp && air.vyTO < 0.5) || (!(preGround && !result.ground) && vxSeen < 2.5))) {
     if (air.vyTO >= 0.5 && !result.ground) return { error: 'Skok sa nedá zmerať: v zábere chýba doska alebo čiary dráhy.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };
     return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };
   }
@@ -395,7 +399,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // arc gives no speed to trust (2026-11-19, IMG_1083: 14.5 m/s from the arc, refused before the
   // server's first pass could measure the runway); its metres stay hidden by the scale checks.
   const vxTrusted = (ground && !ground.error) || !(popUp || (preGround && !result.ground));
-  if (!flight.error && ((flight.angleOk || flight.apexOk) && flight.vyTO > 4.5 || (vxTrusted && flight.vxTO > 13))) {
+  if (!keepTakeoff && !flight.error && ((flight.angleOk || flight.apexOk) && flight.vyTO > 4.5 || (vxTrusted && flight.vxTO > 13))) {
     return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: flight.vxTO, vy: flight.vyTO } };
   }
   // A run-through (pop-up, named by Claude on the server) lands on one foot and runs out: no
