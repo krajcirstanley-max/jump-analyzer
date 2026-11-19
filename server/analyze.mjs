@@ -15,7 +15,8 @@ import { toWire, fromWire } from '../js/cloud.js';
 import { writeCoaching } from './coach.mjs';
 import { cliClient } from './claude-cli.mjs';
 import { probe, openFrames, jpeg } from './frames.mjs';
-import { locateEvents, locateGuess } from './locate.mjs';
+import { locateEvents, locateGuess, locateLanding, nameEvents, LOCATE_MODEL, LANDING_MODEL } from './locate.mjs';
+import { stepTakeoff } from './takeoff.mjs';
 import { measureGround } from './ground.mjs';
 import { analyzeRsiClip } from './rsi.mjs';
 import { analyzeSprintClip } from './sprint.mjs';
@@ -79,25 +80,69 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     const result = toWire(res, meta.ts);
     // Claude watches the frames and names the key frames; the pose track's guess only says
     // where to look. Without a client, or if it fails, the pose track's own frames stand.
-    let who = null;
+    let who = null, groundDone = false;
+    const runGround = async jumpGuess => {
+      onProgress?.({ stage: 'ground', done: 0, total: 1 });
+      try {
+        const g = await measureGround({ frames, track: fromWire(result).smooth, jump: jumpGuess, boxes: res.boxes });
+        if (!g.error) result.ground = g;
+        else result.groundError = g.error;
+      } catch (e) {
+        console.error('ground failed:', e?.message || e);
+        result.groundError = String(e?.message || e).slice(0, 300);
+      }
+      mark('ground');
+    };
     if (client) {
       const guessed = locateGuess(fromWire(result), sex, meta.ts, { height, pb });
+      // Skok (2026-11-20): the board contact from the sprint pass's foot contacts (server/takeoff.mjs),
+      // then Claude reads only the landing while the runway is measured. A run-up keeps the full
+      // reading: its far steps are missed by the contact pass (3 of 6 run-ups had no board contact).
+      let fast = null;
+      if (mode === 'jump') {
+        fast = await stepTakeoff({ frames, meta, res, wire: result, sex, onProgress })
+          .catch(e => ({ error: String(e?.message || e).slice(0, 300) }));
+        mark('steps');
+      }
+      const near = fast?.seen?.T ?? guessed.TD ?? null;
       // Who is in the clip, read alongside the key frames.
       const whoP = athletes?.length > 1
-        ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, near: guessed.TD ?? null, athletes, client })
+        ? identifyAthlete({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, near, athletes, client })
           .catch(e => ({ id: null, error: String(e?.message || e).slice(0, 200) }))
         : null;
-      try {
-        const loc = await locateEvents({
-          frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, client, onProgress,
-          guess: guessed,
-        });
-        if (loc.events.TD != null) result.events = loc.events;
-        // What Claude answered and what was kept, so a wrong frame can be traced later.
-        result.locate = { ms: loc.ms, model: loc.model, coarse: loc.coarse, runs: loc.runs, edges: loc.edges, windows: loc.windows, rejected: loc.rejected, seen: loc.seen };
-      } catch (e) {
-        console.error('locate failed:', e?.message || e);
-        result.locate = { error: String(e?.message || e).slice(0, 300) };
+      const first = fast?.seen ? nameEvents({ ...fast.seen, sand: null, runThrough: false }, guessed, meta.fps) : null;
+      if (first?.events.TD != null) {
+        result.events = first.events;
+        const landP = locateLanding({ frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, client, TO: first.events.TO, model: LANDING_MODEL })
+          .catch(e => ({ sand: null, runThrough: false, error: String(e?.message || e).slice(0, 200) }));
+        // The runway from the take-off alone; its frames run to gravity's landing plus 0.12 s
+        // (gravity was up to 13 frames early, never more than 2 late, on 11 jumps checked by eye).
+        const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true });
+        const groundP = pre.error ? Promise.resolve() : runGround({ ...pre, landing: pre.landing != null ? pre.landing + Math.round(0.12 * meta.fps) : null }).then(() => { groundDone = true; });
+        const [land] = await Promise.all([landP, groundP]);
+        mark('landing');
+        const seen = { ...fast.seen, sand: land.sand, runThrough: land.runThrough };
+        const n = nameEvents(seen, guessed, meta.fps);
+        if (n.events.TD != null) result.events = n.events;
+        // the same fields as the full reading, so tools/bench.mjs replays it the same way
+        result.locate = { fast: true, ms: land.ms, model: land.model, runs: n.runs, edges: n.edges, windows: { T: seen.T, L: null }, rejected: n.rejected, seen,
+          steps: fast.steps, pick: fast.pick, timing: fast.timing, landWindow: land.window, ...(land.error ? { landError: land.error } : {}) };
+      } else {
+        // Claude watches the frames and names the key frames; the pose track's guess only says
+        // where to look. If it fails, the pose track's own frames stand.
+        try {
+          const loc = await locateEvents({
+            frames, boxes: res.boxes, first: res.first, last: res.last, fps: meta.fps, client, onProgress,
+            guess: guessed,
+          });
+          if (loc.events.TD != null) result.events = loc.events;
+          // What Claude answered and what was kept, so a wrong frame can be traced later.
+          result.locate = { ms: loc.ms, model: loc.model, coarse: loc.coarse, runs: loc.runs, edges: loc.edges, windows: loc.windows, rejected: loc.rejected, seen: loc.seen,
+            ...(fast ? { fastError: fast.error ?? 'naming rejected', steps: fast.steps } : {}) };
+        } catch (e) {
+          console.error('locate failed:', e?.message || e);
+          result.locate = { error: String(e?.message || e).slice(0, 300) };
+        }
       }
       who = await whoP;
       mark('located');
@@ -108,21 +153,11 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
       result.who = { id: a?.id ?? null, said: who?.said ?? null, ms: who?.ms, error: who?.error };
     }
     // Metres from the runway: the take-off line, the sand and the runway lines in every frame.
-    // Without them the analysis falls back to the gravity fit.
-    {
+    // Without them the analysis falls back to the gravity fit. Already measured on the fast path
+    // unless its first pass found no jump (a run-through before it was named one).
+    if (!groundDone) {
       const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true });
-      if (!pre.error) {
-        onProgress?.({ stage: 'ground', done: 0, total: 1 });
-        try {
-          const g = await measureGround({ frames, track: fromWire(result).smooth, jump: pre, boxes: res.boxes });
-          if (!g.error) result.ground = g;
-          else result.groundError = g.error;
-        } catch (e) {
-          console.error('ground failed:', e?.message || e);
-          result.groundError = String(e?.message || e).slice(0, 300);
-        }
-        mark('ground');
-      }
+      if (!pre.error) await runGround(pre);
     }
     onProgress?.({ stage: 'analysis', done: 0, total: 1 });
     const jump = analyzeJump(fromWire(result), sex, meta.ts, { height, pb });

@@ -270,6 +270,33 @@ export function recordedAt(clip) {
   } catch { return null; }
 }
 
+// The sprint's foot contacts for a clip already posed (2026-11-20): the long jump finds its board
+// contact among them instead of asking Claude to read every frame, the way the sprint counts its
+// steps. Same toe-against-track rule, same parallel pass. timing gets motion / motionParts.
+export async function stepsOf({ frames, meta, res, wire, timing = {} }) {
+  const pose = fromWire(wire).clean, track = fillToes(pose);
+  const tM = performance.now();
+  let motion = null;
+  if (frames.fd) {
+    await frames.get(res.last);
+    motion = await measureMotionParallel({ fd: await frames.fd(), W: meta.W, H: meta.H, track, from: res.first, to: res.last })
+      .catch(e => { timing.motionError = String(e?.message || e).slice(0, 300); return null; });
+  }
+  if (!motion) {
+    const it = frames.sequential(res.first, res.last, 1);
+    let at = -1, cur = null;
+    const getRGBA = async f => {
+      while (at < f) { const r = await it.next(); if (r.done) throw new Error('clip ended'); at = r.value.i; cur = r.value.rgba; }
+      return cur;
+    };
+    try { motion = await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); }
+    finally { await it.return?.(); }
+  }
+  timing.motion = Math.round(performance.now() - tM);
+  timing.motionParts = motion?.stats;
+  return sprintFromMotion({ motion, ts: meta.ts, fps: meta.fps });
+}
+
 export async function analyzeSprintClip(engine, { clip, athletes = null, who: known = null, client, onProgress, dump = false }) {
   const t0 = performance.now();
   const meta = probe(clip);

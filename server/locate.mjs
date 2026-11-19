@@ -12,6 +12,9 @@ import { analyzeJump, poseContacts } from '../js/analysis/jump.js';
 
 export const LOCATE_MODEL = 'claude-opus-5-5';    // per-frame reading: Sonnet merged steps on IMG_2674
 export const OVERVIEW_MODEL = 'claude-sonnet-5-5'; // finding the jump in a thumbnail strip is easy
+// The sand frame alone. Sonnet tried 2026-11-20 on five clips: no faster (5-10 s against Opus 8-10 s),
+// a run-through read as a full jump (IMG_2432) and a run-through's sand 6 frames late (IMG_1084).
+export const LANDING_MODEL = 'claude-opus-5-5';
 const TIMEOUT_MS = 60_000;
 
 const frameOrNull = { anyOf: [{ type: 'integer' }, { type: 'null' }] };
@@ -30,6 +33,18 @@ Find the jump. Answer with the printed frame numbers of the tile closest to the 
 const FRAMES_PROMPT = `You see a long jump filmed on a phone that pans with the athlete. Each image is a contact sheet of consecutive frames, row by row, cropped around the athlete, each stamped with its frame number in yellow.
 For every frame, decide whether a foot of the athlete is touching the running surface. A foot touches when it is flat on the ground or meets its own shadow; a foot above its shadow is in the air. Ignore the board and markings. A low box, mat or plate lying on the runway (often at the board) is running surface too: a foot standing on it is touching.
 List every frame number with a foot on the running surface in on_ground. In sand, give the first frame where any part of the body touches the sand pit, or null if it is not shown.
+Set run_through to true if this is a run-through (pop-up) instead of a full jump: after the takeoff the athlete comes down onto one foot in the sand and keeps running, rather than landing with both legs reaching forward. If the landing is not shown, judge from the flight: a run-through has no leg extension forward before the sand.`;
+
+// The landing alone (2026-11-20): with the board contact found from the foot contacts, Claude only
+// says when the body meets the sand and whether it is a run-through. One window from just after the
+// toe-off (a run-through lands 0.22 s after the board) to 0.95 s, about a third of the frames the
+// full reading sent, so it runs alongside the runway measurement instead of before it.
+const LANDING_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['sand', 'run_through'],
+  properties: { sand: frameOrNull, run_through: { type: 'boolean' } },
+};
+const LANDING_PROMPT = `You see the flight and landing of a long jump filmed on a phone that pans with the athlete. Each image is a contact sheet of consecutive frames after the take-off, row by row, cropped around the athlete, each stamped with its frame number in yellow.
+In sand, give the first frame where any part of the body touches the sand pit, or null if it is not shown.
 Set run_through to true if this is a run-through (pop-up) instead of a full jump: after the takeoff the athlete comes down onto one foot in the sand and keeps running, rather than landing with both legs reaching forward. If the landing is not shown, judge from the flight: a run-through has no leg extension forward before the sand.`;
 
 const image = jpeg => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } });
@@ -185,6 +200,20 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
     // what Claude answered, kept so tools/bench.mjs can replay the choice above with new code
     seen: { ground: seen.ground, sand: seen.sand, runThrough: seen.runThrough },
   };
+}
+
+// TO: the board toe-off. One retry: a failed call leaves gravity's landing and a full jump.
+export async function locateLanding({ frames, boxes, first, last, fps, client, TO, model = LANDING_MODEL }) {
+  const t0 = Date.now();
+  const f = s => Math.round(s * fps), per = Math.max(1, Math.round(fps / 120));
+  const clamp = v => Math.max(first, Math.min(last, v));
+  const win = range(clamp(TO + f(0.08)), clamp(TO + f(0.95)), per);
+  if (win.length < 4) return { sand: null, runThrough: false, ms: 0, window: null };
+  const sheets = await Promise.all(chunks(win, 36).map(part => contactSheet(frames, part, { boxes, cols: 9, tileW: 160 })));
+  const ans = await ask(client, model, LANDING_PROMPT, sheets, LANDING_SCHEMA)
+    .catch(() => ask(client, model, LANDING_PROMPT, sheets, LANDING_SCHEMA));
+  const shown = new Set(win);
+  return { sand: shown.has(ans?.sand) ? ans.sand : null, runThrough: ans?.run_through === true, ms: Date.now() - t0, window: [win[0], win.at(-1)], model };
 }
 
 // From Claude's ground frames and sand frame to the named key frames. Pure, so the benchmark can
