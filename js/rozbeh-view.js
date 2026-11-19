@@ -4,12 +4,14 @@
 // jump job and reads the answer with the same analyzeJump, as a run-through. Freelap gives the
 // splits (cones 1 · 6 · 11 · 21 m from the board), the video the steps and the take-off.
 import { analyzeJump } from './analysis/jump.js';
+import { detectContacts } from './analysis/events.js';
 import { pairRun } from './analysis/sprint.js';
 import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob } from './cloud.js';
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 2;
+const RB_ALGO = 3;
+export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (x, dp) => (Number.isFinite(x) ? Number(x).toFixed(dp).replace('.', ',') : '–');
@@ -31,6 +33,52 @@ export function splitsOf(legs) {
 
 // What a run-up keeps from the jump analysis: the steps it saw, the last two contacts and the
 // take-off. A rozbeh never lands, so the answer is read as a run-through whatever the server said.
+// The steps of the run-up's end, walked back from the take-off by the running rhythm: a contact one
+// step period before the next is the step before; two periods means a step the pose missed (kept as
+// "nezachytený" so the numbers from the board stay right). Stops where the rhythm breaks or past
+// `backS` seconds before the take-off (the Freelap zone). A single short miss had cut every step
+// before it from the jump timeline (2026-11-19, IMG_4656: 3 of about 9 steps shown).
+export function stepsBack(clean, first, last, fps, takeoff, pen, { backS = 2.6 } = {}) {
+  const raw = detectContacts(clean, first, last, fps).filter(c => c.to >= c.td && c.td < takeoff.td - 2).sort((a, b) => a.td - b.td);
+  const cs = [];
+  for (const c of raw) { const p = cs.at(-1); if (p && c.td <= p.to + 1) { if (c.to - c.td > p.to - p.td) cs[cs.length - 1] = c; continue; } cs.push(c); }
+  const out = [{ td: takeoff.td, to: takeoff.to, foot: takeoff.foot }];
+  if (pen) out.unshift({ td: pen.td, to: pen.to, foot: pen.foot });
+  let period = pen ? takeoff.td - pen.td : Math.round(0.25 * fps);
+  for (let k = cs.length - 1; k >= 0; k--) {
+    const c = cs[k], next = out[0];
+    if (c.td >= next.td - 2) continue;
+    const gap = next.td - c.td, n = Math.round(gap / period);
+    if ((takeoff.td - c.td) / fps > backS) break;
+    if (n < 1 || Math.abs(gap - n * period) > 0.35 * period || n > 3) { if (gap < 0.6 * period) continue; break; }
+    for (let m = n - 1; m >= 1; m--) out.unshift({ td: Math.round(next.td - m * gap / n), to: null, foot: null, missing: true });
+    out.unshift({ td: c.td, to: c.to, foot: c.foot });
+    if (n === 1) period = 0.7 * period + 0.3 * gap;
+  }
+  return out.map((s, i) => ({ ...s, contact: s.to != null ? (s.to - s.td + 1) / fps : null, air: i < out.length - 1 && s.to != null ? (out[i + 1].td - s.to - 1) / fps : null }));
+}
+
+// Per Freelap split: the steps in it, their rate from the video, the step length from the split's
+// speed. The cones are passed by the chip on the hip; the 1 m cone about 1 m before the take-off
+// touchdown at the 6-1 m speed. Steps at a boundary can fall either side, so the counts are shown "≈".
+export function splitSteps(steps, ts, splits) {
+  if (!splits || !steps?.length) return null;
+  const take = steps.at(-1), tTD = ts[take.td], v1 = splits.v6_1 ?? splits.v1_11;
+  if (!Number.isFinite(tTD) || !Number.isFinite(v1)) return null;
+  const t1 = tTD - 1 / v1;
+  const segs = splits.s11_6 != null
+    ? [['21–11 m', t1 - splits.s6_1 - splits.s11_6 - splits.s21_11, t1 - splits.s6_1 - splits.s11_6, splits.v21_11], ['11–6 m', t1 - splits.s6_1 - splits.s11_6, t1 - splits.s6_1, splits.v11_6], ['6–1 m', t1 - splits.s6_1, t1, splits.v6_1]]
+    : [['21–11 m', t1 - splits.s1_11 - (splits.s21_11 ?? NaN), t1 - splits.s1_11, splits.v21_11], ['11–1 m', t1 - splits.s1_11, t1, splits.v1_11]];
+  return segs.filter(([, a, b]) => Number.isFinite(a) && Number.isFinite(b)).map(([label, a, b, v]) => {
+    const inside = steps.filter(s => ts[s.td] >= a && ts[s.td] < b);
+    const periods = [];
+    for (let i = 0; i < steps.length - 1; i++) if (ts[steps[i].td] >= a && ts[steps[i].td] < b) periods.push(ts[steps[i + 1].td] - ts[steps[i].td]);
+    const rate = periods.length ? periods.length / periods.reduce((x, y) => x + y, 0) : null;
+    const seen = ts[steps[0].td] <= a + 0.05;   // the steps go back to the split's start
+    return { label, steps: inside.length, rate, length: rate && v ? v / rate : null, seen, contact: inside.filter(s => s.contact != null).reduce((x, s, _, l) => x + s.contact / l.length, 0) || null };
+  });
+}
+
 export function rozbehNumbers(result, sex, height) {
   const res = { ...result, events: result?.events ? { ...result.events, kind: 'runthrough' } : result?.events };
   const j = analyzeJump(res, sex, res.ts ?? null, { height, trustTakeoff: true });
@@ -38,8 +86,10 @@ export function rozbehNumbers(result, sex, height) {
   const m = Object.fromEntries((j.metrics ?? []).map(x => [x.key, x.status === 'hidden' ? null : x.value]));
   const g = j.flight?.ground && !j.flight.ground.error ? j.flight.ground : null;
   const sp = id => g?.steps?.find(s => s.id === id)?.speed ?? null;
+  const back = stepsBack(res.clean, res.first ?? 0, res.last ?? res.clean.length - 1, j.fps, { ...j.takeoff, foot: j.takeoffFoot }, j.pen);
   return {
-    steps: (j.timeline?.rows ?? []).map(r => ({ foot: r.foot, contact: r.contact, air: r.air ?? null })),
+    steps: back.map(r => ({ foot: r.foot, contact: r.contact, air: r.air, td: r.td, missing: !!r.missing })),
+    ts: back.map(r => res.ts?.[r.td] ?? r.td / j.fps),
     stepCount: j.stepCount?.count ?? null, stepSeen: !!j.stepCount?.seen,
     pen: { contact: m.contactPen != null ? m.contactPen / 1000 : null, knee: m.penKnee },
     take: { contact: m.contactTO != null ? m.contactTO / 1000 : null, kneeTD: m.kneeTD, kneeTO: m.kneeTO, angle: m.takeoffAngle },
@@ -186,9 +236,11 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const what = Number.isFinite(s.keep) ? (s.keep >= 0
       ? `Do dosky si zrýchlil o ${num(Math.abs(s.s11_6 != null ? s.v6_1 - s.v11_6 : s.v1_11 - s.v21_11), 2)} m/s.`
       : `Na konci si spomalil o ${num(Math.abs(s.s11_6 != null ? s.v6_1 - s.v11_6 : s.v1_11 - s.v21_11), 2)} m/s. Cieľ: rýchlosť udržať až do dosky.`) : '';
+    const per = rec.ts?.length ? splitSteps(rec.steps.map((x, i) => ({ ...x, td: i })), rec.ts, s) : null;
+    const perHtml = per?.length ? `<div class="rb-per">${per.map(p => `<div class="sp-row rb-row"><span style="width:64px">${p.label}</span><span class="sp-n" style="width:auto;flex:1;text-align:left">${p.seen ? `≈ ${p.steps} ${p.steps === 1 ? 'krok' : p.steps < 5 ? 'kroky' : 'krokov'}` : 'začiatok mimo videa'}</span><span class="sp-n" style="width:64px">${p.rate ? `${num(p.rate, 2)} kr/s` : '–'}</span><span class="sp-n" style="width:64px">${p.length ? `${num(p.length, 2)} m` : '–'}</span></div>`).join('')}<p class="note s">Frekvencia z videa, dĺžka kroku z rýchlosti Freelapu a frekvencie.</p></div>` : '';
     return card(`Freelap · posledných 21 m${run.typed ? ' (zadané ručne)' : ''}`, `<div class="${s.s11_6 != null ? 'sp-g3' : 'sp-g2'}">${cells}</div>
       <div class="rb-sum"><span><span class="sp-lb">1–11 m</span> <b>${num(s.s1_11, 2)} s</b> <span class="sp-lb">· ${num(s.v1_11, 2)} m/s</span></span>${keep}</div>
-      ${what ? `<p class="note s">${what}</p>` : ''}${form}`);
+      ${what ? `<p class="note s">${what}</p>` : ''}${perHtml}${form}`);
   }
   function takeoffHtml(rec) {
     const t = rec.take ?? {};
@@ -200,19 +252,18 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   function stepsHtml(rec) {
     const steps = rec.steps ?? [];
     if (!steps.length) return '';
-    // numbered from the board (1 = the take-off): the start of a run-up filmed from the board end is
-    // far and small, so the video never counts the whole run-up (2026-11-19: 2 steps counted for 18)
-    const shown = steps.slice(-8), first = steps.length - shown.length, scale = 520;
-    const num0 = i => steps.length - i;
-    const rows = shown.map((s, k) => {
-      const i = first + k, last = i === steps.length - 1, pen = i === steps.length - 2;
-      return `<div class="sp-row rb-row${last || pen ? ' hl' : ''}"><span class="sp-i">${num0(i)}</span><span class="sp-f">${FOOT[s.foot] ?? ''}</span>
-        <span class="sp-bar"><span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>${!last && s.air != null ? `<span class="fl" style="width:${(s.air * scale).toFixed(0)}px"></span>` : ''}</span>
-        <span class="sp-n">${n3(s.contact)}</span><span class="sp-n">${last ? 'odraz' : s.air != null ? n3(s.air) : '–'}</span></div>`;
+    const total = runOf(rec)?.steps ?? RUNUP_STEPS, scale = 520;
+    const sure = c => c != null && c >= 0.07;   // shorter is a flicker of the tracking, not a contact
+    const rows = steps.map((s, i) => {
+      const n = total - (steps.length - 1 - i), last = i === steps.length - 1, pen = i === steps.length - 2;
+      if (s.missing) return `<div class="sp-row rb-row"><span class="sp-i">${n}</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n" style="width:84px">nezachytený</span></div>`;
+      return `<div class="sp-row rb-row${last || pen ? ' hl' : ''}"><span class="sp-i">${n}</span><span class="sp-f">${FOOT[s.foot] ?? ''}</span>
+        <span class="sp-bar">${sure(s.contact) ? `<span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>` : ''}${!last && s.air != null && sure(s.contact) ? `<span class="fl" style="width:${(s.air * scale).toFixed(0)}px"></span>` : ''}</span>
+        <span class="sp-n">${sure(s.contact) ? n3(s.contact) : '–'}</span><span class="sp-n">${last ? 'odraz' : s.air != null && sure(s.contact) ? n3(s.air) : '–'}</span></div>`;
     }).join('');
-    return card('Posledné kroky', `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let</p>
+    return card(`Kroky ${total - steps.length + 1}–${total}`, `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let</p>
       <div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}
-      <p class="note s">Kroky číslované od dosky: 1 odraz, 2 predposledný.${runOf(rec)?.steps ? ` Rozbeh ${runOf(rec).steps} krokov podľa Freelapu.` : ''}</p>`);
+      <p class="note s">Rozbeh ${total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${total} odraz, ${total - 1} predposledný. Začiatok rozbehu je na videu príliš ďaleko, preto len posledné kroky.</p>`);
   }
   let shownSig = '';
   function draw() {

@@ -716,3 +716,4 @@ div.att-open { cursor: default; }
 .rb-type .sp-g3 { margin-top: 8px; }
 .rb-in { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 16px; background: var(--card); margin-top: 2px; }
 .note.s { font-size: 12.5px; margin: 8px 0 0; }
+.rb-per { margin-top: 10px; } .rb-per .sp-row span:first-child { color: var(--muted); }

@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { splitsOf, rozbehNumbers } from '../js/rozbeh-view.js';
+import { splitsOf, rozbehNumbers, splitSteps } from '../js/rozbeh-view.js';
 import { fromWire } from '../js/cloud.js';
 
 test('Freelap splits of a run-up: three legs with the 6 m cone, two without', () => {
@@ -52,4 +52,24 @@ test('real run-ups: every take-off found, board edges within 2 frames', { skip: 
     assert.ok(!n.error, `${id}: ${n.error}`);   // IMG_4655: no runway and a −11 m/s arc, the take-off still stands
     assert.ok(Math.abs(n.frames.TD - td) <= 2 && Math.abs(n.frames.TO - to) <= 2, `${id} board ${n.frames.TD}-${n.frames.TO}, by eye ${td}-${to}`);
   }
+});
+
+test('real run-ups: the last 10-12 steps walked back from the take-off by rhythm, misses kept', { skip: !existsSync(new URL('IMG_4656.json', rb)) }, () => {
+  for (const id of Object.keys(HAND)) {
+    const r = fromWire(JSON.parse(readFileSync(new URL(`IMG_${id}.json`, rb))).result);
+    const a = r.who?.id === 'miska' ? ['female', 171] : ['male', 186];
+    const n = rozbehNumbers(r, ...a);
+    assert.ok(n.steps.length >= 10 && n.steps.length <= 13, `${id}: ${n.steps.length} steps`);   // IMG_4656 showed 3 before
+    const tds = n.ts;
+    for (let i = 1; i < tds.length; i++) { const p = tds[i] - tds[i - 1]; assert.ok(p > 0.17 && p < 0.36, `${id} step ${i} period ${p.toFixed(3)}`); }
+  }
+});
+
+test('per Freelap split: steps, rate and step length from the split speed', () => {
+  const ts = Array.from({ length: 11 }, (_, i) => i * 0.25);   // a step every 0.25 s, take-off at 2.5 s
+  const steps = ts.map((_, i) => ({ td: i, contact: 0.11 }));
+  const per = splitSteps(steps, ts, splitsOf([1.07, 0.54, 0.55]));
+  assert.equal(per.length, 3);
+  for (const p of per) { assert.equal(+p.rate.toFixed(2), 4); assert.ok(Math.abs(p.length - p.label === '' ? 0 : 1) >= 0); }
+  assert.equal(+per[2].length.toFixed(2), 2.27);   // 9.09 m/s / 4 steps/s
 });
