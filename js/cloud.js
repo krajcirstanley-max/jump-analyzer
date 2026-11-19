@@ -257,6 +257,7 @@ export async function analyzeInCloud(file, { sex, name, height, history, athlete
   if (height) params.set('height', String(height));
   if (mode === 'rsi') { params.set('mode', 'rsi'); if (boxCm) params.set('box', String(boxCm)); }
   if (mode === 'sprint') params.set('mode', 'sprint');
+  if (mode === 'rozbeh') params.set('mode', 'rozbeh');
   if (who) params.set('who', String(who));   // known from a Freelap chip: the server need not look
   // The query string is bounded, and the newest attempts matter most.
   let h = (history || []).slice(-5);
@@ -274,7 +275,7 @@ export async function analyzeInCloud(file, { sex, name, height, history, athlete
   const { jobId } = await upload(file, params, { signal, onProgress });
   onJob?.(jobId);
   // RSI and sprint jobs take seconds and the jump screen would not know what to do with one on resume.
-  if (mode === 'jump') rememberJob(jobId);
+  if (mode === 'jump' || mode === 'rozbeh') rememberJob(jobId);
   return follow(jobId, { signal, onProgress, onResult, t0 });
 }
 

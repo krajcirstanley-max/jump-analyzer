@@ -119,7 +119,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       if (jobId) out = await resumeCloudJob(jobId, opts);
       else {
         const all = await roster();
-        out = await analyzeInCloud(file, { sex: me.sex, name: me.name, height: me.height, history: [], athletes: all, ...opts });
+        out = await analyzeInCloud(file, { sex: me.sex, name: me.name, height: me.height, history: [], athletes: all, mode: 'rozbeh', ...opts });
       }
       take(out?.result);
       patch(id, x => { x.jobId = null; });

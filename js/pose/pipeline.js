@@ -44,7 +44,7 @@ export async function runPipeline(frames, engine, opts = {}) {
   for (const dir of [-1, 1]) {
     let misses = 0;
     for (let f = (dir < 0 ? points[0].frame : points.at(-1).frame) + dir * o.sampleStep;
-      f >= 0 && f < N && misses < 2; f += dir * o.sampleStep) {
+      f >= 0 && f < N && misses < (o.extendMisses ?? 2); f += dir * o.sampleStep) {
       const pred = predictBox(points, f);
       const roi = searchRoi(pred, W, H);
       const hit = bestMatch(await engine.detect(await frames.get(f), W, H, roi), pred);

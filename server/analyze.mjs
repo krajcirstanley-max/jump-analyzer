@@ -60,7 +60,8 @@ export function coachClient({ token, localLogin = false } = {}) {
 // deferCoach: the coaching text is written elsewhere (a CPU container, worker.process_coach), so this
 // GPU job ends with the numbers and the phase snapshots (2026-11-19: a job held its GPU 1-3 min for
 // the text, ten jumps queued 25-60 min, and the GPU was paid while idle).
-export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, pb = null, history = [], athletes = null, client, onProgress, onResult, deferCoach = false }) {
+// mode 'rozbeh' (2026-11-19): a run-up, analysed like a jump but with no coaching text.
+export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, pb = null, history = [], athletes = null, client, onProgress, onResult, deferCoach = false, mode = 'jump' }) {
   const t = { start: performance.now() };
   const mark = k => { t[k] = Math.round(performance.now() - t.start); };
   const meta = probe(clip);
@@ -68,6 +69,8 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
   const frames = openFrames(clip, meta);
   engine.ms = {};
   try {
+    // a run-up is posed like a jump: posing the far, small athlete (tried 2026-11-19) counted 2 of 18
+    // steps on two of five run-ups and made the take-off pick worse
     const res = await runPipeline(frames, engine, { onProgress });
     mark('pose');
     if (res.error) return { error: NO_PERSON, ms: t };
@@ -128,6 +131,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     await onResult?.({ result, coachFallback, ms: t });
 
     let coach = null;
+    if (mode === 'rozbeh') return { result, coach: null, jumpError: jump.error ?? undefined, decode: frames.mode, provider, ms: t };
     if (!jump.error && deferCoach) {
       const snapshots = await phaseSnapshots(frames, jump, res.last).catch(() => null);
       mark('snapshots');

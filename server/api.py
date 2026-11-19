@@ -205,7 +205,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
     ):
         if clip and not CLIP_ID.fullmatch(clip):
             clip = ""  # the app's own id for the video; anything else is ignored
-        if mode not in ("jump", "rsi", "sprint"):
+        if mode not in ("jump", "rsi", "sprint", "rozbeh"):
             raise HTTPException(400, SK["mode"])
         if box and not 5 <= box <= 120:
             box = 0  # a box height outside 5-120 cm is a typo; the app asks again
