@@ -12,7 +12,7 @@ import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJu
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 4;
+const RB_ALGO = 5;
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -106,8 +106,22 @@ export function rozbehNumbers(result, sex, height) {
     pen: { contact: m.contactPen != null ? m.contactPen / 1000 : null, knee: m.penKnee },
     take: { contact: m.contactTO != null ? m.contactTO / 1000 : null, kneeTD: m.kneeTD, kneeTO: m.kneeTO, angle: m.takeoffAngle },
     speeds: g ? { third: sp('third'), pen: sp('pen'), take: sp('take') } : null,
+    // 1-6 and 6-11 m only from a cone seen at the 6 m mark (ground.js): without one the mark came
+    // out 1.8 m off on IMG_4677 (2026-11-14), too loose to split anything
+    videoSplits: g?.splits?.s1to6 != null && g?.splits?.s6to11 != null ? { s1to6: g.splits.s1to6, s6to11: g.splits.s6to11 } : null,
     frames: { penTD: j.pen?.td ?? null, TD: j.takeoff?.td ?? null, TO: j.takeoff?.to ?? null },
   };
+}
+
+// The splits shown for a run-up: Freelap's (21-11 and 11-1; Stanley 2026-11-19: Freelap measures
+// only those two), with 11-1 divided at 6 m in the proportion the video's cone crossings give.
+export function splitsWithVideo(legs, video) {
+  const L = (legs ?? []).filter(Number.isFinite);
+  if (L.length === 2 && video?.s1to6 > 0 && video?.s6to11 > 0) {
+    const r = video.s1to6 / (video.s1to6 + video.s6to11), F = L[1];
+    return { ...splitsOf([L[0], F * (1 - r), F * r]), from6: 'video' };
+  }
+  return splitsOf(L);
 }
 
 export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspect, onProgress = () => {}, onChange = () => {}, onDeleted = () => {}, saveClip, loadClip, loadOriginal, dropClip, storePose, loadPose, makePlayer }) {
@@ -226,7 +240,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const name = athletes[rec.who]?.name ?? '';
     const at = rec.pending || rec.error ? rec.at : rec.recordedAt ?? rec.at;
     if (rec.pending || rec.error) return { kind: 'rozbeh', id: rec.id, who: rec.who, at, title: `Rozbeh · ${rec.file ?? ''}`, sub: rec.error ? 'nepodarilo sa · ťukni a skús znova' : rec.stage ?? 'analýza beží…', value: rec.error ? '!' : '…', valueSub: '' };
-    const s = splitsOf(runOf(rec)?.legs);
+    const s = splitsWithVideo(runOf(rec)?.legs, rec.videoSplits);
     const n = runOf(rec)?.steps, steps = n ? ` ${n} kr.` : '';
     const sub = [s?.s21_11 != null ? `11–21 ${num(s.s21_11, 2)}` : null, rec.take?.contact != null ? `odraz ${num(rec.take.contact, 3)} s` : null].filter(Boolean).join(' · ');
     return { kind: 'rozbeh', id: rec.id, who: rec.who, at, title: `${name}${name ? ' · ' : ''}rozbeh${steps}`, sub, value: s?.s1_11 != null ? num(s.s1_11, 2) : '–', valueSub: s?.s1_11 != null ? '1–11 m' : 'bez Freelapu' };
@@ -236,10 +250,10 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   const card = (title, body) => `<section class="card sp-card"><h2>${title}</h2>${body}</section>`;
   const cell = (lb, big, small = '') => `<div class="sp-cd"><p class="sp-lb">${lb}</p><p class="sp-mid">${big}</p>${small ? `<p class="sp-lb">${small}</p>` : ''}</div>`;
   function freelapHtml(rec) {
-    const run = runOf(rec), s = splitsOf(run?.legs);
+    const run = runOf(rec), s = splitsWithVideo(run?.legs, rec.videoSplits);
     const form = `<details class="rb-type"${s ? '' : ' open'}><summary>${s ? 'Upraviť časy' : 'Zadať časy z Freelapu'}</summary>
-      <div class="sp-g3">${[['21–11 m', 's21_11'], ['11–6 m', 's11_6'], ['6–1 m', 's6_1']].map(([lb, k]) => `<label class="sp-cd"><span class="sp-lb">${lb}</span><input class="rb-in" inputmode="decimal" data-rb-leg="${k}" value="${s?.[k] != null ? num(s[k], 2) : ''}" placeholder="0,00"></label>`).join('')}</div>
-      <p class="note s">Bez kužeľa na 6 m nechaj 11–6 prázdne a do 6–1 daj celých 11–1.</p>
+      <div class="sp-g2">${[['21–11 m', 's21_11'], ['11–1 m', 's1_11']].map(([lb, k]) => `<label class="sp-cd"><span class="sp-lb">${lb}</span><input class="rb-in" inputmode="decimal" data-rb-leg="${k}" value="${s?.[k] != null ? num(s[k], 2) : ''}" placeholder="0,00"></label>`).join('')}</div>
+      <p class="note s">11–6 a 6–1 rozdelí appka z videa, keď je vo videu kužeľ na 6 m.</p>
       <button class="btn" data-rb-save="${esc(rec.id)}">Uložiť časy</button></details>`;
     if (!s) return card('Freelap · posledných 21 m', `<p class="note">K tomuto rozbehu sa nenašiel beh z Freelapu.</p>${form}`);
     const cells = s.s11_6 != null
@@ -252,8 +266,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const per = rec.ts?.length ? splitSteps(rec.steps.map((x, i) => ({ ...x, td: i })), rec.ts, s) : null;
     const perHtml = per?.length ? `<div class="rb-per">${per.map(p => `<div class="sp-row rb-row"><span style="width:64px">${p.label}</span><span class="sp-n" style="width:auto;flex:1;text-align:left">${p.seen ? `≈ ${p.steps} ${p.steps === 1 ? 'krok' : p.steps < 5 ? 'kroky' : 'krokov'}` : 'začiatok mimo videa'}</span><span class="sp-n" style="width:64px">${p.rate ? `${num(p.rate, 2)} kr/s` : '–'}</span><span class="sp-n" style="width:64px">${p.length ? `${num(p.length, 2)} m` : '–'}</span></div>`).join('')}<p class="note s">Frekvencia z videa, dĺžka kroku z rýchlosti Freelapu a frekvencie.</p></div>` : '';
     return card(`Freelap · posledných 21 m${run.typed ? ' (zadané ručne)' : ''}`, `<div class="${s.s11_6 != null ? 'sp-g3' : 'sp-g2'}">${cells}</div>
-      <div class="rb-sum"><span><span class="sp-lb">1–11 m</span> <b>${num(s.s1_11, 2)} s</b> <span class="sp-lb">· ${num(s.v1_11, 2)} m/s</span></span>${keep}</div>
-      ${what ? `<p class="note s">${what}</p>` : ''}${perHtml}${form}`);
+      ${s.s11_6 != null ? `<div class="rb-sum"><span><span class="sp-lb">1–11 m</span> <b>${num(s.s1_11, 2)} s</b> <span class="sp-lb">· ${num(s.v1_11, 2)} m/s</span></span>${keep}</div>` : `<div class="rb-sum"><span></span>${keep}</div>`}
+      ${s.from6 ? '<p class="note s">11–6 a 6–1: čas 11–1 z Freelapu rozdelený podľa prechodu cez kužeľ na 6 m vo videu.</p>' : ''}${what ? `<p class="note s">${what}</p>` : ''}${perHtml}${form}`);
   }
   function takeoffHtml(rec) {
     const t = rec.take ?? {};
@@ -269,7 +283,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   function lastSteps(rec) {
     const steps = rec.steps ?? [], ts = rec.ts ?? [];
     if (!steps.length) return null;
-    const total = runOf(rec)?.steps ?? RUNUP_STEPS, sp = splitsOf(runOf(rec)?.legs);
+    const total = runOf(rec)?.steps ?? RUNUP_STEPS, sp = splitsWithVideo(runOf(rec)?.legs, rec.videoSplits);
     const tTake = ts.at(-1);
     const t1 = sp && Number.isFinite(tTake) ? tTake - 1 / (sp.v6_1 ?? sp.v1_11) : null;
     const t6 = t1 != null && sp.s6_1 != null ? t1 - sp.s6_1 : null;
@@ -309,9 +323,9 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   // kept on the record and written again when its numbers change (Freelap times added or typed).
   const r2 = x => (Number.isFinite(x) ? +x.toFixed(3) : null);
   function contextOf(rec) {
-    const run = runOf(rec), s = splitsOf(run?.legs), L = lastSteps(rec);
+    const run = runOf(rec), s = splitsWithVideo(run?.legs, rec.videoSplits), L = lastSteps(rec);
     const earlier = load().filter(x => x.who === rec.who && x.id !== rec.id && !x.pending && !x.error).slice(0, 4).map(x => {
-      const t = splitsOf(runOf(x)?.legs);
+      const t = splitsWithVideo(runOf(x)?.legs, x.videoSplits);
       return { den: new Date(x.recordedAt ?? x.at).toLocaleDateString('sk-SK'), s1_11: r2(t?.s1_11), strataNaKonciPct: t?.keep != null ? r2(t.keep * 100) : null, kontaktNaDoske: r2(x.take?.contact) };
     });
     return {
@@ -392,8 +406,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const save = e.target.closest('[data-rb-save]');
     if (save) {
       const v = k => parse(root.querySelector(`[data-rb-leg="${k}"]`)?.value);
-      const a = v('s21_11'), b = v('s11_6'), c = v('s6_1');
-      const legs = b != null && c != null ? [a, b, c].filter(x => x != null) : [a, c].filter(x => x != null);
+      const a = v('s21_11'), c = v('s1_11');
+      const legs = c != null ? (a != null ? [a, c] : [c]) : (a != null ? [a] : []);
       patch(save.dataset.rbSave, x => { x.typed = legs.length ? legs : null; });
       draw(); return;
     }

@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { splitsOf, rozbehNumbers, splitSteps } from '../js/rozbeh-view.js';
+import { splitsOf, rozbehNumbers, splitSteps, splitsWithVideo } from '../js/rozbeh-view.js';
 import { fromWire } from '../js/cloud.js';
 
 test('Freelap splits of a run-up: three legs with the 6 m cone, two without', () => {
@@ -74,4 +74,13 @@ test('per Freelap split: steps, rate and step length from the split speed', () =
   assert.equal(per.length, 3);
   for (const p of per) { assert.equal(+p.rate.toFixed(2), 4); assert.ok(Math.abs(p.length - p.label === '' ? 0 : 1) >= 0); }
   assert.equal(+per[2].length.toFixed(2), 2.27);   // 9.09 m/s / 4 steps/s
+});
+
+test('Freelap gives 21-11 and 11-1; 6 m only from a cone crossing in the video', () => {
+  const plain = splitsWithVideo([1.07, 1.09], null);
+  assert.equal(plain.s11_6, undefined); assert.equal(plain.s1_11, 1.09);
+  const v = splitsWithVideo([1.07, 1.09], { s1to6: 0.56, s6to11: 0.53 });
+  assert.equal(v.from6, 'video');
+  assert.equal(+(v.s11_6 + v.s6_1).toFixed(3), 1.09);   // the Freelap time stays whole
+  assert.ok(v.s6_1 > v.s11_6);                          // the slower half where the video saw it
 });
