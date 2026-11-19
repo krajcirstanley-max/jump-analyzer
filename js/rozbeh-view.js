@@ -259,25 +259,35 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       ${cell('Uhol odrazu', t.angle != null ? `${num(t.angle, 0)}°` : '–', t.angle != null ? '' : 'let je príliš krátky')}</div>
       ${rec.speeds?.pen != null ? `<p class="note s">Rýchlosť z dráhy: predposledný ${num(rec.speeds.pen, 2)} m/s, odraz ${num(rec.speeds.take, 2)} m/s.</p>` : '<p class="note s">Rýchlosť posledných krokov len keď appka nájde dosku a čiary dráhy.</p>'}`);
   }
+  // The last steps, 11-1 m from the board (Stanley 2026-11-19: "posledné kroky 11-1 potrebujem každý
+  // let a kontakt a frekvencia a dĺžka"): contact and flight from the video (±1-2 frames by eye on
+  // IMG_4654), the step rate from touchdown to touchdown, the step length from the Freelap speed of
+  // the split the step is in. The 11 m cone from the splits, else the last 1.25 s.
   function stepsHtml(rec) {
-    const steps = rec.steps ?? [];
+    const steps = rec.steps ?? [], ts = rec.ts ?? [];
     if (!steps.length) return '';
-    const total = runOf(rec)?.steps ?? RUNUP_STEPS, scale = 520;
-    // contact and flight only near the board: further back the athlete is small and a touchdown came
-    // 8 frames late by eye (IMG_4654, 718 for about 710); there the step itself and its rhythm stand
-    const tTake = rec.ts?.at(-1);
-    const nearBoard = i => !(Number.isFinite(tTake) && Number.isFinite(rec.ts?.[i])) || tTake - rec.ts[i] <= 1.05;
-    const sureAt = (c, i) => c != null && c >= 0.07 && nearBoard(i);
-    const rows = steps.map((s, i) => {
-      const n = total - (steps.length - 1 - i), last = i === steps.length - 1, pen = i === steps.length - 2;
-      if (s.missing) return `<div class="sp-row rb-row"><span class="sp-i">${n}</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n" style="width:84px">nezachytený</span></div>`;
+    const total = runOf(rec)?.steps ?? RUNUP_STEPS, scale = 420, sp = splitsOf(runOf(rec)?.legs);
+    const tTake = ts.at(-1);
+    const t1 = sp && Number.isFinite(tTake) ? tTake - 1 / (sp.v6_1 ?? sp.v1_11) : null;
+    const t6 = t1 != null && sp.s6_1 != null ? t1 - sp.s6_1 : null;
+    const t11 = t1 != null ? t1 - (sp.s1_11 ?? NaN) : null;
+    const inZone = i => (Number.isFinite(t11) ? ts[i] >= t11 - 0.02 : tTake - ts[i] <= 1.25);
+    const speedAt = i => (!sp ? rec.speeds?.pen ?? null : t6 != null && ts[i] < t6 ? sp.v11_6 : sp.v6_1 ?? sp.v1_11);
+    const first = Math.max(0, steps.findIndex((_, i) => inZone(i)));
+    const rows = steps.slice(first).map((st, k) => {
+      const i = first + k, n = total - (steps.length - 1 - i), last = i === steps.length - 1, pen = i === steps.length - 2;
+      const period = !last && Number.isFinite(ts[i + 1]) ? ts[i + 1] - ts[i] : null;
+      const rate = period ? 1 / period : null, v = speedAt(i), len = period && v ? v * period : null;
+      const ok = st.contact != null && st.contact >= 0.07 && !st.missing;
       return `<div class="sp-row rb-row${last || pen ? ' hl' : ''}"><span class="sp-i">${n}</span><span class="sp-f">${FOOT[footOf(i, steps.length, rec.who)]}</span>
-        <span class="sp-bar">${sureAt(s.contact, i) ? `<span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>` : ''}${!last && s.air != null && sureAt(s.contact, i) ? `<span class="fl" style="width:${(s.air * scale).toFixed(0)}px"></span>` : ''}</span>
-        <span class="sp-n">${sureAt(s.contact, i) ? n3(s.contact) : '–'}</span><span class="sp-n">${last ? 'odraz' : s.air != null && sureAt(s.contact, i) ? n3(s.air) : '–'}</span></div>`;
+        <span class="sp-bar">${ok ? `<span class="c" style="width:${(st.contact * scale).toFixed(0)}px"></span>` : ''}${!last && ok && st.air != null ? `<span class="fl" style="width:${(st.air * scale).toFixed(0)}px"></span>` : ''}</span>
+        <span class="sp-n">${ok ? n3(st.contact) : '–'}</span><span class="sp-n">${last ? 'odraz' : ok && st.air != null ? n3(st.air) : '–'}</span>
+        <span class="sp-n">${rate ? num(rate, 2) : '–'}</span><span class="sp-n">${len ? num(len, 2) : '–'}</span></div>`;
     }).join('');
-    return card(`Kroky ${total - steps.length + 1}–${total}`, `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let</p>
-      <div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}
-      <p class="note s">Rozbeh ${total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${total} odraz, ${total - 1} predposledný. Čas na zemi a let len pri posledných krokoch, ďalej od dosky je postava na videu príliš malá.</p>`);
+    const from = total - (steps.length - 1 - first);
+    return card(`Posledné kroky · 11–1 m (kroky ${from}–${total})`, `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let · kr/s frekvencia · m dĺžka kroku</p>
+      <div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span><span class="sp-n">kr/s</span><span class="sp-n">m</span></div>${rows}
+      <p class="note s">Rozbeh ${total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${total} odraz, ${total - 1} predposledný. Zem a let ±0,01 s. Dĺžka kroku z rýchlosti Freelapu v úseku${sp ? '' : ' (bez Freelapu len z rýchlosti dráhy, ak ju appka zmerala)'}.</p>`);
   }
   let shownSig = '';
   function draw() {
