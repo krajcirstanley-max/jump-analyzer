@@ -12,6 +12,7 @@ import { centreOfMass } from './analysis/kinematics.js';
 import { idealsFor } from './analysis/ideal.js';
 import { renderResult, showCoach, runupHtml, firstCellHtml, stopEdit } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
+import { initRozbeh } from './rozbeh-view.js';
 import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
 import { initCompare } from './compare-view.js';
@@ -24,7 +25,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.29.1';
+const APP_VERSION = '0.30.0';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -110,6 +111,24 @@ const sprintView = initSprint({
   onAsk: id => openSprintChat(id),
 });
 const sprintOfRun = key => sprintView.records().find(r => r.runKey === key)?.id ?? null;
+// Rozbeh tab (2026-11-19): a full run-up with its take-off, never a landing. Own screen and storage.
+let rbFeedTimer = null;
+const rozbehView = initRozbeh({
+  root: document.getElementById('rozbeh'), athletes: ATHLETES, freelap: freelapView,
+  getAthlete: () => ({ id: athlete, ...ATHLETES[athlete] }), roster,
+  inspect: async file => {
+    const r = await inspectClip(file, mb);
+    r.input.dispose?.();
+    const ts = r.packetTimestamps ?? [];
+    return { fps: r.timing.fpsFromGap, recordedAt: Date.parse(r.tags.creationTime) || null, duration: ts.length ? ts.at(-1) - ts[0] : null };
+  },
+  onProgress: t => trainProgress(t),
+  onChange: () => { clearTimeout(rbFeedTimer); rbFeedTimer = setTimeout(() => { refreshFeeds(); rozbehView.refresh(); }, 250); },
+  onDeleted: () => { refreshFeeds(); renderLists(); showTab(backTo); },
+  saveClip: (id, f) => { navigator.storage?.persist?.().catch(() => {}); return hist.storeClip(id, f); },
+  loadClip: hist.loadClip, loadOriginal: hist.loadOriginal, dropClip: hist.deleteMedia, storePose: hist.storePose,
+  makePlayer: clipPlayer,
+});
 // Two jumps side by side: each its own player with its skeleton and angles, lined up on the jump.
 initRecap({ hist, athletes: ATHLETES, profiles });
 compareView = initCompare({
@@ -952,7 +971,7 @@ async function renderLists() {
   const all = await Promise.all(ids.map(a => hist.listAttempts(a)));
   ids.forEach((a, i) => { lastRunup[a] = all[i].findLast(r => r.runup != null)?.runup ?? null; });
   const i = ids.indexOf(athlete);
-  $('trends').innerHTML = trendsHtml({ who: athlete, name: ATHLETES[athlete].name, runs: freelapView.runs(), attempts: all[i], rsi: rsiView.records() });
+  $('trends').innerHTML = trendsHtml({ who: athlete, name: ATHLETES[athlete].name, runs: freelapView.runs(), attempts: all[i], rsi: rsiView.records(), rozbeh: rozbehView.records() });
   const root = $('progress');
   root.innerHTML = hist.progressHtml(all[i], profiles[athlete], ATHLETES[athlete].name, athlete);
   root.querySelectorAll('[data-ath]').forEach(hist.wireTrend);
@@ -961,6 +980,7 @@ async function renderLists() {
 // ---------- Tréning and História ----------
 const KINDS = {
   skok: { hint: 'Kto skáče, appka zistí z videa sama. Natočené v appke ide 120 fps; Nahrať otvorí galériu a vezme video ako je natočené, aj viac naraz.' },
+  rozbeh: { hint: 'Celý rozbeh s odrazom, bez dopadu. Natoč zboku ako akceleráciu. Časy 21–11, 11–6 a 6–1 m prídu z Freelapu (typ Rozbeh), kroky a odraz z videa.' },
   sprint: { hint: 'Natočené v appke ide 120 fps a s Freelapom aj s časmi vo videu. Rozbor príde sám.' },
   rsi: { hint: 'Drop jump, odrazy, prekážky aj výskok z miesta. Natáčaj spredu, celé chodidlá v zábere. Natočené v appke sa uloží s časmi.' },
 };
@@ -982,11 +1002,13 @@ const jumpCam = (() => {
   return { open: o => cap.nativePromise('SprintCamera', 'open', o), on: (ev, f) => cap.addListener('SprintCamera', ev, d => d && f(d)) };
 })();
 // A jump filmed in the app: saved to Photos as filmed, and analysed like an upload.
+let filmFor = 'skok';
 jumpCam?.on('saved', async d => {
   if (d.mode !== 'jump' || !d.raw) return;
   try {
     const src = globalThis.Capacitor?.convertFileSrc?.(d.raw) ?? d.raw;
     const blob = await (await fetch(src)).blob();
+    if (filmFor === 'rozbeh') return void rozbehView.upload(withPath(new File([blob], `rozbeh-${d.recordedAt ?? Date.now()}.mov`, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }), d.raw));
     analyzeFile(withPath(new File([blob], `skok-${d.recordedAt ?? Date.now()}.mov`, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }), d.raw));
   } catch (e) { trainProgress(`Natočený skok sa nepodarilo otvoriť: ${e?.message ?? e}`); }
 });
@@ -1001,6 +1023,7 @@ $('train-film').addEventListener('click', () => {
   if (cloudReady()) warmCloud();   // the server boots (~3 min) while the athlete films
   if (kind === 'sprint') return sprintView.film();
   if (kind === 'rsi') return rsiView.film();
+  filmFor = kind;   // a run-up films with the jump camera and goes to Rozbeh when saved
   // 120 fps: the jump analysis is proven there; Miška's two 240 fps jumps (2026-11-16) failed
   // (Stanley: "vypni 240 fps v appke").
   jumpCam?.open({ fps: 120, mode: 'jump', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
@@ -1010,7 +1033,7 @@ $('train-film').addEventListener('click', () => {
 function drawFreelapMini() {
   const el = $('fl-mini'), s = freelapView.listener.state, on = s === 'on' || s === 'starting';
   const today = freelapView.runs().filter(r => new Date(r.at).toDateString() === new Date().toDateString()).length;
-  el.classList.toggle('hidden', !freelapView.listener || (kind !== 'sprint' && !on));
+  el.classList.toggle('hidden', !freelapView.listener || (kind !== 'sprint' && kind !== 'rozbeh' && !on));
   el.innerHTML = `<div><b>Freelap</b> <span class="${s === 'on' ? 'fl-on' : 'fl-off'}">${s === 'on' ? '● počúva' : s === 'starting' ? 'zapína sa…' : 'vypnutý'}</span>
     <small>${today ? `${today} ${today === 1 ? 'beh' : today < 5 ? 'behy' : 'behov'} dnes` : 'dnes zatiaľ žiadny beh'} </small><button class="fl-all" data-fl-mini="list">Všetky časy ›</button></div>
     <button class="btn" data-fl-mini="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>
@@ -1030,7 +1053,7 @@ setTimeout(drawFreelapMini, 1500);   // a Start left on comes back on by itself
 
 async function feedItems() {
   const jumps = (await Promise.all(Object.keys(ATHLETES).map(a => hist.listAttempts(a)))).flat().map(r => jumpSummary(r, ATHLETES));
-  return [...jumps, ...bgRows(), ...sprintView.records().map(r => sprintView.summary(r)), ...rsiView.records().map(r => rsiView.summary(r))]
+  return [...jumps, ...bgRows(), ...rozbehView.records().map(r => rozbehView.summary(r)), ...sprintView.records().map(r => sprintView.summary(r)), ...rsiView.records().map(r => rsiView.summary(r))]
     .filter(it => Number.isFinite(it.at));
 }
 async function refreshFeeds() {
@@ -1055,7 +1078,7 @@ $('hist-filter').addEventListener('click', e => {
 function openDetail(k, id, who) {
   $('compare').classList.toggle('hidden', k !== 'compare');
   if (k === 'compare') {
-    for (const el of ['fl-run', 'sprint', 'rsi']) $(el).classList.add('hidden');
+    for (const el of ['fl-run', 'sprint', 'rsi', 'rozbeh']) $(el).classList.add('hidden');
     tabScroll.detail = 0; showTab('detail'); scrollTo(0, 0);
     return;
   }
@@ -1064,7 +1087,8 @@ function openDetail(k, id, who) {
   $('fl-run').classList.toggle('hidden', !(runKey && freelapView.openRun(runKey)));
   $('sprint').classList.toggle('hidden', k !== 'sprint');
   $('rsi').classList.toggle('hidden', k !== 'rsi');
-  if (k === 'sprint') sprintView.open(id); else rsiView.open(id, who);
+  $('rozbeh').classList.toggle('hidden', k !== 'rozbeh');
+  if (k === 'sprint') sprintView.open(id); else if (k === 'rozbeh') rozbehView.open(id); else rsiView.open(id, who);
   tabScroll.detail = 0;
   showTab('detail');
   scrollTo(0, 0);
@@ -1076,6 +1100,7 @@ function openRun(key) {
   $('fl-run').classList.toggle('hidden', !freelapView.openRun(key));
   $('sprint').classList.add('hidden');
   $('rsi').classList.add('hidden');
+  $('rozbeh').classList.add('hidden');
   tabScroll.detail = 0;
   showTab('detail');
   scrollTo(0, 0);
@@ -1182,6 +1207,7 @@ async function pickFromGallery() {
     } catch (err) { trainProgress(`Video ${f.name ?? ''} sa nepodarilo otvoriť.`); continue; }
     // Sprint and RSI take one upload at a time and drop a second one while busy (2026-11-17: of
     // several drop jumps picked at once only the first was analysed), so each waits its turn.
+    if (picked === 'rozbeh') { await rozbehView.upload(file, { quiet: k > 0 }); continue; }
     if (picked === 'sprint' || picked === 'rsi') {
       const view = picked === 'sprint' ? sprintView : rsiView;
       while (view.busy()) await new Promise(r => setTimeout(r, 500));
@@ -1343,6 +1369,7 @@ $('file').addEventListener('change', e => {
   e.target.value = '';
   if (!f) return;
   if (kind === 'sprint') sprintView.upload(f);
+  else if (kind === 'rozbeh') rozbehView.upload(f);
   else if (kind === 'rsi') rsiView.analyze(f);
   else analyzeFile(f);
 });
@@ -1352,6 +1379,7 @@ renderLists();
 resumeCoaches();
 resumeHeld();
 resumeBackground();
+rozbehView.resume();
 
 function summaryOf(r) {
   const t = r.timing;

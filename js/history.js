@@ -247,6 +247,8 @@ export const deleteMedia = id => removeMedia(id);
 export const loadClip = async id => (await getMedia(id, 'view')) ?? getMedia(id, 'clip');
 // the clip as filmed, for anything that saves or uploads it again (the watching copy is for playing)
 export const loadOriginal = id => getMedia(id, 'clip');
+// a run-up's server answer, kept beside its clip (rozbeh-view)
+export const storePose = (id, pose) => putMedia(id, 'pose', poseBlob(pose));
 export async function dropIfOrphan(id) {
   if (!(await getAttempt(id))) await removeMedia(id);
 }

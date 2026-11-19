@@ -6,8 +6,11 @@ export async function viewCopy(path, cap = globalThis.Capacitor) {
   if (!path || !cap?.isNativePlatform?.() || !cap.nativePromise) return null;
   try {
     const r = await cap.nativePromise('SprintCamera', 'viewCopy', { path });
-    const blob = await (await fetch(cap.convertFileSrc(r.path))).blob();
-    return new File([blob], 'view.mp4', { type: 'video/mp4' });
+    if (!r?.path) return null;
+    const res = await fetch(cap.convertFileSrc(r.path));
+    if (!res.ok) return null;   // an error page must never be kept as the clip to play
+    const blob = await res.blob();
+    return blob.size > 1000 ? new File([blob], 'view.mp4', { type: 'video/mp4' }) : null;
   } catch (e) { console.warn('view copy failed', e); return null; }
 }
 // a File read from a native path keeps the path, so the copy can be made from it later

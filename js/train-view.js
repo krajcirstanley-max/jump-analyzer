@@ -10,7 +10,7 @@ const num = (x, dp) => (Number.isFinite(x) ? Number(x).toFixed(dp).replace('.', 
 const dayKey = t => new Date(t).toLocaleDateString('sv-SE');
 const hm = t => new Date(t).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' });
 const dayName = t => new Date(t).toLocaleDateString('sk-SK', { weekday: 'short', day: 'numeric', month: 'numeric' });
-const LABEL = { sprint: 'ŠP', rsi: 'RSI', skok: 'SK' };
+const LABEL = { sprint: 'ŠP', rsi: 'RSI', skok: 'SK', rozbeh: 'RB' };
 const PHASE = { pen: 'predposl.', plant: 'plant', takeoff: 'odraz', flight: 'let', landing: 'dopad' };
 
 // The jump attempts as list lines.
@@ -78,17 +78,27 @@ function trendCard(label, series, { unit = '', dp = 2, lowerBetter = false, colo
     <p class="trend-l">najlepšie ${num(best, dp)}${unit ? ` ${unit}` : ''}${bestAt ? ` · ${esc(dayName(bestAt))}` : ''} · ${series.length} ${series.length === 1 ? 'deň' : series.length < 5 ? 'dni' : 'dní'}</p></div>${spark(v, lowerBetter)}</div>`;
 }
 
-export function trendsHtml({ who, name, runs, attempts, rsi }) {
+export function trendsHtml({ who, name, runs, attempts, rsi, rozbeh = [] }) {
   const mine = runs.filter(r => r.who === who && r.legs?.length >= 2);
   const fly = byDay(mine.filter(r => modeOfRun(r) === 'fly').map(r => ({ at: r.at, v: Math.min(...r.legs) })), true);
   const acc = byDay(mine.filter(r => modeOfRun(r) === 'accel').map(r => ({ at: r.at, v: r.legs[0] })), true);
   const score = byDay(attempts.map(r => ({ at: Date.parse(r.recordedAt || r.analysedAt), v: r.score })), false);
   const rsiDays = byDay(rsi.filter(x => x.who === who).flatMap(({ rec }) => (rec.jumps ?? []).map(j => ({ at: Date.parse(rec.at), v: j.rsi }))), false);
   const vert = byDay(rsi.filter(x => x.who === who && !(x.rec.jumps ?? []).length).flatMap(({ rec }) => (rec.standing ?? []).map(j => ({ at: Date.parse(rec.at), v: j.heightCm }))), false);
-  // Run-ups: the last 10 m before the board, one card per number of steps.
+  // Run-ups, one pair of cards per number of steps: 1-11 m and 11-21 m before the board. With a cone
+  // at 6 m the last two splits make 1-11 (2026-11-19, cones 1 · 6 · 11 · 21 m); a 5 m split alone
+  // was shown as "the last 10 m" before.
   const ups = runs.filter(r => r.who === who && modeOfRun(r) === 'rozbeh' && r.legs?.length);
-  const upCards = [...new Set(ups.map(r => r.steps ?? 0))].sort((a, b) => b - a).map(n =>
-    trendCard(`Rozbeh${n ? ` ${n} krokov` : ''} · posledných 10 m`, byDay(ups.filter(r => (r.steps ?? 0) === n).map(r => ({ at: r.at, v: r.legs.at(-1) })), true), { unit: 's', lowerBetter: true }));
+  const s1 = r => (r.legs.length >= 3 ? r.legs.at(-1) + r.legs.at(-2) : r.legs.at(-1));
+  const s2 = r => (r.legs.length >= 3 ? r.legs.at(-3) : r.legs.length === 2 ? r.legs[0] : null);
+  const upCards = [...new Set(ups.map(r => r.steps ?? 0))].sort((a, b) => b - a).flatMap(n => {
+    const mine = ups.filter(r => (r.steps ?? 0) === n), lb = `Rozbeh${n ? ` ${n} krokov` : ''}`;
+    return [trendCard(`${lb} · 1–11 m`, byDay(mine.map(r => ({ at: r.at, v: s1(r) })), true), { unit: 's', lowerBetter: true }),
+      trendCard(`${lb} · 11–21 m`, byDay(mine.filter(r => s2(r) != null).map(r => ({ at: r.at, v: s2(r) })), true), { unit: 's', lowerBetter: true })];
+  });
+  // the take-off of the run-ups analysed from video, the day's mean
+  const rbDay = (key) => { const m = new Map(); for (const r of (rozbeh ?? []).filter(x => x.who === who && x[key.split('.')[0]]?.contact != null)) { const d = new Date(r.recordedAt ?? r.at).toLocaleDateString('sv-SE'); (m.get(d) ?? m.set(d, []).get(d)).push({ at: r.recordedAt ?? r.at, v: r[key.split('.')[0]].contact }); } return [...m.values()].map(l => ({ at: l[0].at, v: l.reduce((a, x) => a + x.v, 0) / l.length })).sort((a, b) => a.at - b.at); };
+  upCards.push(trendCard('Rozbeh · kontakt na doske (priemer dňa)', rbDay('take.contact'), { unit: 's', dp: 3, lowerBetter: true }));
   const cards = [
     trendCard('Letmá desiatka (najlepšia z dňa)', fly, { unit: 's', lowerBetter: true }),
     trendCard('0–10 m z rúk', acc, { unit: 's', lowerBetter: true }),
