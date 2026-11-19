@@ -345,6 +345,10 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   if (board) board.speed = vxTO; // the board contact's speed is the take-off speed
 
   const pxPerM = pxPerUnit(T.td, comX(T.td)) / boardM;
+  // A runway read wrong gives steps no one runs (2026-11-19, IMG_2432: 0.5, 1.1 and 28 m/s into the
+  // board, and the whole jump was refused as "no take-off"). Without it the jump still shows, its
+  // metres from the gravity fit or hidden. Every checked jump: 6.6-10 m/s into and off the board.
+  if (!(speedLast > 3 && speedLast < 13) || !(vxTO > 3 && vxTO < 13)) return { error: `runway speeds not human: ${speedLast?.toFixed?.(1)} / ${vxTO?.toFixed?.(1)} m/s` };
   return {
     steps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
     boardM: boardM0, fix, implied, legRatio, yAth, raised, pxPerM, splits,

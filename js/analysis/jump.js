@@ -7,7 +7,7 @@ import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
 import { refineTouchdowns, refineClaudeEdges } from './refine.js';
-import { sharpen } from './kinematics.js';
+import { sharpen, has, P, torsoLength } from './kinematics.js';
 import { techniqueScore, coaching, PHASES } from './coach.js';
 
 const KF_LABELS = {
@@ -279,7 +279,11 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   if (!(fps > 0)) return { error: 'Neznáma snímková frekvencia.' };
   // Key frames Claude named on the server win over the ones detected from the pose track.
   // Their touchdowns are then moved to the first frame the foot is really down (raw track).
-  const named0 = result.events?.TD != null && result.events?.TO != null ? result.events : null;
+  let named0 = result.events?.TD != null && result.events?.TO != null ? result.events : null;
+  // A run-through saved before 2026-11-19 lost its early sand frame on the server (under 0.3 s after
+  // the board, IMG_1083); the frame Claude saw is still in the answer, so a stored jump analyses too.
+  const sand = result.locate?.seen?.sand;
+  if (named0?.kind === 'runthrough' && named0.landing == null && Number.isInteger(sand) && (sand - named0.TO) / fps >= 0.1 && (sand - named0.TO) / fps <= 1.3) named0 = { ...named0, landing: sand };
   // Edges Claude read itself (no pose contact there) first get both ends from the raw foot.
   // Those keep their new frames; refineTouchdowns' narrower search would nudge them again.
   const claudeFixed = named0 ? refineClaudeEdges(result, named0, result.locate?.edges, { height }) : null;
@@ -297,6 +301,28 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   if (ev.pen && ev.pen.td - 1 > (ev.third?.to ?? -Infinity)) {
     ev.pen.td -= 1;
     ev.keyFrames = ev.keyFrames.map(k => (k.id === 'penTD' ? { ...k, frame: ev.pen.td } : k));
+  }
+  // A touchdown read while the foot is still in the air (2026-11-19, IMG_2432: the phone panned at
+  // the speed of the swinging foot, so the foot stood still in the picture 80 px above the runway and
+  // the penultimate contact began 10 frames early, 0.225 s for about 0.15, by eye 505). At a true
+  // touchdown the foot is 0.07-0.15 torso above the level it holds in the contact's second half (the
+  // heel lands above where the toe later stands: 2432, 2433, 1084 by eye); the miss started at 0.36.
+  // So only a foot more than 0.16 torso up moves the touchdown, to the first frame within it, then on
+  // while the foot still falls more than 0.025 torso a frame. A move under 3 frames is not made: the
+  // frame-level edges stay with the rules above.
+  for (const [k, id] of [['pen', 'penTD'], ['takeoff', 'TD']]) {
+    const c = ev[k], f = c?.foot ?? (k === 'takeoff' ? ev.takeoffFoot : null);
+    if (!c || !f) continue;
+    const low = i => { const kp = clean[i]; if (!kp) return NaN; const ys = [f + 'heel', f + 'bigtoe'].filter(n => has(kp, n)).map(n => P(kp, n)[1]); return ys.length ? Math.max(...ys) : NaN; };
+    const mid = Math.round((c.td + c.to) / 2);
+    const lv = []; for (let i = mid; i <= c.to; i++) if (Number.isFinite(low(i))) lv.push(low(i));
+    lv.sort((a, b) => a - b);
+    const t = clean[mid] && has(clean[mid], 'lsho', 'rsho', 'lhip', 'rhip') ? torsoLength(clean[mid]) : NaN;
+    if (lv.length < 3 || !(t > 0)) continue;
+    const level = lv[lv.length >> 1];
+    let td = c.td; while (td < mid && !(low(td) >= level - 0.16 * t)) td++;
+    if (td > c.td) while (td + 1 < mid && low(td + 1) - low(td) > 0.025 * t) td++;
+    if (td - c.td >= 3 && td < c.to) { c.td = td; ev.keyFrames = ev.keyFrames.map(x => (x.id === id ? { ...x, frame: td } : x)); }
   }
   // Frames set by hand: the jump's own key frames with those replaced, run through the same path
   // as the server's names. Kept only when they stay in order (pen touchdown < pen toe-off < board
@@ -324,12 +350,16 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // or a clip whose speed only the runway can set right never gets the runway measured. Without a
   // runway at all a panning phone can turn the speed around (Miška's 240 fps pop-up from the track,
   // 2026-11-16: vx −10,5): that clip says why it can't be measured instead of showing nonsense.
-  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(air.vxTO) && (air.vyTO < 0.5 || (!(preGround && !result.ground) && air.vxTO < 2.5))) {
-    if (air.vyTO >= 0.5 && !result.ground) return { error: 'Skok sa nedá zmerať: v zábere chýba doska alebo čiary dráhy.', noTakeoff: { vx: air.vxTO, vy: air.vyTO } };
-    return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: air.vxTO, vy: air.vyTO } };
-  }
   // Metres from the runway when the server found it; the gravity scale is only the fallback.
   const ground = result.ground && !air.error ? groundAnalysis(result.ground, smooth, ev, times, sex, height) : null;
+  // With the runway measured its speed is the horizontal one checked: a pop-up's low arc gives the
+  // gravity scale nothing to hold (2026-11-19, Miška's run-through IMG_1084: vx −49 m/s from the arc,
+  // the runway measured fine, the jump refused as "no take-off").
+  const vxSeen = ground && !ground.error && Number.isFinite(ground.vxTO) ? ground.vxTO : air.vxTO;
+  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(vxSeen) && (air.vyTO < 0.5 || (!(preGround && !result.ground) && vxSeen < 2.5))) {
+    if (air.vyTO >= 0.5 && !result.ground) return { error: 'Skok sa nedá zmerať: v zábere chýba doska alebo čiary dráhy.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };
+    return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };
+  }
   // Where the video's metres can be wrong (2026-11-14, IMG_4677): not on the runway, where the
   // Freelap cones came out exactly 10.0 m apart on the board's scale, but in the air over the sand,
   // where there are no lines and the camera's homography is extrapolated. So the tape corrects only

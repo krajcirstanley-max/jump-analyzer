@@ -108,7 +108,7 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps) {
 }
 
 // Keeps only answers that fit a long jump: the right order and human contact and flight times.
-export function checkEvents(e, fps, { claudeTake = false } = {}) {
+export function checkEvents(e, fps, { claudeTake = false, runThrough = false } = {}) {
   const ok = {}, bad = [];
   const s = (a, b) => (e[b] - e[a]) / fps;
   const keep = (k, valid) => { if (e[k] == null) return; if (valid) ok[k] = e[k]; else bad.push(k); };
@@ -117,7 +117,9 @@ export function checkEvents(e, fps, { claudeTake = false } = {}) {
   // Claude's own take-off can be a piece of the contact (IMG_4953 on a box: 536-541 of 529-547);
   // the app then finds both edges on the raw foot, so 0.04 s is enough to say where it is.
   keep('TO', e.TD != null && inRange(s('TD', 'TO'), claudeTake ? 0.04 : 0.06, 0.26));
-  keep('landing', ok.TO != null && inRange(s('TO', 'landing'), 0.3, 1.3));
+  // a run-through (pop-up) comes down early: IMG_1083 (2026-11-19) touched the sand 0.22 s after the
+  // board, and without the sand frame the flight fit ran on into the running out of the pit
+  keep('landing', ok.TO != null && inRange(s('TO', 'landing'), runThrough ? 0.1 : 0.3, 1.3));
   // Claude's own board touchdown can be a few frames early (the app moves it), so then the
   // flight into the board only has to be positive.
   keep('penTO', ok.TD != null && inRange(s('penTO', 'TD'), claudeTake ? 0.5 / fps : 0.02, 0.2));
@@ -186,7 +188,7 @@ export function nameEvents(seen, guess, fps) {
     td3: c.third?.td ?? null, penTD: c.pen?.td ?? null, penTO: c.pen?.to ?? null,
     TD: c.take?.td ?? null, TO: c.take?.to ?? null, landing: seen.sand,
   };
-  const checked = checkEvents(named, fps, { claudeTake: c.take?.from === 'claude' });
+  const checked = checkEvents(named, fps, { claudeTake: c.take?.from === 'claude', runThrough: seen.runThrough });
   // A run-through (pop-up) is the same jump up to the flight, then the athlete runs out of the pit.
   if (checked.events.TD != null) checked.events.kind = seen.runThrough ? 'runthrough' : 'jump';
   return { ...checked, runs, edges: { take: c.take?.from, pen: c.pen?.from, third: c.third?.from } };
