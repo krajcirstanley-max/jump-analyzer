@@ -24,7 +24,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.28.8';
+const APP_VERSION = '0.28.9';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -266,7 +266,7 @@ async function swapAthlete() {
   rememberAthlete(to);
   setWho(to);
   if (!currentFile) {            // opened from Progres: the clip is the stored one
-    currentFile = (await hist.loadMedia(oldId)).clip;
+    currentFile = await hist.loadOriginal(oldId);   // not the watching copy: it would replace the original
     currentClip = { file: { name: old.file, size: old.size }, recordedAt: old.recordedAt };
   }
   // The numbers again with the other athlete's sex; the coaching from the server named the wrong
@@ -365,6 +365,7 @@ $('res-msg').addEventListener('click', e => {
 async function analyzeFile(file) {
   detachRunning();   // a jump still on its way keeps going in the background
   const run = ++runId;
+  screenJob = null;
   clearResult();
   setWho(athlete);
   openResultTab();
@@ -448,7 +449,10 @@ async function runAnalysis(file, run, forceLocal) {
   const athletes = await roster();
   if (!stillCurrent()) return void cloudJumpInBackground(file, clip0, a0);
   const history = athletes.find(a => a.id === a0).history;
-  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, athletes, ...opts }));
+  // the job id goes with the held clip: a resume after iOS closed the app follows this clip's own
+  // job, never "the newest one" (2026-11-19: IMG_2435 came back with IMG_2434's numbers)
+  const onJob = j => { if (!stillCurrent()) return; screenJob = j; if (held && held.file?.name === clip0.file.name && held.file?.size === clip0.file.size) hold({ ...held, jobId: j }); };
+  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, athletes, onJob, ...opts }));
 }
 
 async function followCloud(run, start) {
@@ -563,6 +567,7 @@ async function resumeCoaches() {
 // A cloud job in flight: what the app needs to finish it after being closed.
 const HOLD_KEY = 'jump.held';
 let held = null;
+let screenJob = null;   // the server job of the jump on the screen
 function hold(h) {
   held = h;
   try { localStorage.setItem(HOLD_KEY, JSON.stringify(h)); } catch { /* storage blocked: no resume */ }
@@ -581,9 +586,11 @@ async function resumeHeld() {
   let h = null;
   try { h = JSON.parse(localStorage.getItem(HOLD_KEY)); } catch { /* storage blocked */ }
   if (!h) return;
-  const job = pendingCloudJob();
-  const clip = job?.jobId && cloudReady() ? (await hist.loadMedia(h.id)).clip : null;
-  if (!clip) { held = h; dropHeld(); return; }
+  const job = h.jobId ? pendingCloudJob(h.jobId) : null;
+  const clip = cloudReady() ? await hist.loadOriginal(h.id) : null;
+  // closed before its upload went out: it goes now, in the background, from the stored clip
+  if (clip && !h.jobId) { releaseHeld(); background.set(h.id, null); return void runQueue([{ id: h.id, file: clip, clip: { file: h.file, recordedAt: h.recordedAt }, athlete: h.athlete }]); }
+  if (!clip || !job) { held = h; dropHeld(); return; }
   const run = ++runId;
   clearResult();
   setWho(h.athlete);
@@ -597,6 +604,7 @@ async function resumeHeld() {
     currentFile = clip;
     currentClip = { file: h.file, recordedAt: h.recordedAt };
     hold(h);
+    screenJob = job.jobId;
     await openPlayer(r, () => run === runId);
     if (run !== runId || !player) return;
     setBusy(true);
@@ -753,7 +761,7 @@ function showJump() {
   $('res-msg').classList.add('hidden');
   const rec = hist.attemptRecord(jump, { athlete: resultAthlete, ...currentClip });
   rec.coachPending = awaitingCoach;
-  rec.coachJob = awaitingCoach ? pendingCloudJob()?.jobId ?? null : null;
+  rec.coachJob = awaitingCoach ? screenJob : null;
   resultId = rec.id;
   $('res-del').dataset.del = rec.id;
   const stale = staleClip !== rec.id ? staleClip : null;
@@ -1209,18 +1217,30 @@ async function pickFromGallery() {
   if (rest.length) {
     for (const f of rest) background.set(`wait:${f.name}:${f.size}`, null);   // counted from the start
     bgStatus();
-    const worker = async () => { for (let f; (f = rest.shift());) { background.delete(`wait:${f.name}:${f.size}`); await jumpInBackground(f, pickedFor); } };
-    await Promise.all([worker(), worker()]);
+    // every waiting clip is stored and listed first, so it still goes out if iOS closes the app
+    const ready = [];
+    for (const f of rest) { const w = await waitInBackground(f, pickedFor); background.delete(`wait:${f.name}:${f.size}`); if (w) { background.set(w.id, null); ready.push(w); } }
+    bgStatus();
+    await runQueue(ready);
   }
 }
-// A jump that never takes the screen: read the clip, then upload, analyse and save it in the
-// background (a batch past its first clip, or a clip the screen moved on from before it left).
-async function jumpInBackground(file, a) {
+// Two background jumps at a time from a list of stored, listed clips.
+async function runQueue(list) {
+  const worker = async () => { for (let w; (w = list.shift());) { background.delete(w.id); await cloudJumpInBackground(w.file, w.clip, w.athlete); } };
+  await Promise.all([worker(), worker()]);
+}
+// A jump that never takes the screen (a batch past its first clip): read the clip, store it on the
+// phone and list it as waiting. null when it can't be analysed.
+async function waitInBackground(file, a) {
   let r;
-  try { r = await inspectClip(file, mb); } catch { bgStatus(`Video ${file.name} sa nedá prečítať.`); return; }
+  try { r = await inspectClip(file, mb); } catch { bgStatus(`Video ${file.name} sa nedá prečítať.`); return null; }
   r.input.dispose?.();
-  if (r.verdict === VERDICT.RENDERED) { bgStatus(`${file.name}: video má len ${fmt(r.timing.fpsFromGap, 0)} fps, skok potrebuje spomalené.`); return; }
-  return cloudJumpInBackground(file, { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null }, a);
+  if (r.verdict === VERDICT.RENDERED) { bgStatus(`${file.name}: video má len ${fmt(r.timing.fpsFromGap, 0)} fps, skok potrebuje spomalené.`); return null; }
+  const clip = { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null };
+  const id = hist.attemptId(a, clip.file);
+  try { await hist.storeClip(id, file); } catch { /* the upload still goes; only a resume needs the stored clip */ }
+  bgJobs.add({ id, athlete: a, clip, jobId: null });
+  return { id, file, clip, athlete: a };
 }
 async function cloudJumpInBackground(file, clip, a) {
   const id = hist.attemptId(a, clip.file), ctx = { id, athlete: a, file, clip };
@@ -1229,14 +1249,48 @@ async function cloudJumpInBackground(file, clip, a) {
   try {
     await hist.storeClip(id, file);
     const who = ATHLETES[a], athletes = await roster();
-    const out = await analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history: athletes.find(x => x.id === a)?.history ?? [], athletes });
+    const onJob = jobId => bgJobs.add({ id, athlete: a, clip, jobId });
+    const out = await analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history: athletes.find(x => x.id === a)?.history ?? [], athletes, onJob });
     await saveInBackground(ctx, out);
   } catch (e) {
     console.warn('Background jump failed', e);
     background.delete(id);
     hist.dropIfOrphan(id);
     bgStatus('Jeden skok sa nepodarilo dokončiť.');
+  } finally { bgJobs.drop(id); }
+}
+// Background jumps in flight, kept so they finish after iOS closed the app: a batch of ten waits
+// up to 25 min for the server, longer than the phone stays awake.
+const BG_KEY = 'jump.bg';
+const bgJobs = {
+  list() { try { return JSON.parse(localStorage.getItem(BG_KEY)) || []; } catch { return []; } },
+  write(l) { try { localStorage.setItem(BG_KEY, JSON.stringify(l)); } catch { /* storage blocked: no resume */ } },
+  add(e) { this.write([...this.list().filter(x => x.id !== e.id), e]); },
+  drop(id) { this.write(this.list().filter(x => x.id !== id)); },
+};
+async function resumeBackground() {
+  const waiting = [];
+  for (const e of bgJobs.list()) {
+    if (background.has(e.id)) continue;
+    if (!e.jobId) {   // never sent: send it now from the stored clip
+      const file = cloudReady() ? await hist.loadOriginal(e.id) : null;
+      if (file) { background.set(e.id, null); waiting.push({ id: e.id, file, clip: e.clip, athlete: e.athlete }); } else bgJobs.drop(e.id);
+      continue;
+    }
+    const job = cloudReady() ? pendingCloudJob(e.jobId) : null;
+    const file = job ? await hist.loadOriginal(e.id) : null;
+    if (!file) { bgJobs.drop(e.id); hist.dropIfOrphan(e.id); continue; }
+    const ctx = { id: e.id, athlete: e.athlete, file, clip: e.clip };
+    background.set(e.id, ctx);
+    bgStatus();
+    resumeCloudJob(e.jobId).then(out => saveInBackground(ctx, out), err => {
+      console.warn('Background jump failed', err);
+      background.delete(e.id);
+      hist.dropIfOrphan(e.id);
+      bgStatus('Jeden skok sa nepodarilo dokončiť.');
+    }).finally(() => bgJobs.drop(e.id));
   }
+  if (waiting.length) { bgStatus(); await runQueue(waiting); }
 }
 // Until jump run `run` is uploading (it can then finish in the background) or is over.
 async function onItsWay(run) {
@@ -1259,6 +1313,7 @@ drawKind(); drawWho(); drawFreelapMini(); refreshFeeds();
 renderLists();
 resumeCoaches();
 resumeHeld();
+resumeBackground();
 
 function summaryOf(r) {
   const t = r.timing;
