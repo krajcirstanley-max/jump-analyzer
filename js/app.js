@@ -24,7 +24,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.28.5';
+const APP_VERSION = '0.28.6';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -389,7 +389,9 @@ async function analyzeFile(file) {
 
   // Silent when the clip is fine; speaks only when it can't give true timings.
   if (r.verdict === VERDICT.RENDERED) {
-    showMsg('bad', 'Toto je kópia, nie originál', `Video má ${fmt(r.timing.fpsFromGap, 0)} fps, spomalené snímky v ňom chýbajú. ${ROUTE}`);
+    // a normal-speed video lands here too, not only a baked copy (2026-11-19: a 30 fps long jump was called a copy)
+    const f = fmt(r.timing.fpsFromGap, 0);
+    showMsg('bad', `Video má len ${f} fps`, `Na skok treba spomalené video (120 fps). Pri ${f} fps padne odraz na doske medzi snímky. Ak bolo natočené spomalene: ${ROUTE}`);
     return summaryOf(r);
   }
   if (!r.canDecode) {

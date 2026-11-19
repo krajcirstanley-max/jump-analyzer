@@ -391,6 +391,13 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   const levelBox = firstUp != null && firstUp >= 10 && firstUp <= 100;
   const startsOnBox = levelBox || !!events[0]?.byFlight;
   const boxEstCm = levelBox ? firstUp : null;
+  // A run-up, not a jump on the spot (2026-11-19: a long jump picked under RSI read as five hops):
+  // three or more contacts in a row on one foot each, the feet taking turns, and the hips moving
+  // over 1.5 m. Hops on one leg keep one foot; hurdle hops land on both feet (IMG_2213 travels 5
+  // body lengths, never on one foot). No RSI clip so far had even two in turn.
+  if (runningSteps(events) >= 3 && hipTravelM(track, pxM) > 1.5) {
+    return { error: 'Toto vyzerá ako rozbeh alebo skok do diaľky, nie skok na mieste. Skok do diaľky patrí pod Skok, beh pod Šprint.', running: true };
+  }
   const singleLeg = jumps.length && jumps.every(j => j.feet.length === 1);
   const kind = startsOnBox && jumps.length ? (singleLeg ? 'drop_jump_single' : 'drop_jump')
     : jumps.length >= 3 ? 'repeated_hops'
@@ -457,6 +464,24 @@ function leaveAt(v, foot, c) {       // sub-frame time a toe leaves the floor, s
   }
   return NaN;
 }
+// The longest row of contacts on one foot each with the feet taking turns (r, l, r ...).
+export function runningSteps(events) {
+  let best = 0, row = 0, prev = null;
+  for (const e of events) {
+    if (e.feet?.length !== 1) { row = 0; prev = null; continue; }
+    row = prev && e.feet !== prev ? row + 1 : 1; prev = e.feet; best = Math.max(best, row);
+  }
+  return best;
+}
+// How far the hips move sideways in the picture (camera motion taken out), in m: 5th to 95th percentile.
+export function hipTravelM(track, pxM) {
+  const xs = [];
+  for (const kp of track) { const h = ['lhip', 'rhip'].map(n => at(kp, n)).filter(Boolean); if (h.length) xs.push(h.reduce((s, p) => s + p[0], 0) / h.length); }
+  if (xs.length < 10 || !(pxM > 0)) return 0;
+  xs.sort((a, b) => a - b);
+  return (xs[Math.floor(0.95 * (xs.length - 1))] - xs[Math.floor(0.05 * (xs.length - 1))]) / pxM;
+}
+
 export function pixelEdges(r, motion, fps) {
   if (!r?.events?.length || !motion?.length) return r;
   const v = vyOf(motion), G0 = 9.81;
