@@ -46,3 +46,18 @@ test('IMG_2432: the penultimate touchdown is not read in the air', { skip: !have
   const j = run(2432);
   assert.ok(Math.abs(j.pen.td - 505) <= 2, `pen touchdown ${j.pen.td}, by eye 505`);
 });
+
+// A second server run of the same clips (a three-at-once upload test, same day): Claude reads them
+// differently every time. IMG_1083: the take-off tile fell between the penultimate and the board
+// contact and the penultimate became the take-off. IMG_1084: the pop-up's arc gave vy −0.19, the
+// first pass refused it and the runway was never measured.
+test('second server run: the take-off is the contact before the sand, a pop-up gets its runway', { skip: !existsSync(new URL('run2_1083.json', dir)) }, () => {
+  const a = JSON.parse(readFileSync(new URL('run2_1083.json', dir))).result;
+  const r0 = { ...a }; delete r0.events; delete r0.locate; delete r0.ground; delete r0.groundError;
+  const n = nameEvents({ ...a.locate.seen, T: a.locate.windows.T }, locateGuess(r0, 'male', a.ts, { height: 186 }), a.fps);
+  assert.ok(Math.abs(n.events.TD - 957) <= 2 && Math.abs(n.events.TO - 971) <= 2, `take-off ${n.events.TD}-${n.events.TO}, by eye 957-971`);
+  const b = JSON.parse(readFileSync(new URL('run2_1084.json', dir))).result;
+  delete b.ground;
+  const pre = analyzeJump(b, 'female', b.ts, { height: 171, preGround: true });
+  assert.ok(!pre.error, `first pass: ${pre.error}`);
+});

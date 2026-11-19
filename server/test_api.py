@@ -127,9 +127,13 @@ def test_spawn_failure_removes_clip_and_reports():
 def test_stale_job_becomes_error_but_done_does_not():
     e = Env()
     jid = e.post().json()["jobId"]
-    e.t[0] += A.STALE_S + 1
+    e.t[0] += A.STALE_S + 1   # still waiting in the queue behind other jobs: not dead yet
+    assert e.get(jid).json()["state"] == "queued"
+    e.t[0] += A.QUEUE_STALE_S
     j = e.get(jid).json()
     assert j["state"] == "error" and "prerušila" in j["error"]
+    e.jobs.put(A.job_key("w"), {"state": "running", "stage": "pose", "owner": "stanley", "updatedAt": e.t[0] - A.STALE_S - 1})
+    assert e.get("w").json()["state"] == "error"   # a running job that went quiet is dead after 6 min
     k = A.job_key("d")
     e.jobs.put(k, {"state": "done", "owner": "stanley", "updatedAt": 0, "result": {"N": 1}})
     assert e.get("d").json()["state"] == "done"

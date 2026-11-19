@@ -24,7 +24,7 @@ import { whatIf, bestAngle } from './analysis/whatif.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.28.7';
+const APP_VERSION = '0.28.8';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -438,12 +438,16 @@ async function runAnalysis(file, run, forceLocal) {
   staleClip = null;
   // The clip goes on the phone first: if the app is closed after the upload, the job can
   // be picked up again and still has its replay.
-  const id = hist.attemptId(resultAthlete, currentClip.file);
+  // A newer clip can take the screen during the awaits below; this one then finishes in the
+  // background with its own clip instead of being dropped (2026-11-19, ten long jumps picked at once).
+  const clip0 = currentClip, a0 = resultAthlete;
+  const id = hist.attemptId(a0, clip0.file);
   await hist.storeClip(id, file);
-  if (!stillCurrent()) return;
-  hold({ id, athlete: resultAthlete, ...currentClip });
+  if (!stillCurrent()) return void cloudJumpInBackground(file, clip0, a0);
+  hold({ id, athlete: a0, ...clip0 });
   const athletes = await roster();
-  const history = athletes.find(a => a.id === resultAthlete).history;
+  if (!stillCurrent()) return void cloudJumpInBackground(file, clip0, a0);
+  const history = athletes.find(a => a.id === a0).history;
   return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, athletes, ...opts }));
 }
 
@@ -1167,14 +1171,18 @@ $('train-pick').addEventListener('click', e => {
 });
 
 // Videos picked in Photos come as the original files (the native picker, SprintCamera.pickVideo):
-// no "Export Unmodified Original → Files" any more (Stanley 2026-11-16). Several at once: jumps go
-// one after another, each starting once the one before is on its way to the server (it then
-// finishes in the background); sprints and RSI queue on their own.
+// no "Export Unmodified Original → Files" any more (Stanley 2026-11-16). Several at once: the first
+// jump opens on the screen, the others go straight to the background, each with its own clip and
+// result, two at a time (2026-11-19: of ten long jumps picked at once only the first and the last
+// were saved, the last with the ninth one's numbers: each new clip took over the screen's clip
+// before the one before had left, and the one before was dropped or saved under the new clip).
+// Sprints and RSI queue on their own.
 async function pickFromGallery() {
   let files;
   try { files = (await globalThis.Capacitor.nativePromise('SprintCamera', 'pickVideo', { limit: 10 }))?.files ?? []; }
   catch (err) { return alert(`Galériu sa nepodarilo otvoriť: ${err?.message ?? err}`); }
   const picked = kind;   // the switch can change while the clips wait their turn
+  const pickedFor = athlete, rest = [];
   for (const [k, f] of files.entries()) {
     let file;
     try {
@@ -1190,11 +1198,44 @@ async function pickFromGallery() {
       // watched is not swapped for the next upload (2026-11-17)
       inBatch = k > 0;
       try { await (picked === 'sprint' ? view.upload(file, null, null, null, false, inBatch) : view.analyze(file, null, null, inBatch)); } finally { inBatch = false; }
+    } else if (k > 0 && cloudReady()) {
+      rest.push(file);
     } else {
       const run = runId + 1;
       analyzeFile(file);
-      if (k < files.length - 1) await onItsWay(run);
+      if (k < files.length - 1 && !cloudReady()) await onItsWay(run);
     }
+  }
+  if (rest.length) {
+    for (const f of rest) background.set(`wait:${f.name}:${f.size}`, null);   // counted from the start
+    bgStatus();
+    const worker = async () => { for (let f; (f = rest.shift());) { background.delete(`wait:${f.name}:${f.size}`); await jumpInBackground(f, pickedFor); } };
+    await Promise.all([worker(), worker()]);
+  }
+}
+// A jump that never takes the screen: read the clip, then upload, analyse and save it in the
+// background (a batch past its first clip, or a clip the screen moved on from before it left).
+async function jumpInBackground(file, a) {
+  let r;
+  try { r = await inspectClip(file, mb); } catch { bgStatus(`Video ${file.name} sa nedá prečítať.`); return; }
+  r.input.dispose?.();
+  if (r.verdict === VERDICT.RENDERED) { bgStatus(`${file.name}: video má len ${fmt(r.timing.fpsFromGap, 0)} fps, skok potrebuje spomalené.`); return; }
+  return cloudJumpInBackground(file, { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null }, a);
+}
+async function cloudJumpInBackground(file, clip, a) {
+  const id = hist.attemptId(a, clip.file), ctx = { id, athlete: a, file, clip };
+  background.set(id, ctx);
+  bgStatus();
+  try {
+    await hist.storeClip(id, file);
+    const who = ATHLETES[a], athletes = await roster();
+    const out = await analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history: athletes.find(x => x.id === a)?.history ?? [], athletes });
+    await saveInBackground(ctx, out);
+  } catch (e) {
+    console.warn('Background jump failed', e);
+    background.delete(id);
+    hist.dropIfOrphan(id);
+    bgStatus('Jeden skok sa nepodarilo dokončiť.');
   }
 }
 // Until jump run `run` is uploading (it can then finish in the background) or is over.

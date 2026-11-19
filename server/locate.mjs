@@ -63,7 +63,7 @@ export function groundRuns(frames, gap = 2) {
 
 // Claude's runs say which contacts are which; the pose track's overlapping contact gives the
 // edges. takeoffAt: the frame the takeoff contact should cover (the pose track's guess).
-export function pickContacts(runs, poseContacts, takeoffAt, fps) {
+export function pickContacts(runs, poseContacts, takeoffAt, fps, sand = null) {
   // Claude sometimes reads one contact in pieces (IMG_4953, 2026-11-16: 492-496, 502-506 and
   // 510-512 for a 500-516 penultimate, with the pose track's 502-517 right): pieces inside one
   // pose contact of at least 0.06 s are one contact.
@@ -84,10 +84,19 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps) {
   }
   // A piece no pose contact backs has to be 0.05 s long to count: IMG_4953's 519-522, in the air
   // between the last two steps, otherwise became the penultimate.
-  const real = joined.filter(r => (r.to - r.td + 1) / fps >= (r.p ? 0.03 : 0.05)).map(({ td, to }) => ({ td, to }));
+  const real = joined.filter(r => (r.to - r.td + 1) / fps >= (r.p ? 0.03 : 0.05)).map(({ td, to, p }) => ({ td, to, posed: !!p }));
   if (!real.length) return {};
   const dist = r => (takeoffAt >= r.td && takeoffAt <= r.to ? 0 : Math.min(Math.abs(takeoffAt - r.td), Math.abs(takeoffAt - r.to)));
-  const ti = real.reduce((b, r, k) => (dist(r) < dist(real[b]) ? k : b), 0);
+  let ti = real.reduce((b, r, k) => (dist(r) < dist(real[b]) ? k : b), 0);
+  // Claude's take-off tile between two contacts: the later one is the take-off when it still ends
+  // before the sand (2026-11-19, a rerun of IMG_1083: the tile at 946 sat nearer the penultimate
+  // 928-937 than the board contact 958-967, with the sand at 990). Only a contact the pose track also
+  // sees planted, and never when the tile is inside a contact: Claude marks flight frames as ground
+  // too (IMG_4677 715-720, IMG_4933 520-530, after the real take-off).
+  if (Number.isInteger(sand) && dist(real[ti]) > 0) {
+    const k = real.findIndex(r => r.td > takeoffAt);
+    if (k > ti && real[k].posed && real[k].to < sand - Math.round(0.1 * fps)) ti = k;
+  }
   // A pose contact that covers only a piece of Claude's run is a broken detection, not better
   // edges: on IMG_4933 (2026-11-16) the pose track had 506-512 of a 497-513 take-off, Claude
   // 489-509; taking the pose piece (0.058 s) failed the contact-time check and the whole jump
@@ -183,7 +192,7 @@ export async function locateEvents({ frames, boxes, first, last, fps, client, gu
 export function nameEvents(seen, guess, fps) {
   const runs = groundRuns(seen.ground);
   const at = seen.T === guess.TD && guess.TO != null ? Math.round((guess.TD + guess.TO) / 2) : seen.T;
-  const c = pickContacts(runs, guess.contacts ?? [], at, fps);
+  const c = pickContacts(runs, guess.contacts ?? [], at, fps, seen.sand);
   const named = {
     td3: c.third?.td ?? null, penTD: c.pen?.td ?? null, penTO: c.pen?.to ?? null,
     TD: c.take?.td ?? null, TO: c.take?.to ?? null, landing: seen.sand,

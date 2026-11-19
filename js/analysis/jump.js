@@ -356,7 +356,10 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // gravity scale nothing to hold (2026-11-19, Miška's run-through IMG_1084: vx −49 m/s from the arc,
   // the runway measured fine, the jump refused as "no take-off").
   const vxSeen = ground && !ground.error && Number.isFinite(ground.vxTO) ? ground.vxTO : air.vxTO;
-  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(vxSeen) && (air.vyTO < 0.5 || (!(preGround && !result.ground) && vxSeen < 2.5))) {
+  // A run-through's arc is too short and low to read the vertical speed from (2026-11-19, two server
+  // runs of Miška's IMG_1084: vy 0.59 and −0.19 m/s), so only the horizontal floor holds there.
+  const popUp = result.events?.kind === 'runthrough';
+  if (!air.error && Number.isFinite(air.vyTO) && Number.isFinite(vxSeen) && ((!popUp && air.vyTO < 0.5) || (!(preGround && !result.ground) && vxSeen < 2.5))) {
     if (air.vyTO >= 0.5 && !result.ground) return { error: 'Skok sa nedá zmerať: v zábere chýba doska alebo čiary dráhy.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };
     return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };
   }

@@ -8,6 +8,9 @@ from pathlib import Path
 
 MAX_UPLOAD = 300 * 1024 * 1024
 STALE_S = 360  # no update for this long means the worker died without saying so
+# A queued job waits for a free container, and each job holds one through its coaching text (up to
+# 3 min): ten jumps picked at once queued past 6 min and were called dead (2026-11-19, 2 of 3 in a test).
+QUEUE_STALE_S = 1800
 MAX_DEVICES = 5
 CLIP_ID = re.compile(r"[A-Za-z0-9_-]{1,40}")  # the app's own id for a video (sp1794744449246)
 CLIP_KEEP_S = 7 * 24 * 3600  # a job is followed for a week at most
@@ -279,7 +282,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         if not job or job.get("owner") != owner:  # someone else's job looks like no job
             raise HTTPException(404, SK["missing"])
         t = now()
-        if job["state"] in ("queued", "running") and t - job.get("updatedAt", 0) > STALE_S:
+        if job["state"] in ("queued", "running") and t - job.get("updatedAt", 0) > (QUEUE_STALE_S if job["state"] == "queued" else STALE_S):
             # A worker that died during coaching still leaves a good result behind.
             ended = {"state": "done", "stage": "done", "done": 1, "total": 1, "coach": None} if job.get("result") else {"state": "error", "error": SK["stale"]}
             job = {**job, **ended, "updatedAt": t}

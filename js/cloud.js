@@ -14,7 +14,8 @@ const POLL_MS = 1500;
 const UPLOAD_TRIES = 3;
 const RETRY_MS = 1500;           // first backoff after a failed upload; doubles
 const POLL_FAIL_LIMIT_MS = 5 * 60_000; // keep polling through a bad network this long
-const JOB_LIMIT_MS = 10 * 60_000;
+// a batch of jumps queues on the server (2026-11-19: ten at once, the last ones waited over 10 min)
+const JOB_LIMIT_MS = 30 * 60_000;
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
