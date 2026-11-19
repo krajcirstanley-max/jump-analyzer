@@ -5,8 +5,10 @@
 // splits (cones 1 · 6 · 11 · 21 m from the board), the video the steps and the take-off.
 import { analyzeJump } from './analysis/jump.js';
 import { detectContacts } from './analysis/events.js';
+import { NORMS } from './analysis/metrics.js';
+import { APPROVED_CUES } from './analysis/coach.js';
 import { pairRun } from './analysis/sprint.js';
-import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob } from './cloud.js';
+import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJump } from './cloud.js';
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
@@ -167,6 +169,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       patch(id, x => Object.assign(x, nums.error
         ? { who, pending: false, error: 'Odraz sa vo videu nenašiel. Ťukni a skús znova.', stage: null, hasPose: true, algo: RB_ALGO }
         : { who, pending: false, error: null, stage: null, ...nums, hasPose: true, algo: RB_ALGO }));
+      if (!nums.error) comment(load().find(x => x.id === id));
     };
     try {
       patch(id, x => { x.stage = jobId ? 'server počíta' : 'posiela sa'; x.error = null; });
@@ -263,10 +266,10 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   // let a kontakt a frekvencia a dĺžka"): contact and flight from the video (±1-2 frames by eye on
   // IMG_4654), the step rate from touchdown to touchdown, the step length from the Freelap speed of
   // the split the step is in. The 11 m cone from the splits, else the last 1.25 s.
-  function stepsHtml(rec) {
+  function lastSteps(rec) {
     const steps = rec.steps ?? [], ts = rec.ts ?? [];
-    if (!steps.length) return '';
-    const total = runOf(rec)?.steps ?? RUNUP_STEPS, scale = 420, sp = splitsOf(runOf(rec)?.legs);
+    if (!steps.length) return null;
+    const total = runOf(rec)?.steps ?? RUNUP_STEPS, sp = splitsOf(runOf(rec)?.legs);
     const tTake = ts.at(-1);
     const t1 = sp && Number.isFinite(tTake) ? tTake - 1 / (sp.v6_1 ?? sp.v1_11) : null;
     const t6 = t1 != null && sp.s6_1 != null ? t1 - sp.s6_1 : null;
@@ -275,19 +278,83 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const speedAt = i => (!sp ? rec.speeds?.pen ?? null : t6 != null && ts[i] < t6 ? sp.v11_6 : sp.v6_1 ?? sp.v1_11);
     const first = Math.max(0, steps.findIndex((_, i) => inZone(i)));
     const rows = steps.slice(first).map((st, k) => {
-      const i = first + k, n = total - (steps.length - 1 - i), last = i === steps.length - 1, pen = i === steps.length - 2;
+      const i = first + k, last = i === steps.length - 1;
       const period = !last && Number.isFinite(ts[i + 1]) ? ts[i + 1] - ts[i] : null;
-      const rate = period ? 1 / period : null, v = speedAt(i), len = period && v ? v * period : null;
-      const ok = st.contact != null && st.contact >= 0.07 && !st.missing;
-      return `<div class="sp-row rb-row${last || pen ? ' hl' : ''}"><span class="sp-i">${n}</span><span class="sp-f">${FOOT[footOf(i, steps.length, rec.who)]}</span>
-        <span class="sp-bar">${ok ? `<span class="c" style="width:${(st.contact * scale).toFixed(0)}px"></span>` : ''}${!last && ok && st.air != null ? `<span class="fl" style="width:${(st.air * scale).toFixed(0)}px"></span>` : ''}</span>
-        <span class="sp-n">${ok ? n3(st.contact) : '–'}</span><span class="sp-n">${last ? 'odraz' : ok && st.air != null ? n3(st.air) : '–'}</span>
-        <span class="sp-n">${rate ? num(rate, 2) : '–'}</span><span class="sp-n">${len ? num(len, 2) : '–'}</span></div>`;
-    }).join('');
-    const from = total - (steps.length - 1 - first);
-    return card(`Posledné kroky · 11–1 m (kroky ${from}–${total})`, `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let · kr/s frekvencia · m dĺžka kroku</p>
+      const v = speedAt(i), ok = st.contact != null && st.contact >= 0.07 && !st.missing;
+      return { n: total - (steps.length - 1 - i), foot: footOf(i, steps.length, rec.who), contact: ok ? st.contact : null, air: !last && ok ? st.air : null,
+        rate: period ? 1 / period : null, length: period && v ? v * period : null, takeoff: last, pen: i === steps.length - 2 };
+    });
+    return { total, rows, sp };
+  }
+  // The last steps, 11-1 m from the board (Stanley 2026-11-19: "posledné kroky 11-1 potrebujem každý
+  // let a kontakt a frekvencia a dĺžka"): contact and flight from the video (±1-2 frames by eye on
+  // IMG_4654), the step rate from touchdown to touchdown, the step length from the Freelap speed of
+  // the split the step is in. The 11 m cone from the splits, else the last 1.25 s.
+  function stepsHtml(rec) {
+    const L = lastSteps(rec);
+    if (!L) return '';
+    const scale = 420;
+    const rows = L.rows.map(r => `<div class="sp-row rb-row${r.takeoff || r.pen ? ' hl' : ''}"><span class="sp-i">${r.n}</span><span class="sp-f">${FOOT[r.foot]}</span>
+        <span class="sp-bar">${r.contact != null ? `<span class="c" style="width:${(r.contact * scale).toFixed(0)}px"></span>` : ''}${r.air != null ? `<span class="fl" style="width:${(r.air * scale).toFixed(0)}px"></span>` : ''}</span>
+        <span class="sp-n">${r.contact != null ? n3(r.contact) : '–'}</span><span class="sp-n">${r.takeoff ? 'odraz' : r.air != null ? n3(r.air) : '–'}</span>
+        <span class="sp-n">${r.rate ? num(r.rate, 2) : '–'}</span><span class="sp-n">${r.length ? num(r.length, 2) : '–'}</span></div>`).join('');
+    return card(`Posledné kroky · 11–1 m (kroky ${L.rows[0].n}–${L.total})`, `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let · kr/s frekvencia · m dĺžka kroku</p>
       <div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span><span class="sp-n">kr/s</span><span class="sp-n">m</span></div>${rows}
-      <p class="note s">Rozbeh ${total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${total} odraz, ${total - 1} predposledný. Zem a let ±0,01 s. Dĺžka kroku z rýchlosti Freelapu v úseku${sp ? '' : ' (bez Freelapu len z rýchlosti dráhy, ak ju appka zmerala)'}.</p>`);
+      <p class="note s">Rozbeh ${L.total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${L.total} odraz, ${L.total - 1} predposledný. Zem a let ±0,01 s. Dĺžka kroku z rýchlosti Freelapu v úseku${L.sp ? '' : ' (bez Freelapu len z rýchlosti dráhy, ak ju appka zmerala)'}.</p>`);
+  }
+
+  // ---------- comment ----------
+  // Claude's comment on the run-up (2026-11-19, Stanley: "koment od Clauda že čo je problém"): the
+  // numbers go to the server's chat with the run-up rules (server/chat.py RUNUP_SYSTEM), the text is
+  // kept on the record and written again when its numbers change (Freelap times added or typed).
+  const r2 = x => (Number.isFinite(x) ? +x.toFixed(3) : null);
+  function contextOf(rec) {
+    const run = runOf(rec), s = splitsOf(run?.legs), L = lastSteps(rec);
+    const earlier = load().filter(x => x.who === rec.who && x.id !== rec.id && !x.pending && !x.error).slice(0, 4).map(x => {
+      const t = splitsOf(runOf(x)?.legs);
+      return { den: new Date(x.recordedAt ?? x.at).toLocaleDateString('sk-SK'), s1_11: r2(t?.s1_11), strataNaKonciPct: t?.keep != null ? r2(t.keep * 100) : null, kontaktNaDoske: r2(x.take?.contact) };
+    });
+    return {
+      atlet: athletes[rec.who]?.name ?? null, krokovRozbehu: L?.total ?? RUNUP_STEPS,
+      freelap: s ? { s21_11: r2(s.s21_11), s11_6: r2(s.s11_6), s6_1: r2(s.s6_1), s1_11: r2(s.s1_11), v21_11: r2(s.v21_11), v11_6: r2(s.v11_6), v6_1: r2(s.v6_1), v1_11: r2(s.v1_11), zmenaRychlostiNaKonciPct: s.keep != null ? r2(s.keep * 100) : null } : null,
+      // values no runner produces are a frame-edge error, not a fault, and never reach the comment
+      // (IMG_4658: a 0.025 s flight and 7.5 steps/s on the step into the board from a contact 2-4
+      // frames off; the comment built its whole point on them)
+      posledneKroky: (L?.rows ?? []).map(r => {
+        const okRate = r.rate != null && r.rate >= 3 && r.rate <= 6;
+        return { krok: r.n, noha: r.foot === 'r' ? 'pravá' : 'ľavá', zem: r.contact != null && r.contact <= 0.2 ? r2(r.contact) : null,
+          let: r.air != null && r.air >= 0.05 && r.air <= 0.25 ? r2(r.air) : null, frekvencia: okRate ? r2(r.rate) : null, dlzka: okRate ? r2(r.length) : null,
+          ...(r.takeoff ? { odraz: true } : {}), ...(r.pen ? { predposledny: true } : {}) };
+      }),
+      povoleneCue: APPROVED_CUES,
+      odraz: { kontaktNaDoske: r2(rec.take?.contact), kontaktPredposledny: r2(rec.pen?.contact), kolenoPriDopade: r2(rec.take?.kneeTD), kolenoPriOdraze: r2(rec.take?.kneeTO) },
+      predosleRozbehy: earlier,
+      // the app's own norms (elite ranges in analysis/metrics.js): the only targets the comment may name
+      normy: (() => { const g = athletes[rec.who]?.sex === 'female' ? 'f' : 'm', nr = k => NORMS[k]?.[g] ? { od: NORMS[k][g][0], do: NORMS[k][g][1], jednotka: NORMS[k].unit } : null;
+        return { kontaktNaDoskeMs: nr('contactTO'), kontaktPredposlednyMs: nr('contactPen'), kolenoPriOdraze: nr('kneeTO'), kolenoPriDopade: nr('kneeTD') }; })(),
+    };
+  }
+  const commentSig = rec => JSON.stringify([runOf(rec)?.legs ?? null, rec.steps?.length ?? 0, rec.algo ?? 0]);
+  const commenting = new Set();
+  async function comment(rec) {
+    if (!rec || rec.pending || rec.error || commenting.has(rec.id) || !cloudReady()) return;
+    const sig = commentSig(rec);
+    if (rec.comment?.sig === sig) return;
+    commenting.add(rec.id);
+    patch(rec.id, x => { x.commentError = null; });
+    try {
+      const text = await askAboutJump(contextOf(rec), [{ role: 'user', text: 'Napíš krátky komentár k tomuto rozbehu: čo v ňom najviac rozhoduje, ako to vyzerá, ako by to malo byť, a jeden povel.' }], { kind: 'rozbeh' });
+      patch(rec.id, x => { x.comment = { text, sig, at: Date.now() }; });
+    } catch (e) {
+      patch(rec.id, x => { x.commentError = e?.message || 'Komentár sa nepodarilo napísať.'; });
+    } finally { commenting.delete(rec.id); onChange(); }
+  }
+  function commentHtml(rec) {
+    const c = rec.comment, fresh = c && c.sig === commentSig(rec);
+    const body = c?.text ? `${c.text.split(/\n+/).map(p => `<p class="rb-coach">${esc(p)}</p>`).join('')}${fresh ? '' : '<p class="note s">Časy sa zmenili, píšem nový komentár…</p>'}`
+      : commenting.has(rec.id) || !rec.commentError ? '<p class="note">◌ Píšem komentár…</p>'
+      : `<p class="note">${esc(rec.commentError)}</p><button class="btn" data-rb-comment="${esc(rec.id)}">Skúsiť znova</button>`;
+    return `<div data-rb-cm>${card('Komentár', body)}</div>`;
   }
   let shownSig = '';
   function draw() {
@@ -300,9 +367,10 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       : rec.error ? `<section class="card"><p class="banner bad">${esc(rec.error)}</p><button class="btn" data-rb-retry="${esc(rec.id)}">Skúsiť znova</button></section>` : '';
     const n = runOf(rec)?.steps ?? RUNUP_STEPS;
     root.innerHTML = `<h2 class="ath-name">${esc(name)}${name ? ' · ' : ''}rozbeh${n ? ` ${n} kr.` : ''}</h2>${video}${state}
-      ${rec.pending || rec.error ? '' : freelapHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
+      ${rec.pending || rec.error ? '' : commentHtml(rec) + freelapHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
       <section class="card"><button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
     mountVideo(rec);
+    if (!rec.pending && !rec.error && rec.comment?.sig !== commentSig(rec) && !commenting.has(rec.id)) comment(rec);
   }
   async function mountVideo(rec) {
     const box = root.querySelector('[data-rb-clip]');
@@ -329,6 +397,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       patch(save.dataset.rbSave, x => { x.typed = legs.length ? legs : null; });
       draw(); return;
     }
+    const cm = e.target.closest('[data-rb-comment]');
+    if (cm) { const r = load().find(x => x.id === cm.dataset.rbComment); if (r) { comment(r); onChange(); } return; }
     const rt = e.target.closest('[data-rb-retry]');
     if (rt) return void retry(rt.dataset.rbRetry);
     const del = e.target.closest('[data-rb-del]');
@@ -349,6 +419,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       const r = load().find(x => x.id === current);
       if (!r) return;
       const sig = `${!!r.pending}|${r.error ?? ''}|${(r.typed ?? []).join(',')}`;
+      const cm = root.querySelector('[data-rb-cm]');
+      if (sig === shownSig && cm && !r.pending && !r.error) { cm.outerHTML = commentHtml(r); return; }
       const line = root.querySelector('[data-rb-state]');
       if (sig === shownSig && r.pending && line) { line.textContent = `◌ ${r.stage ?? 'analýza beží'}… Video si môžeš pozrieť hneď, čísla sa doplnia samé.`; return; }
       if (sig !== shownSig) draw();

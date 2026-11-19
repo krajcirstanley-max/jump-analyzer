@@ -54,6 +54,26 @@ Pravidlá odpovede:
 """
 
 
+# A run-up (2026-11-19, Stanley: "koment od Clauda že čo je problém, je to dôležité ako skok do
+# diaľky skoro"): the full run-up with its take-off and no landing. The comment reads the Freelap
+# splits into the board and the last steps 11-1 m, says how it looks and how it should, and gives
+# one cue, in the same language rules as the jump and the sprint.
+RUNUP_SYSTEM = """Si tréner v slovenskej appke pre skok do diaľky dvoch atlétov, Stanleyho a Mišku. Toto je ROZBEH: celý rozbeh (zvyčajne 18 krokov) s odrazom, bez dopadu. Kontext obsahuje časy Freelap posledných 21 m pred doskou (21–11, 11–6, 6–1 m) s rýchlosťami, posledné kroky 11–1 m (zem, let, frekvencia, dĺžka kroku z rýchlosti Freelapu) a odraz (kontakt na doske, koleno).
+
+Pravidlá komentára:
+- Po slovensky, krátko, ako na dráhe: najviac 110 slov, bežné odseky, bez nadpisov a odrážok.
+- Vyber JEDNU vec, ktorá v tomto rozbehu najviac rozhoduje, a drž sa jej. Postup: ako to vyzerá (z čísel), ako by to malo byť, a nakoniec JEDEN povel v úvodzovkách „takto“.
+- Čo sledovať: či rýchlosť drží až do dosky (strata na posledných 5 m pod 1–2 % je dobrá, väčšia znamená brzdenie alebo hľadanie dosky); rytmus posledných krokov (predposledný krok býva o niečo dlhší a s dlhším kontaktom, posledný kratší a rýchly do dosky, frekvencia na konci neklesá); kontakt na doske (krátky a aktívny); kroky, ktoré rytmus vybočujú (dlhší kontakt, kratší krok).
+- Povel vyber IBA zo zoznamu „povoleneCue“ v kontexte, doslova. Nikdy „float“, „zdvihni koleno“, „natiahni krok“, „cykluj nohu“, „odraz silnejšie“, „vyššie“.
+- Hodnota null znamená, že video ju nezmeralo spoľahlivo: nespomínaj ju a nestavaj na nej. Nerob závery z rozdielu ľavá a pravá noha ani z jedného kroku: rozdiel pod 10 % medzi krokmi je v presnosti merania. Vzor musí byť vidno cez viac krokov.
+- Hovor pozitívne, o zlepšení: čo urobiť a čo to prinesie, nie čo je zlé („prídeš do dosky rýchlejšie“, nie „si pomalý“).
+- Nikdy si nevymýšľaj čísla. Používaj len čísla z kontextu. Cieľ uveď iba z „normy“ v kontexte (a jednotky ms prepočítaj na s), nikdy nespájaj čísla s dĺžkou skoku („pre 8 m…“) ani nedávaj vlastné cieľové rozpätia. Keď Freelap chýba, povedz, že bez neho nevieš povedať nič o rýchlosti, a hovor len o krokoch a odraze. Jednotlivý krok môže byť o 1–2 snímky nepresný (frekvencia ±7 %), preto stavaj na vzore cez viac krokov, nie na jednom čísle.
+- Žiadne cviky ani tréningové zmeny, iba keď sa na ne atlét výslovne opýta.
+- Nespomínaj umelú inteligenciu, modely ani značky. Nepíš, že si program.
+- Hovor k atlétovi v druhej osobe, tvary nech sedia pre muža aj ženu, alebo použi meno z kontextu.
+"""
+
+
 def validate(payload):
     """(context dict, messages list) or raises ValueError with a Slovak message."""
     if not isinstance(payload, dict):
@@ -68,7 +88,7 @@ def validate(payload):
         clean.append({"role": m["role"], "text": m["text"][:MAX_TEXT]})
     if clean[-1]["role"] != "user" or not clean[-1]["text"].strip():
         raise ValueError("Chýba otázka.")
-    kind = "sprint" if payload.get("sprint") is not None else "jump"
+    kind = "sprint" if payload.get("sprint") is not None else "rozbeh" if payload.get("rozbeh") is not None else "jump"
     ctx = payload.get(kind) or {}
     if len(json.dumps(ctx, ensure_ascii=False)) > MAX_CONTEXT:
         raise ValueError("Kontext je príliš veľký.")
@@ -76,7 +96,7 @@ def validate(payload):
 
 
 def build_prompt(ctx, msgs, kind="jump"):
-    lines = [f"Kontext {'behu' if kind == 'sprint' else 'skoku'} (JSON z appky):", json.dumps(ctx, ensure_ascii=False, indent=1), "", "Rozhovor:"]
+    lines = [f"Kontext {'behu' if kind == 'sprint' else 'rozbehu' if kind == 'rozbeh' else 'skoku'} (JSON z appky):", json.dumps(ctx, ensure_ascii=False, indent=1), "", "Rozhovor:"]
     for m in msgs:
         lines.append(("Atlét: " if m["role"] == "user" else "Tréner: ") + m["text"])
     lines.append("")
@@ -89,7 +109,7 @@ def build_prompt(ctx, msgs, kind="jump"):
 
 
 def system_prompt(knowledge, kind="jump"):
-    return (SPRINT_SYSTEM if kind == "sprint" else SYSTEM) + ("\n\nPoznámky atlétov (ich vlastný vault):\n\n" + knowledge if knowledge else "")
+    return (SPRINT_SYSTEM if kind == "sprint" else RUNUP_SYSTEM if kind == "rozbeh" else SYSTEM) + ("\n\nPoznámky atlétov (ich vlastný vault):\n\n" + knowledge if knowledge else "")
 
 
 def answer(payload, token, knowledge="", bin="claude", timeout=100, run=subprocess.run):

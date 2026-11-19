@@ -227,7 +227,7 @@ export function warmCloud() {
 // kind 'sprint': the context is a sprint run (sprint-view.js contextOf), answered by the sprint coach.
 export async function askAboutJump(ctx, messages, { signal, kind = 'jump' } = {}) {
   if (!cloudReady()) throw new CloudError('Server nie je nastavený.');
-  const r = await fetch(`${base()}/chat`, { method: 'POST', headers: { ...auth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ [kind === 'sprint' ? 'sprint' : 'jump']: ctx, messages }), signal });
+  const r = await fetch(`${base()}/chat`, { method: 'POST', headers: { ...auth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ [kind === 'sprint' ? 'sprint' : kind === 'rozbeh' ? 'rozbeh' : 'jump']: ctx, messages }), signal });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new CloudError(j.detail || `Server odpovedal ${r.status}.`);
   return j.answer;
