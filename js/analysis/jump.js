@@ -305,6 +305,10 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const claudeFixed = named0 ? refineClaudeEdges(result, named0, result.locate?.edges, { height }) : null;
   const refined = claudeFixed ? refineTouchdowns(result, claudeFixed.events, { height }) : null;
   if (refined) for (const k of claudeFixed.done) refined.events[k] = claudeFixed.events[k];
+  // On a take-off plank the foot lands above the runway, and the raw track's "really down" comes a
+  // frame or two late (IMG_5166, 2026-11-20: 986 named, 987 refined, 985 by hand): the named board
+  // touchdown stands there.
+  if (refined && result.ground?.lineM != null && Number.isInteger(claudeFixed.events.TD)) refined.events.TD = claudeFixed.events.TD;
   const named = refined ? refined.events : null;
   const detected = detectContacts(clean, result.first, result.last, fps);
   let contacts = withEvents(clean, detected, named, fps);

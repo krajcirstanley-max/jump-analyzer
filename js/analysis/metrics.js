@@ -226,16 +226,20 @@ export function flightMetrics(f, ev, sex = 'male') {
     // vy 0.53, apex 1 cm) they go hidden with the angle. The reason is the arc's, not the scale's.
     const board = f.scaleSource === 'board';
     const raisedBox = key === 'comDropBoard' && f.ground?.raised;
+    // From a take-off plank the distance is not shown yet: two server runs of IMG_5166 (2026-11-20)
+    // read 6.78 and 7.18 m, the speeds on the body's scale within 0.5 %. Shown once a tape agrees.
+    const plankDist = (key === 'estDistance' || key === 'flightDistance') && f.ground?.onPlank;
     // Speeds and metres need the runway: from the flight's arc alone they came 4-15 % off the runway
     // on eight clips that have both (2026-11-19: 6.5 vs 7.7, 7.8 vs 6.9 m/s), and 4.9 m/s for
     // Stanley's IMG_2432 when its runway failed. A typed Freelap time is its own measure and stays.
     // The angle too: its horizontal speed is the same arc speed, and a phone that follows the jumper
     // shrinks it (2026-11-20, IMG_5166 from a raised plank: 2.7 m/s, 46°; IMG_5169 31°).
     const noRunway = !board && !fromApex && key !== 'speedApproach' && !SCALE_FREE.has(key);
-    const usable = !raisedBox && !noRunway && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk && !(f.fitSeconds < 0.3) : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
+    const usable = !raisedBox && !plankDist && !noRunway && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk && !(f.fitSeconds < 0.3) : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
     const status = !usable ? 'hidden' : value < lo ? 'low' : value > hi ? 'high' : 'ok';
     const arc = board ? { ...f, scaleWhy: f.fitWhy } : f;
-    const why = noRunway ? 'na videu sa nezmerala dráha (doska a čiary), a rýchlosť len z letu by mohla byť mimo až o 15 %'
+    const why = plankDist ? 'z debničky sa dĺžka skoku zatiaľ nemeria dosť presne (±0,2 m); rýchlosť a kroky áno'
+      : noRunway ? 'na videu sa nezmerala dráha (doska a čiary), a rýchlosť len z letu by mohla byť mimo až o 15 %'
       : raisedBox ? 'odraz z debničky: ťažisko sa meria od chodidla na debničke, zníženie by vyšlo o výšku debničky väčšie'
       : key === 'takeoffAngle' || fromApex ? (f.angleOk ? 'vrchol letu nie je na videu' : scaleReason(arc)) : scaleReason(f);
     return { key, label: n.label, unit: n.unit, value, norm: [lo, hi], status, frame, good: n.good, estimate: true, reason: usable ? null : why };

@@ -62,7 +62,7 @@ export function coachClient({ token, localLogin = false } = {}) {
 // GPU job ends with the numbers and the phase snapshots (2026-11-19: a job held its GPU 1-3 min for
 // the text, ten jumps queued 25-60 min, and the GPU was paid while idle).
 // mode 'rozbeh' (2026-11-19): a run-up, analysed like a jump but with no coaching text.
-export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, pb = null, history = [], athletes = null, client, onProgress, onResult, deferCoach = false, mode = 'jump' }) {
+export async function analyzeClip(engine, { clip, sex = 'male', name = '', height = null, pb = null, history = [], athletes = null, client, onProgress, onResult, deferCoach = false, mode = 'jump', split = null }) {
   const t = { start: performance.now() };
   const mark = k => { t[k] = Math.round(performance.now() - t.start); };
   const meta = probe(clip);
@@ -160,7 +160,8 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
       if (!pre.error) await runGround(pre);
     }
     onProgress?.({ stage: 'analysis', done: 0, total: 1 });
-    const jump = analyzeJump(fromWire(result), sex, meta.ts, { height, pb });
+    // split: Freelap's 1-11 m time the phone paired with this clip (2026-11-20), as if typed
+    const jump = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, split: split > 0.8 && split < 2.5 ? split : null });
     mark('analysis');
     const coachFallback = jump.error ? null : await writeCoaching({ jump, name, sex });
     await onResult?.({ result, coachFallback, ms: t });

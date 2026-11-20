@@ -714,7 +714,8 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     init(fps: Int, freelapOn: Bool, chips: [String: String] = [:], mode: String = "sprint") {
         self.fps = fps
         self.mode = mode
-        self.freelapOn = mode == "sprint" ? freelapOn : false
+        // Jumps and run-ups hear Freelap too (Stanley, 2026-11-20: "zapnúť tiež Freelap meranie"); RSI never.
+        self.freelapOn = mode == "sprint" || mode == "jump" ? freelapOn : false
         self.chips = chips
         super.init(nibName: nil, bundle: nil)
     }
@@ -789,7 +790,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
 
         freelapLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         freelapLabel.textColor = freelapOn ? SprintOverlay.green : UIColor(white: 1, alpha: 0.6)
-        freelapLabel.text = mode != "sprint" ? "" : freelapOn ? "● Freelap" : "Freelap vypnutý"
+        freelapLabel.text = mode == "rsi" ? "" : freelapOn ? "● Freelap" : "Freelap vypnutý"
 
         toast.font = .systemFont(ofSize: 15, weight: .semibold)
         toast.textColor = .white
@@ -1028,7 +1029,9 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
     }
 
     private func write(_ url: URL, runs: [SprintRun], wall: Date?) {
-        guard !runs.isEmpty else { save(url, raw: url, wall: wall, runs: runs, burned: false); return }
+        // A jump keeps its picture clean: the ring sits over the feet at the bottom of the frame, and a
+        // jump saved to Photos may be uploaded again later. Its times go to the app with "saved".
+        guard !runs.isEmpty, mode == "sprint" else { save(url, raw: url, wall: wall, runs: runs, burned: false); return }
         SprintBurner.burn(url, runs: runs, fps: actualFps) { out in
             DispatchQueue.main.async { self.save(out ?? url, raw: url, wall: wall, runs: runs, burned: out != nil) }
         }
@@ -1046,7 +1049,7 @@ final class RecorderViewController: UIViewController, AVCaptureFileOutputRecordi
                 PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: url, options: nil)
             }) { ok, _ in
                 DispatchQueue.main.async {
-                    let what = burned ? (runs.count == 1 ? "s časom" : "s časmi") : "bez časov"
+                    let what = burned ? (runs.count == 1 ? "s časom" : "s časmi") : runs.isEmpty ? "bez časov" : "· čas z Freelapu v appke"
                     self.done(ok ? "Uložené do Fotiek \(what)" : "Do Fotiek sa video uložiť nepodarilo.", runs: runs, burned: burned, path: url, raw: raw, wall: wall)
                 }
             }

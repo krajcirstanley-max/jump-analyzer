@@ -377,6 +377,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       open = sessionFor(open, run0.at); store(SESSION_KEY, open);
       const run = { ...run0, session: open.id };
       if (open.plan?.type) { run.type = open.plan.type; if (open.plan.type === 'rozbeh') run.steps = open.plan.steps; }
+      else if (r.type) run.type = r.type;   // heard while a jump or run-up was filmed
       reps.unshift(run); reps.sort((a, b) => b.at - a.at);
     }
     seen.set(run0.key, Math.max(seen.get(run0.key) ?? 0, run0.legs.length));

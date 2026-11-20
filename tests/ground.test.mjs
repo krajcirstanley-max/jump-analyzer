@@ -42,6 +42,29 @@ test('finds the runway lines, the sand edge and the take-off line', () => {
   });
 });
 
+// Stanley's take-off plank (2026-11-20): a grey-brown board lying along the runway over the white
+// unit, narrower than the runway, so the white shows beside it along both lines.
+test('a take-off plank: its pit-side end, its far end and the board beside it', () => {
+  const { px, W, H } = runwayImage();
+  const far = x => 400 + 0.01 * x, near = x => 470 + 0.015 * x;
+  const white0 = y => 650 - 0.08 * (y - 400);
+  const front = y => 600 - 0.05 * (y - 400), back = y => 840 - 0.05 * (y - 400);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const f = far(x), n = near(x), u = (y - f) / (n - f);
+    if (u > 0.18 && u < 0.82 && x >= front(y) && x < back(y)) { const o = (y * W + x) * 4; px[o] = 150; px[o + 1] = 130; px[o + 2] = 105; }
+  }
+  // empty board: the scan starts on the rubber between the sand and the plank
+  const d = detectRunway(px, W, H, { toe: [470, 435], ground: [470, 435], foot: [466, 474], dir: -1 });
+  assert.ok(!d.error, d.error);
+  const pl = d.corners.plank;
+  assert.ok(pl, 'no plank');
+  const onLine = (p, edge) => Math.abs(p[0] - edge(p[1]));
+  pl.front.forEach(p => assert.ok(onLine(p, front) < 3, `front ${p}`));
+  pl.back.forEach(p => assert.ok(onLine(p, back) < 3, `back ${p}`));
+  assert.ok(pl.under, 'board beside the plank not found');
+  pl.under.forEach(p => assert.ok(onLine(p, white0) < 3, `board ${p}`));
+});
+
 // IMG_4658: filmed across the hall, the athlete about 200 px tall. The same runway at half size
 // is enlarged around the foot first and the answer mapped back to the frame's own pixels.
 test('far camera: the board area is enlarged before the runway is looked for', () => {

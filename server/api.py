@@ -201,12 +201,15 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
         athletes: str = Query(""),
         clip: str = Query(""),
         who: str = Query(""),
+        split: float = Query(0),
         owner=Depends(user),
     ):
         if clip and not CLIP_ID.fullmatch(clip):
             clip = ""  # the app's own id for the video; anything else is ignored
         if mode not in ("jump", "rsi", "sprint", "rozbeh"):
             raise HTTPException(400, SK["mode"])
+        if split and not 0.8 <= split <= 2.5:
+            split = 0  # Freelap's 1-11 m time; anything else is not one
         if box and not 5 <= box <= 120:
             box = 0  # a box height outside 5-120 cm is a typo; the app asks again
         if sex not in ("male", "female"):
@@ -253,7 +256,7 @@ def create_api(jobs, clips_dir, commit_clips, start_job, warm, tokens, push_key=
                 jobs.put(clip_key(owner, clip), {"jobId": job_id, "at": t})
             try:
                 start_job(job_id, owner, {"sex": sex, "name": name, "history": past[-5:], **({"height": height} if height else {}),
-                                          **({"mode": mode} if mode != "jump" else {}), **({"boxCm": box} if box else {}),
+                                          **({"mode": mode} if mode != "jump" else {}), **({"boxCm": box} if box else {}), **({"split": split} if split else {}),
                                           **({"athletes": roster} if roster else {}),
                                           # the athlete the phone already knows (a Freelap chip heard): no need to look
                                           **({"who": who} if who and any(a.get("id") == who for a in roster) else {})})

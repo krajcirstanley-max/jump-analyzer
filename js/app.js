@@ -12,9 +12,11 @@ import { centreOfMass } from './analysis/kinematics.js';
 import { idealsFor } from './analysis/ideal.js';
 import { renderResult, showCoach, runupHtml, firstCellHtml, stopEdit } from './analysis/view.js';
 import { initRsi } from './rsi-view.js';
-import { initRozbeh } from './rozbeh-view.js';
+import { initRozbeh, splitsOf } from './rozbeh-view.js';
 import { initFreelap } from './freelap-view.js';
 import { initSprint } from './sprint-view.js';
+import { pairRun } from './analysis/sprint.js';
+import { CHIPS } from './freelap/listen.js';
 import { initCompare } from './compare-view.js';
 let compareView = null;   // two jumps side by side (compare-view.js), set up below
 import { jumpSummary, listHtml, todayHtml, trendsHtml } from './train-view.js';
@@ -405,7 +407,7 @@ async function analyzeFile(file) {
   if (run !== runId) { r.input.dispose?.(); return { superseded: true }; }
   current = r;
   currentFile = file;
-  currentClip = { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null };
+  currentClip = { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null, duration: r.timing?.duration ?? null };
 
   // Silent when the clip is fine; speaks only when it can't give true timings.
   if (r.verdict === VERDICT.RENDERED) {
@@ -471,7 +473,8 @@ async function runAnalysis(file, run, forceLocal) {
   // the job id goes with the held clip: a resume after iOS closed the app follows this clip's own
   // job, never "the newest one" (2026-11-19: IMG_2435 came back with IMG_2434's numbers)
   const onJob = j => { if (!stillCurrent()) return; screenJob = j; if (held && held.file?.name === clip0.file.name && held.file?.size === clip0.file.size) hold({ ...held, jobId: j }); };
-  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, athletes, onJob, ...opts }));
+  const fl = filmedRuns.get(clip0?.file?.name) ?? null;   // a gallery clip pairs once its touchdown is known
+  return followCloud(run, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history, athletes, onJob, split: runSplit(fl), who: fl?.who ?? null, ...opts }));
 }
 
 async function followCloud(run, start) {
@@ -747,6 +750,10 @@ function setOverlays() {
 function showJump() {
   const a = resultAthlete ?? athlete, who = ATHLETES[a];
   jump = analyzeJump(pose, who.sex, player.ts, { height: who.height, pb: profiles[a].pb });
+  const self = currentClip?.file ? hist.attemptId(a, currentClip.file) : null;
+  const fl = jump.error ? null : jumpRun(currentClip, a, player.ts?.[jump.takeoff.td] ?? null, self), split = runSplit(fl);
+  if (split && self) runOwner.set(fl.key, self);
+  if (split) { jump = analyzeJump(pose, who.sex, player.ts, { height: who.height, pb: profiles[a].pb, split }); if (!jump.error) { jump.split = split; jump.runKey = fl.key; } }
   setOverlays();
   player.refresh();
   if (jump.error) {
@@ -761,6 +768,7 @@ function showJump() {
   $('res-empty').classList.add('hidden');
   $('res-msg').classList.add('hidden');
   const rec = hist.attemptRecord(jump, { athlete: resultAthlete, ...currentClip });
+  if (jump.runKey) rec.runKey = jump.runKey;
   rec.coachPending = awaitingCoach;
   rec.coachJob = awaitingCoach ? screenJob : null;
   resultId = rec.id;
@@ -1001,15 +1009,47 @@ const jumpCam = (() => {
   if (!cap?.isNativePlatform?.() || !cap.nativePromise || !cap.addListener) return null;
   return { open: o => cap.nativePromise('SprintCamera', 'open', o), on: (ev, f) => cap.addListener('SprintCamera', ev, d => d && f(d)) };
 })();
+// The Freelap run of a jump (Stanley, 2026-11-20: "zapnúť tiež Freelap meranie"): heard while the
+// app filmed it, or on the Freelap list within the clip's time. Its last 10 m before the board is the
+// 1-11 m time the jump otherwise only gets typed. who: the athlete when known (null: any chip).
+// One run only: two athletes' runs in the window and no athlete known means no pairing.
+// tTake: seconds into the clip of the board touchdown, once the analysis has it. The run is heard as
+// the chip passes the 1 m cone, a moment before the board, and reaches the phone up to ~2 s later,
+// so it has to land from 1.5 s before to 3 s after the touchdown. The whole clip is too loose: clips
+// copied or edited together carry one time (IMG_5162-5166 all 11:08:49-50, 2026-11-20 test).
+function jumpRun(clip, who = null, tTake = null, self = null) {
+  const filmed = filmedRuns.get(clip?.file?.name);
+  if (filmed) return filmed;
+  const t = typeof clip?.recordedAt === 'string' ? Date.parse(clip.recordedAt) : clip?.recordedAt;
+  if (!t || !Number.isFinite(tTake)) return null;
+  const at = t + tTake * 1000;
+  // a run already on another jump stays there (one run, one jump)
+  const free = r => !runOwner.has(r.key) || runOwner.get(r.key) === self;
+  const near = freelapView.runs().filter(r => r.type !== 'accel' && r.type !== 'fly' && r.legs?.length && r.at >= at - 1500 && r.at <= at + 3000 && (!who || !r.who || r.who === who) && free(r));
+  return near.length === 1 ? near[0] : null;   // two runs that close: not ours to pick
+}
+// Runs the app's own camera heard, by the clip's file name: those need no time window.
+const filmedRuns = new Map();
+// Which jump each Freelap run went to (runKey -> attempt id), from the history at start.
+const runOwner = new Map();
+hist.listAttempts().then(l => { for (const r of l) if (r.runKey) runOwner.set(r.runKey, r.id); }).catch(() => {});
+const runSplit = run => { const s = splitsOf(run?.legs)?.s1_11; return s > 0.8 && s < 2.5 ? +s.toFixed(3) : null; };
+const chipNames = () => Object.fromEntries(Object.entries(CHIPS).map(([chip, w]) => [chip, ATHLETES[w]?.name ?? chip]));
+const chipWho = name => Object.entries(ATHLETES).find(([, v]) => v.name === name)?.[0] ?? null;
+
 // A jump filmed in the app: saved to Photos as filmed, and analysed like an upload.
 let filmFor = 'skok';
 jumpCam?.on('saved', async d => {
   if (d.mode !== 'jump' || !d.raw) return;
+  // The runs the recorder heard go on the Freelap list first, so the jump pairs with its own run.
+  const heard = d.freelap !== false && d.times?.length ? d.times.map(t => freelapView.addHeard({ key: t.key, chip: String(t.key).split(':')[0], who: chipWho(t.name), lap: t.lap, legs: t.legs, raw: t.raw ?? null, at: (d.recordedAt ?? Date.now()) + (t.arrived ?? 0) * 1000, type: 'rozbeh' })).filter(Boolean) : [];
+  const name = `${filmFor === 'rozbeh' ? 'rozbeh' : 'skok'}-${d.recordedAt ?? Date.now()}.mov`;
+  if (heard.length === 1) filmedRuns.set(name, heard[0]);   // one run while filming: that jump's
   try {
     const src = globalThis.Capacitor?.convertFileSrc?.(d.raw) ?? d.raw;
     const blob = await (await fetch(src)).blob();
-    if (filmFor === 'rozbeh') return void rozbehView.upload(withPath(new File([blob], `rozbeh-${d.recordedAt ?? Date.now()}.mov`, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }), d.raw));
-    analyzeFile(withPath(new File([blob], `skok-${d.recordedAt ?? Date.now()}.mov`, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }), d.raw));
+    if (filmFor === 'rozbeh') return void rozbehView.upload(withPath(new File([blob], name, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }), d.raw));
+    analyzeFile(withPath(new File([blob], name, { type: 'video/quicktime', lastModified: d.recordedAt ?? Date.now() }), d.raw));
   } catch (e) { trainProgress(`Natočený skok sa nepodarilo otvoriť: ${e?.message ?? e}`); }
 });
 document.querySelector('.segc').addEventListener('click', e => {
@@ -1026,14 +1066,14 @@ $('train-film').addEventListener('click', () => {
   filmFor = kind;   // a run-up films with the jump camera and goes to Rozbeh when saved
   // 120 fps: the jump analysis is proven there; Miška's two 240 fps jumps (2026-11-16) failed
   // (Stanley: "vypni 240 fps v appke").
-  jumpCam?.open({ fps: 120, mode: 'jump', freelap: false }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
+  jumpCam?.open({ fps: 120, mode: 'jump', freelap: freelapView.listening(), chips: chipNames() }).catch(err => alert(`Kameru sa nepodarilo otvoriť: ${err?.message ?? err}`));
 });
 
 // Freelap at a glance on Tréning; its runs, by training, under História → Freelap.
 function drawFreelapMini() {
   const el = $('fl-mini'), s = freelapView.listener.state, on = s === 'on' || s === 'starting';
   const today = freelapView.runs().filter(r => new Date(r.at).toDateString() === new Date().toDateString()).length;
-  el.classList.toggle('hidden', !freelapView.listener || (kind !== 'sprint' && kind !== 'rozbeh' && !on));
+  el.classList.toggle('hidden', !freelapView.listener || (kind !== 'sprint' && kind !== 'rozbeh' && kind !== 'skok' && !on));
   el.innerHTML = `<div><b>Freelap</b> <span class="${s === 'on' ? 'fl-on' : 'fl-off'}">${s === 'on' ? '● počúva' : s === 'starting' ? 'zapína sa…' : 'vypnutý'}</span>
     <small>${today ? `${today} ${today === 1 ? 'beh' : today < 5 ? 'behy' : 'behov'} dnes` : 'dnes zatiaľ žiadny beh'} </small><button class="fl-all" data-fl-mini="list">Všetky časy ›</button></div>
     <button class="btn" data-fl-mini="${on ? 'stop' : 'start'}">${on ? 'Stop' : 'Start'}</button>
@@ -1256,7 +1296,7 @@ async function waitInBackground(file, a) {
   try { r = await inspectClip(file, mb); } catch { bgStatus(`Video ${file.name} sa nedá prečítať.`); return null; }
   r.input.dispose?.();
   if (r.verdict === VERDICT.RENDERED) { bgStatus(`${file.name}: video má len ${fmt(r.timing.fpsFromGap, 0)} fps, skok potrebuje spomalené.`); return null; }
-  const clip = { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null };
+  const clip = { file: { name: file.name, size: file.size }, recordedAt: r.tags.creationTime || null, duration: r.timing?.duration ?? null };
   const id = hist.attemptId(a, clip.file);
   bgSet(id, { athlete: a, clip, at: Date.parse(clip.recordedAt) || Date.now(), stage: 'čaká v rade', error: false });
   try { await hist.storeClip(id, file); } catch { /* the upload still goes; only a resume needs the stored clip */ }
@@ -1268,7 +1308,8 @@ async function cloudJumpInBackground(file, clip, a) {
   bgSet(id, { athlete: a, clip, at: Date.parse(clip.recordedAt) || Date.now(), stage: 'posiela sa', error: false });
   try { await hist.storeClip(id, file); } catch { /* only a resume needs it */ }
   const who = ATHLETES[a], athletes = await roster();
-  await followBackground(ctx, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history: athletes.find(x => x.id === a)?.history ?? [], athletes, ...opts }));
+  const fl = filmedRuns.get(clip?.file?.name) ?? null;
+  await followBackground(ctx, opts => analyzeInCloud(file, { sex: who.sex, name: who.name, height: who.height, history: athletes.find(x => x.id === a)?.history ?? [], athletes, split: runSplit(fl), who: fl?.who ?? null, ...opts }));
 }
 // A background jump from its job to the history: the numbers are saved as soon as the server has
 // them, and the coaching text lands on the saved jump when it comes (it is written on its own
@@ -1303,10 +1344,15 @@ async function followBackground(ctx, start) {
 // jump came out: the row stays, with its stored clip, so it can be tried again.
 async function saveNumbers(ctx, result, jobId) {
   const a = result?.who?.id in ATHLETES ? result.who.id : ctx.athlete, who = ATHLETES[a];
-  const j = result && !result.error ? analyzeJump(result, who.sex, result.ts ?? null, { height: who.height, pb: profiles[a].pb }) : { error: 'no result' };
+  let j = result && !result.error ? analyzeJump(result, who.sex, result.ts ?? null, { height: who.height, pb: profiles[a].pb }) : { error: 'no result' };
+  const fl = j.error ? null : jumpRun(ctx.clip, a, result.ts?.[j.takeoff.td] ?? null, hist.attemptId(a, ctx.clip.file)), split = runSplit(fl);
+  if (split) runOwner.set(fl.key, hist.attemptId(a, ctx.clip.file));
+  if (split) j = analyzeJump(result, who.sex, result.ts ?? null, { height: who.height, pb: profiles[a].pb, split });
   if (j.error) { bgSet(ctx.id, { stage: 'skok sa nenašiel · ťukni a skús znova', error: true }); return null; }
   j.coach = null;
+  if (split) j.split = split;   // Freelap's time stands like a typed one
   const rec = hist.attemptRecord(j, { athlete: a, ...ctx.clip });
+  if (split) rec.runKey = fl.key;
   rec.coachPending = true;
   rec.coachJob = jobId;
   await hist.saveAttempt(rec, { clip: ctx.file, pose: result });

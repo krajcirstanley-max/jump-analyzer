@@ -61,6 +61,14 @@ def test_create_job_writes_clip_and_starts():
     assert e.get(jid).json()["state"] == "queued"
 
 
+def test_freelap_split_reaches_the_job_only_when_it_is_one():
+    e = Env()
+    e.post(q="sex=male&name=Stanley&split=1.104")
+    assert e.started[-1][2]["split"] == 1.104
+    e.post(q="sex=male&name=Stanley&split=11.04")   # a typo, not a 1-11 m time
+    assert "split" not in e.started[-1][2]
+
+
 def test_clip_id_finds_its_job_again_only_for_its_owner():
     e = Env()
     jid = e.post(b"v", q="sex=male&mode=sprint&clip=sp1794744449246").json()["jobId"]

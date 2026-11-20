@@ -12,6 +12,9 @@ import { JI as KP } from '../js/pose/models.js';
 export { homography, applyH, invertH };
 
 export const RUNWAY_W = 1.22;
+export const BOARD_WHITE_M = 1.97;  // pit-side edge of the white unit from the sand (take-off line 2 m, strip ~3 cm behind it)
+export const PLANK_M = 1.0;
+export const PLANK_SEEN_M = 1.05;   // its length as the board measured it on 20 Nov (1.03-1.07, three jumps)   // Stanley's take-off plank ("debnička má 1m", 2026-11-20)
 
 // ---------- pixels ----------
 // Whiteness: bright and colourless. Track rubber is red, sand cream, lines and boards white.
@@ -22,6 +25,13 @@ export function whiteness(rgba, W, H) {
     const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
     out[i] = (r + g + b) / 3 - 1.5 * (mx - mn);
   }
+  return out;
+}
+// Red minus blue: the track rubber is red-brown (about 85), a wooden or rubber take-off plank lying on
+// it is grey-brown (about 50 on top, 30-40 on its dark side), white and sand are colourless.
+export function chroma(rgba, W, H) {
+  const out = new Float32Array(W * H);
+  for (let i = 0, o = 0; i < out.length; i++, o += 4) out[i] = rgba[o] - rgba[o + 2];
   return out;
 }
 export function luma(rgba, W, H) {
@@ -102,11 +112,11 @@ function ridgePoints(wh, W, H, { x0, x1, y0, y1, skip }) {
 // Returns the runway lines, the sand edge, the board's pit-side white edge and the take-off line,
 // each as x = m y + c, and the corners where they cross the lines.
 export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null, span = 520 }) {
-  const wh = whiteness(rgba, W, H), lu = luma(rgba, W, H);
+  const wh = whiteness(rgba, W, H), lu = luma(rgba, W, H), ch = chroma(rgba, W, H);
   const footSkip = foot ? x => x >= foot[0] - 12 && x <= foot[1] + 12 : null;
   const [tx0, ty0] = toe;
   const pts = ridgePoints(wh, W, H, { x0: tx0 - span, x1: tx0 + span, y0: ty0 - 260, y1: ty0 + 260, skip: footSkip });
-  const lines = ransacLines(pts, {}).filter(l => l.n >= 40);
+  let lines = ransacLines(pts, {}).filter(l => l.n >= 40);
   const yAt = (l, x) => l.m * x + l.c;
   const [tx, ty] = toe;
   const shoeEnd = foot ? (dir > 0 ? foot[1] : foot[0]) : tx;
@@ -114,6 +124,7 @@ export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null,
   // Painted lines sorted top to bottom at the foot. The runway is the adjacent pair with the
   // sand on one side of the foot and the board on the other; the shoe keypoints sit above
   // the ground, so the foot alone cannot say which pair it stands between.
+  const pickBand = () => {
   const sorted = lines.filter(l => Math.abs(yAt(l, tx) - ty) < 260).sort((a, b) => yAt(a, tx) - yAt(b, tx));
   let best = null;
   for (let k = 0; k + 1 < sorted.length; k++) {
@@ -132,11 +143,20 @@ export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null,
         past += pts.filter(([x, y]) => Math.abs(y - yAt(l, x)) < 2 && (x - sx) * dir > 25).length;
       }
     }
-    const score = got.sandPts.length + got.whitePts.length + 3 * got.offsets.length + (inside ? 30 : 0) - 2 * past;
+    // A plank between the lines counts like the board it covers (2026-11-20: without it the band
+    // scored under 12 on the server's empty-board frames of IMG_5166, the scan start 3 px off).
+    const score = got.sandPts.length + got.whitePts.length + 3 * got.offsets.length + 2 * Math.min(got.plankFront.length, got.plankBack.length) + (inside ? 30 : 0) - 2 * past;
     if (!best || score > best.score) best = { far, near, band, score, ...got };
   }
+  return best;
+  };
+  let best = pickBand();
+  // 9 candidates when 6 found no runway: lane lines around the pit can outvote a runway line a plank
+  // leaves short (2026-11-20, IMG_5166 on the server: the near runway line was the 7th). Only then,
+  // so a runway found before is found the same way (9 always moved IMG_5163/5164 by 1-2 %).
+  if (!best || best.score < 12) { lines = ransacLines(pts, { maxLines: 9 }).filter(l => l.n >= 40); best = pickBand(); }
   if (!best || best.score < 12) return { error: 'runway', debug: { lines } };
-  const { far, near, band, sandPts, whitePts, offsets } = best;
+  const { far, near, band, sandPts, whitePts, offsets, plankFront, plankBack, boardBeside } = best;
 
   function scanBand(far, near) {
   const rows = [];
@@ -165,8 +185,30 @@ export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null,
     }
     return null;
   };
-  const sandPts = [], whitePts = [], offsets = [];
+  const sandPts = [], whitePts = [], offsets = [], plankFront = [], plankBack = [];
+  // A take-off plank on the runway (Stanley's "debnička", 1 m long, lying along the runway over the
+  // board; 2026-11-20): grey-brown, neither red rubber nor white. Walking from the scan's start
+  // towards the run-up, its pit-side end is the take-off line and its far end is 1 m behind.
+  // Only from a start on the rubber in front of it (an empty board frame, not the shoe on it).
+  const plankAt = (u, x) => { const c = prof(ch, u, x), l = prof(lu, u, x), w = prof(wh, u, x); return c < 62 && l < 200 && w < 140; };
+  const plankFrom = (u, xStart, step) => {
+    let k = 0;
+    for (; k < 700; k++) { const x = xStart + step * k; if (!Number.isFinite(prof(ch, u, x))) return null; if (plankAt(u, x)) { let n = 1; while (n < 10 && plankAt(u, x + step * n)) n++; if (n >= 10) break; } }
+    if (k >= 700 || k < 4) return null;
+    const front = xStart + step * k;
+    let len = 0, gap = 0;
+    while (len < 1200) { const x = front + step * (len + 1); if (!Number.isFinite(prof(ch, u, x))) return null; if (plankAt(u, x)) { len += gap + 1; gap = 0; } else if (++gap > 5) break; }
+    return len >= 40 ? { front, back: front + step * len } : null;
+  };
+  // The board under the plank shows only beside it, in a thin strip along each runway line.
+  const boardBeside = [];
+  for (const u of [0.07, 0.1, 0.13, 0.87, 0.9, 0.93]) {
+    const b = edgeFrom(u, heelEnd - dir * 6, -dir, { run: 8, maxRun: 260, maxDist: 700 });
+    if (b && !b.tooLong) boardBeside.push([b.x, rowY(u, b.x)]);
+  }
   for (const u of rows) {
+    const pl = plankFrom(u, heelEnd - dir * 6, -dir);
+    if (pl) { plankFront.push([pl.front, rowY(u, pl.front)]); plankBack.push([pl.back, rowY(u, pl.back)]); }
     const s = edgeFrom(u, shoeEnd + dir * 14, dir, { run: 40 });
     if (s && !s.tooLong) sandPts.push([s.x, rowY(u, s.x)]);
     const b = edgeFrom(u, heelEnd - dir * 14, -dir, { run: 20, maxRun: 260 });
@@ -183,7 +225,7 @@ export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null,
       }
     }
   }
-  return { sandPts, whitePts, offsets };
+  return { sandPts, whitePts, offsets, plankFront, plankBack, boardBeside };
   }
   const edge = (p, min) => {
     if (p.length < min) return null;
@@ -195,6 +237,23 @@ export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null,
     return { ...f, n: keep.length };
   };
   const sand = edge(sandPts, 6), white = edge(whitePts, 6);
+  const pFront = edge(plankFront, 5), pBack = edge(plankBack, 5);
+  // The board's pit-side edge beside the plank, through the points on each side of it (one side
+  // alone could be a shadow or the line). Not parallel to the plank's ends: on a low phone those
+  // converge (IMG_5166: slopes -0.65 and +0.16), and the board's lies between them.
+  let under = null;
+  if (pFront && pBack && boardBeside.length >= 2) {
+    const mid = (yAt(far, toe[0]) + yAt(near, toe[0])) / 2;
+    const side = boardBeside.reduce((o, p) => (o[p[1] < (yAt(far, p[0]) + yAt(near, p[0])) / 2 ? 0 : 1].push(p), o), [[], []]);
+    if (side[0].length && side[1].length) {
+      const m0 = [median(side[0].map(p => p[0])), median(side[0].map(p => p[1]))], m1 = [median(side[1].map(p => p[0])), median(side[1].map(p => p[1]))];
+      const m = (m1[0] - m0[0]) / (m1[1] - m0[1]), c = m0[0] - m * m0[1];
+      const tight = boardBeside.every(([x, y]) => Math.abs(x - (m * y + c)) < 4);
+      const xAt = (e, y) => e.m * y + e.c;
+      const between = (xAt({ m, c }, mid) - xAt(pFront, mid)) * (xAt({ m, c }, mid) - xAt(pBack, mid)) < 0;
+      if (tight && between) under = { m, c, n: boardBeside.length };
+    }
+  }
   // The take-off line runs parallel to the white edge a few centimetres behind it, too close
   // for its own slope to be measured: the white edge shifted by the median offset.
   const off = offsets.length >= 5 ? median(offsets) : NaN;
@@ -207,8 +266,9 @@ export function detectRunway(rgba, W, H, { toe, dir, foot = null, ground = null,
       sand: sand && [cross(sand, far), cross(sand, near)],
       white: white && [cross(white, far), cross(white, near)],
       takeoff: takeoff && [cross(takeoff, far), cross(takeoff, near)],
+      plank: pFront && pBack && { front: [cross(pFront, far), cross(pFront, near)], back: [cross(pBack, far), cross(pBack, near)], n: Math.min(pFront.n, pBack.n), under: under && [cross(under, far), cross(under, near)] },
     },
-    debug: { sandPts, whitePts, offsets, lines },
+    debug: { sandPts, whitePts, offsets, lines, plankFront, plankBack, boardBeside },
   };
 }
 
@@ -251,7 +311,8 @@ export function detectRunwayZoomed(rgba, W, H, opts, s = 1) {
   return {
     far: line(d.far), near: line(d.near), sand: edge(d.sand), white: edge(d.white),
     takeoff: d.takeoff && { ...edge(d.takeoff), offPx: d.takeoff.offPx / s }, band: d.band / s, zoom: s,
-    corners: { sand: pair(d.corners.sand), white: pair(d.corners.white), takeoff: pair(d.corners.takeoff) },
+    corners: { sand: pair(d.corners.sand), white: pair(d.corners.white), takeoff: pair(d.corners.takeoff),
+      plank: d.corners.plank && { front: pair(d.corners.plank.front), back: pair(d.corners.plank.back), n: d.corners.plank.n, under: pair(d.corners.plank.under) } },
     debug: { ...d.debug, zoom: s },
   };
 }
@@ -480,7 +541,7 @@ export async function measureGround({ frames, track, jump, boxes }) {
   // plasticine strip shows and the take-off line is its far edge. The scan starts from a point
   // between the sand and the board, carried from the contact's detection by the tracking. When
   // the contact showed no board, the foot on it stands in for the board.
-  const clear = [];
+  const clear = [], plankClear = [];
   const href = g[ref]?.h, back = href && invertH(href), f0 = footAt(ref);
   if (back && (d0.corners.white || f0)) {
     const c0 = d0.corners;
@@ -498,21 +559,73 @@ export async function measureGround({ frames, track, jump, boxes }) {
       if (b && b[0] <= Math.max(...xs) + 60 && b[2] >= Math.min(...xs) - 30 && b[3] >= Math.min(...pts.map(p => p[1])) - 25) continue;
       const d = detectRunwayZoomed(get(i), W, H, { toe: s0, dir, foot: [s0[0] - 4, s0[0] + 4], ground: s0 }, zoom);
       if (!d.error && d.corners.sand && d.corners.takeoff && d.takeoff.n >= 5) clear.push({ i, d });
+      else if (!d.error && d.corners.sand && d.corners.plank) plankClear.push({ i, d });
     }
   }
+  // A take-off plank (2026-11-20, IMG_5166/5168/5169: "take-off line not found") wins over the
+  // board under it: the athlete leaves from its pit-side end, not from the board.
+  const onPlank = plankClear.length >= 2 && plankClear.length >= clear.length;
   // Two clear frames at least: one alone was wrong on IMG_4676 (motion blur read the strip as
   // 7 px instead of about 30 and every distance came out 14 % long).
-  const lineDets = clear.length >= 2 ? clear : boardDets;
+  const lineDets = onPlank ? plankClear : clear.length >= 2 ? clear : boardDets;
   if (!lineDets.length) return { error: 'take-off line not found', ms: Date.now() - t0 };
   // Every detection into the reference frame; corners that agree within 6 px are averaged.
-  const pick = (d, k) => (k < 2 ? d.corners.sand[k] : (d.corners.takeoff ?? d.corners.white)[k - 2]);
-  const refPts = [0, 1, 2, 3].map(k => {
-    const q = (lineDets === clear && k < 2 ? base.concat(clear) : lineDets).filter(x => g[x.i]).map(x => applyH(invertH(g[x.i].h), pick(x.d, k)));
-    const med = v => [...v].sort((a, b) => a - b)[v.length >> 1];
+  const med = v => [...v].sort((a, b) => a - b)[v.length >> 1];
+  const toRef = (dets, get) => {
+    const q = dets.filter(x => g[x.i]).map(x => applyH(invertH(g[x.i].h), get(x.d)));
+    if (!q.length) return null;
     const mx = med(q.map(p => p[0])), my = med(q.map(p => p[1]));
     const keep = q.filter(p => Math.hypot(p[0] - mx, p[1] - my) < 6);
     return [keep.reduce((a, p) => a + p[0], 0) / keep.length, keep.reduce((a, p) => a + p[1], 0) / keep.length];
-  });
+  };
+  const pick = (d, k) => (k < 2 ? d.corners.sand[k] : onPlank ? d.corners.plank.front[k - 2] : (d.corners.takeoff ?? d.corners.white)[k - 2]);
+  const refPts = [0, 1, 2, 3].map(k => toRef(((lineDets === clear || onPlank) && k < 2 ? base.concat(lineDets) : lineDets), d => pick(d, k)));
+  // The plank's own length gives the distance from its end to the sand: its two ends where they
+  // cross the runway lines are a 1 m x 1.22 m rectangle on the ground.
+  // The board under it, seen beside it, is the better ruler: it stands BOARD_WHITE_M from the sand on
+  // Stanley's runway, as every white-board jump measured (the plank's own 1 m read the board 1.85 m
+  // from the sand on IMG_5166, and the leg 7 % short). The plank's length then only checks it.
+  let boardM = null, plank = null;
+  if (onPlank) {
+    const back = [0, 1].map(k => toRef(plankClear, d => d.corners.plank.back[k]));
+    const withUnder = plankClear.filter(x => x.d.corners.plank.under);
+    const under = withUnder.length >= 2 ? [0, 1].map(k => toRef(withUnder, d => d.corners.plank.under[k])) : null;
+    if (refPts.every(Boolean) && back.every(Boolean)) {
+      const W4 = x => [[x, 0], [x, RUNWAY_W]];
+      const at = (h, p) => applyH(h, p)[0];
+      const hB = under?.every(Boolean) && homography([refPts[0], refPts[1], under[0], under[1]], [...W4(0), ...W4(BOARD_WHITE_M)]);
+      let f = NaN, b = NaN, ruler = null;
+      if (hB) {
+        f = (at(hB, refPts[2]) + at(hB, refPts[3])) / 2; b = (at(hB, back[0]) + at(hB, back[1])) / 2; ruler = 'board';
+        if (!(f > 0.3 && f < BOARD_WHITE_M && b > f + 0.6 && b < f + 1.6)) f = NaN;
+      }
+      if (!Number.isFinite(f)) {
+        const h = homography([refPts[2], refPts[3], back[0], back[1]], [...W4(0), ...W4(PLANK_M)]);
+        const sx = h ? [at(h, refPts[0]), at(h, refPts[1])] : null;
+        if (sx && sx.every(x => x < -0.3 && x > -4)) { f = -(sx[0] + sx[1]) / 2; b = f + PLANK_M; ruler = 'plank'; }
+      }
+      // The rectangle the app works in runs from the sand to the plank's far end, 2.7 m: from the
+      // sand to its pit-side end alone (1.7 m) the extrapolation back to the 3rd-last step went wrong
+      // on IMG_5169 (a 2.9 m step, 11.5 m/s, the leg 27 % long; 2.2 m, 9.4 m/s, 1 % with the far end).
+      // The take-off line stays the pit-side end (lineM), and the Freelap cones keep standing by the
+      // board under it (coneZeroM: its take-off line, 2 m from the sand).
+      if (Number.isFinite(f)) {
+        // One rectangle from every edge seen, not from two corners: the plank's far corners alone
+        // moved 4.5 px between two server runs of IMG_5166 and every speed by 9 % (8.90 / 9.67 m/s).
+        // Least squares over the sand (0), the board (1.97 m), the plank's end (f) and its far end
+        // (f + its measured length, held to 1.05 m when the board gave it: 1.03-1.07 on three jumps).
+        const bSeen = b;
+        if (ruler === 'board') b = f + PLANK_SEEN_M;
+        const src = [refPts[0], refPts[1], refPts[2], refPts[3], back[0], back[1]], dst = [...W4(0), ...W4(f), ...W4(b)];
+        if (under?.every(Boolean)) { src.push(under[0], under[1]); dst.push(...W4(BOARD_WHITE_M)); }
+        const hL = homography(src, dst), hLi = hL && invertH(hL);
+        if (hLi) { refPts[0] = applyH(hLi, [0, 0]); refPts[1] = applyH(hLi, [0, RUNWAY_W]); refPts[2] = applyH(hLi, [b, 0]); refPts[3] = applyH(hLi, [b, RUNWAY_W]); }
+        else { refPts[2] = back[0]; refPts[3] = back[1]; }
+        boardM = +b.toFixed(3);
+        plank = { ruler, lengthM: +(bSeen - f).toFixed(3), lineM: +f.toFixed(3) };
+      }
+    }
+  }
   const out = {}, cones = {};
   for (const [i, v] of Object.entries(g)) {
     out[i] = refPts.map(p => applyH(v.h, p).map(x => +x.toFixed(2)));
@@ -525,7 +638,8 @@ export async function measureGround({ frames, track, jump, boxes }) {
   const offs = lineDets.map(x => x.d.takeoff?.offPx).filter(Number.isFinite);
   return {
     frames: out, cones, ref, detections: dets.length, clearDetections: clear.length, zoom: +zoom.toFixed(2),
-    line: lineDets === clear ? 'foul strip, board clear' : offs.length ? 'foul strip' : 'white edge',
+    line: onPlank ? 'take-off plank' : lineDets === clear ? 'foul strip, board clear' : offs.length ? 'foul strip' : 'white edge',
+    ...(boardM ? { boardM, lineM: plank.lineM, coneZeroM: BOARD_WHITE_M + 0.03, plank } : {}),
     lineOffsetPx: offs.length ? +[...offs].sort((a, b) => a - b)[offs.length >> 1].toFixed(1) : null,
     trackRms: +Math.max(...Object.values(g).map(v => v.rms)).toFixed(2), ms: Date.now() - t0,
   };

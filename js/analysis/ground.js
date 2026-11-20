@@ -23,7 +23,7 @@ function slope(t, y) {
 
 // Cone sightings per frame -> one entry per cone: k (0 = 0.2 m, 1 = 10.2 m, 2 = 20.2 m from the
 // line), its median x in metres from the sand, and every sighting { i, x }.
-function coneClusters(conesByFrame, H, boardM) {
+function coneClusters(conesByFrame, H, boardM, zeroM = boardM) {
   const obs = [];
   for (const [k, list] of Object.entries(conesByFrame ?? {})) {
     if (!H[k]) continue;
@@ -40,9 +40,9 @@ function coneClusters(conesByFrame, H, boardM) {
     if (g.length < 3) continue;
     const x = median(g.map(o => o.x));
     // a cone half-way, 5.2 m from the line (the 6 m mark, Berlin 2009's middle photocell)
-    if (Math.abs(x - (boardM + 5.2)) <= 0.8) { if (!best[0.5] || g.length > best[0.5].obs.length) best[0.5] = { k: 0.5, x, obs: g }; continue; }
-    const k = Math.round((x - boardM - 0.2) / 10);
-    if (k < 0 || k > 2 || Math.abs(x - (boardM + 0.2 + 10 * k)) > 0.8 + 1.2 * k) continue;
+    if (Math.abs(x - (zeroM + 5.2)) <= 0.8) { if (!best[0.5] || g.length > best[0.5].obs.length) best[0.5] = { k: 0.5, x, obs: g }; continue; }
+    const k = Math.round((x - zeroM - 0.2) / 10);
+    if (k < 0 || k > 2 || Math.abs(x - (zeroM + 0.2 + 10 * k)) > 0.8 + 1.2 * k) continue;
     if (!best[k] || g.length > best[k].obs.length) best[k] = { k, x, obs: g };
   }
   // From far away the board's 2 m ruler stretches with distance: on IMG_4658 (filmed across the
@@ -50,7 +50,7 @@ function coneClusters(conesByFrame, H, boardM) {
   // above. The cones still come in order up the runway, so a missing one is taken by order: the
   // first group 6-16 m up from the board cone, then one 1.5-3.5 times as far. These keep their
   // image positions for the splits but never set the scale (byOrder).
-  const zero = boardM + 0.2;
+  const zero = zeroM + 0.2;
   const ups = groups.filter(g => g.length >= 3).map(g => ({ x: median(g.map(o => o.x)), obs: g })).filter(g => g.x - zero > 4);
   if (!best[1]) {
     const c1 = ups.find(g => g.x - zero >= 6 && g.x - zero <= 16);
@@ -129,7 +129,13 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   // put the two cones 9.53 m apart: every distance and speed 5 % short (6.44 m for a jump of
   // about 6.80, 8.7 m/s against Freelap's 9.09). The run direction is rescaled about the
   // take-off line, so the line and the board distance stay where they were found.
-  const cones = coneClusters(ground.cones, H, boardM);
+  // A take-off plank (server ground.mjs, 2026-11-20): the rectangle runs to its far end (boardM), the
+  // take-off line is its pit-side end (lineM), and the cones stand by the board under it (coneZeroM).
+  // (both scale with boardM when the tape corrects it)
+  const along = () => boardM / (ground.boardM || boardM);
+  const lineAt = () => (ground.lineM != null ? ground.lineM * along() : boardM);
+  const coneZero = () => (ground.coneZeroM != null ? ground.coneZeroM * along() : boardM);
+  const cones = coneClusters(ground.cones, H, boardM, coneZero());
   let coneScale = null;
   const measured = cones.filter(c => !c.byOrder && Number.isInteger(c.k));
   if (measured.length >= 2) {
@@ -155,6 +161,17 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     for (const c of cones) { c.x *= fix; c.obs = c.obs.map(o => ({ ...o, x: o.x * fix })); }
   }
   const legRatio = (legUnits * boardM) / legM;
+  // A take-off plank's runway is new (2026-11-20). Past 10 % off the leg its metres are not shown.
+  // Within it they are put on the body's scale: the runway seen past the plank is a strip ~57 px tall
+  // on a low phone, and two server runs of IMG_5166 read every speed 9 % apart (8.88 / 9.62 m/s into
+  // the board) with the leg 0.953 / 1.027 - on the leg's scale both 9.3-9.4 m/s, and the cones'
+  // 1-11 m within 1 %. The leg (0.491 x height) is the athlete's own constant, so jumps compare.
+  if (ground.lineM != null && Math.abs(legRatio - 1) > 0.1) return { error: `plank runway does not fit the body (leg ${legRatio.toFixed(2)})` };
+  const bodyFix = ground.lineM != null ? 1 / legRatio : 1;
+  if (bodyFix !== 1) {
+    boardM *= bodyFix;
+    for (const c of cones) { c.x *= bodyFix; c.obs = c.obs.map(o => ({ ...o, x: o.x * bodyFix })); }
+  }
   const X = i => comX(i) * boardM;
 
   // Speed through the last step: penultimate touchdown to board touchdown, the centre of mass
@@ -299,7 +316,7 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const crossing = k => {
     // The board cone's trigger point is 1 m from the line, where the board's own homography is
     // at its best: when that cone wasn't picked up (IMG_4658: 2 sightings), the ground stands in.
-    const cone = cones.find(c => c.k === k) ?? (k === 0 && cones.some(c => c.k === 1) ? { k: 0, x: boardM + 0.2, obs: [] } : null);
+    const cone = cones.find(c => c.k === k) ?? (k === 0 && cones.some(c => c.k === 1) ? { k: 0, x: coneZero() + 0.2, obs: [] } : null);
     const seen = cone ? new Map(cone.obs.map(o => [o.i, o])) : null;
     // distance past the trigger point: + before it, - after it
     // Without the cone there is no split: through the board's homography alone the 1-11 m time
@@ -351,10 +368,10 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   if (!(speedLast > 3 && speedLast < 13) || !(vxTO > 3 && vxTO < 13)) return { error: `runway speeds not human: ${speedLast?.toFixed?.(1)} / ${vxTO?.toFixed?.(1)} m/s` };
   return {
     steps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
-    boardM: boardM0, fix, implied, legRatio, yAth, raised, pxPerM, splits,
+    boardM: boardM0, fix, implied, legRatio, bodyFix, onPlank: ground.lineM != null, yAth, raised, pxPerM, splits,
     speedLast, vxTO, speedLoss: vxTO - speedLast, speedLossPct: ((vxTO - speedLast) / speedLast) * 100,
     // + behind the take-off line (legal, distance given away), - past it towards the sand.
-    toeToLine: toeTO - boardM, takeoffDist, landingReach: reach, jump, jumpDirect: direct, flightTime, partsGap: agree,
+    toeToLine: toeTO - lineAt(), takeoffDist, landingReach: reach, jump, jumpDirect: direct, flightTime, partsGap: agree,
     // Trust: the body agrees with the board scale.
     sure: Math.abs(legRatio - 1) <= 0.1 ? 'vysoká' : Math.abs(legRatio - 1) <= 0.18 ? 'stredná' : 'nízka',
   };
