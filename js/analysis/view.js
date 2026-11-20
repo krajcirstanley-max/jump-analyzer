@@ -261,7 +261,7 @@ function scoreHtml(jump, s, feel) {
       <circle cx="52" cy="52" r="${r}" class="track"/><circle cx="52" cy="52" r="${r}" class="fill" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 52 52)"/>
       <text x="52" y="58" class="n">${s == null ? '–' : Math.round(s)}</text><text x="52" y="76" class="of">/ 100</text></svg>
     <div class="score-side"><span class="score-l">Technika</span><b>${WORD(s)}</b>
-      <span class="score-feel" data-feel-shown>${feel != null ? `Pocit ${feel}/5` : ''}</span>
+      <span class="score-feel" data-feel-shown>${feel ? `Pocit ${feel}/5` : ''}</span>
       ${est ? `<span class="score-est">odhad dĺžky <b>≈ ${num(est.value, 2)} m</b></span>` : ''}</div>
   </div>`;
 }
@@ -456,8 +456,12 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   els.feel.classList.remove('hidden');
   els.feel.innerHTML = `<h2>Ako sa to cítilo?</h2><p class="note">Povedz to skôr, než uvidíš čísla.</p>
     <div class="feel-row">${[1, 2, 3, 4, 5].map(n => `<button class="feel-b" data-feel="${n}">${n}</button>`).join('')}</div>
-    <div class="feel-ends"><span>zle</span><span>výborne</span></div>`;
+    <div class="feel-ends"><span>zle</span><span>výborne</span></div>
+    <button class="feel-skip" data-feel-skip>Preskočiť</button>`;
   els.feel.onclick = e => {
+    // Skipped (Stanley, 2026-11-20): stored as 0, so the question doesn't come back; 0 is never shown
+    // or counted as a feeling anywhere (every reader takes only 1-5).
+    if (e.target.closest('[data-feel-skip]')) { jump.feel = 0; reveal(); onFeel?.(0); return; }
     const b = e.target.closest('[data-feel]');
     if (!b) return;
     jump.feel = +b.dataset.feel;

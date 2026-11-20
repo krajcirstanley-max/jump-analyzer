@@ -109,10 +109,12 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
 .meter > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 .prog-actions { margin-top: 12px; }
-.feel-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0 6px; }
+.feel-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 14px 0 6px; }
 .feel-b { min-height: 60px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); font-size: 22px; font-weight: 700; cursor: pointer; touch-action: manipulation; font-variant-numeric: tabular-nums; }
 .feel-b:active { background: var(--accent-bg); color: var(--accent); }
 .feel-ends { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+.feel-skip { display: block; width: 100%; margin-top: 16px; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 16px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.feel-skip:active { background: var(--accent-bg); color: var(--accent); }
 #res-feel h2 { font-size: 20px; margin-bottom: 2px; }
 
 /* Score + tiles */
