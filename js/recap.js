@@ -132,7 +132,7 @@ export function together(J, { height = null } = {}) {
   const speed = ok.reduce((b, x) => (Math.hypot(x.jump.flight.vxTO, x.jump.flight.vyTO) > Math.hypot(b.jump.flight.vxTO, b.jump.flight.vyTO) ? x : b), ok[0]);
   const land = ok.reduce((b, x) => (x.jump.flight.landingReach > b.jump.flight.landingReach ? x : b), ok[0]);
   const f = speed.jump.flight, T0 = ((speed.jump.metrics ?? []).find(m => m.key === 'flight')?.value ?? NaN) / 1000;
-  const est = (speed.jump.metrics ?? []).find(m => m.key === 'estDistance')?.value;
+  const est = (speed.jump.metrics ?? []).find(m => m.key === 'estDistance' && m.status !== 'hidden')?.value;
   if (!(T0 > 0) || !(est > 0)) return null;
   const drop = ((G * T0 - f.vyTO) ** 2 - f.vyTO ** 2) / (2 * G);
   // the take-off angle nearest the one that gives this athlete the most distance (whatIf's bestAngle)

@@ -15,7 +15,8 @@ const PHASE = { pen: 'predposl.', plant: 'plant', takeoff: 'odraz', flight: 'let
 
 // The jump attempts as list lines.
 export function jumpSummary(r, athletes) {
-  const est = r.metrics?.estDistance?.v;
+  // a distance the analysis withheld (no runway measured: IMG_5166 read 2.74 m from the arc) is not shown
+  const est = r.metrics?.estDistance?.s !== 'hidden' ? r.metrics?.estDistance?.v : undefined;
   const weak = (r.phases ?? []).filter(p => Number.isFinite(p.score)).sort((a, b) => a.score - b.score)[0];
   return {
     kind: 'skok', id: r.id, who: r.athlete, at: Date.parse(r.recordedAt || r.analysedAt),

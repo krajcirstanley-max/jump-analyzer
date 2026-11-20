@@ -143,11 +143,16 @@ claude_secret = modal.Secret.from_name("jump-claude")
     scaledown_window=60,
     timeout=450,
     retries=modal.Retries(max_retries=1, initial_delay=1.0, backoff_coefficient=1.0),
-    max_containers=2,
+    # A batch from the gallery is 9-11 clips at once (2026-11-20: 11 jobs took 6.5 min on 2 containers,
+    # each running its jobs one after another). 4 containers, each aiming at one job (target_inputs).
+    max_containers=4,
     enable_memory_snapshot=SNAPSHOT,
     experimental_options={"enable_gpu_snapshot": True} if SNAPSHOT else None,
 )
-@modal.concurrent(max_inputs=4)  # the warm-up and a job share a container; jobs still run one at a time
+# The warm-up and a job share a container; jobs still run one at a time. 2, not 4: a container took
+# 4 jobs of a 9-clip batch the moment it came up and ran them one after another while the other
+# containers were still starting (2026-11-20: 9 clips done 99-275 s after upload, 20-45 s each).
+@modal.concurrent(max_inputs=2, target_inputs=1)
 class Analyzer:
     @modal.enter(snap=SNAPSHOT)
     def boot(self):

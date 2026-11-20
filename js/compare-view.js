@@ -14,7 +14,7 @@ const shown = m => m && m.status !== 'hidden' && Number.isFinite(m.value);
 const dateOf = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${d.getDate()}. ${d.getMonth() + 1}.`; };
 const timeOf = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : d.toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' }); };
 const scoreOf = rec => Math.round(typeof rec?.score === 'number' ? rec.score : rec?.jump?.score?.score ?? rec?.jump?.score ?? NaN);
-const distOf = rec => rec?.measured ?? rec?.jump?.measured ?? rec?.jump?.metrics?.find?.(m => m.key === 'estDistance')?.value ?? null;
+const distOf = rec => rec?.measured ?? rec?.jump?.measured ?? rec?.jump?.metrics?.find?.(m => m.key === 'estDistance' && m.status !== 'hidden')?.value ?? null;
 
 // The moments both jumps are lined up on, in the order they happen.
 export const ANCHORS = ['td3', 'penTD', 'penTO', 'TD', 'maxFlex', 'TO', 'apex', 'land'];

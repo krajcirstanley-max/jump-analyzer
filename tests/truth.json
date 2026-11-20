@@ -12,6 +12,15 @@
     "4951": { "who": "miska", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 847, "penTO": 864, "TD": 877, "TO": 895, "landing": 973 },
     "4953": { "who": "miska", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 500, "penTO": 516, "TD": 529, "TO": 547, "landing": 627 },
     "4954": { "who": "stanley", "date": "2026-11-16", "setup": "5 cm box on the board", "penTD": 668, "penTO": 683, "TD": 693, "TO": 710, "landing": 800 },
+    "5161": { "who": "miska", "date": "2026-11-20", "setup": "run-through, white board", "penTD": 881, "penTO": 894, "TD": 909, "TO": 922 },
+    "5162": { "who": "stanley", "date": "2026-11-20", "setup": "white board", "penTD": 814, "penTO": 827, "TD": 835, "TO": 850, "landing": 935 },
+    "5163": { "who": "miska", "date": "2026-11-20", "setup": "white board", "penTD": 647, "penTO": 660, "TD": 675, "TO": 689, "landing": 765 },
+    "5164": { "who": "stanley", "date": "2026-11-20", "setup": "white board", "penTD": 812, "penTO": 824, "TD": 834, "TO": 849, "landing": 932 },
+    "5165": { "who": "miska", "date": "2026-11-20", "setup": "white board", "penTD": 664, "penTO": 678, "TD": 692, "TO": 707, "landing": 782 },
+    "5166": { "who": "stanley", "date": "2026-11-20", "setup": "raised dark take-off plank", "penTD": 963, "penTO": 977, "TD": 985, "TO": 1000, "landing": 1089 },
+    "5167": { "who": "miska", "date": "2026-11-20", "setup": "run-through, white board", "penTD": 708, "penTO": 726, "TD": 735, "TO": 750 },
+    "5168": { "who": "stanley", "date": "2026-11-20", "setup": "run-through, raised dark take-off plank", "penTD": 853, "penTO": 869, "TD": 878, "TO": 893 },
+    "5169": { "who": "stanley", "date": "2026-11-20", "setup": "run-through, raised dark take-off plank, 16 steps", "penTD": 1582, "penTO": 1597, "TD": 1605, "TO": 1621 },
     "4866": { "who": "miska", "date": "2026-11-15", "setup": "a sprint filmed in the jump mode", "noJump": true }
   },
   "athletes": {

@@ -78,7 +78,7 @@ export function groundRuns(frames, gap = 2) {
 
 // Claude's runs say which contacts are which; the pose track's overlapping contact gives the
 // edges. takeoffAt: the frame the takeoff contact should cover (the pose track's guess).
-export function pickContacts(runs, poseContacts, takeoffAt, fps, sand = null) {
+export function pickContacts(runs, poseContacts, takeoffAt, fps, sand = null, { fromSteps = false } = {}) {
   // Claude sometimes reads one contact in pieces (IMG_4953, 2026-11-16: 492-496, 502-506 and
   // 510-512 for a 500-516 penultimate, with the pose track's 502-517 right): pieces inside one
   // pose contact of at least 0.06 s are one contact.
@@ -116,7 +116,7 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps, sand = null) {
   // edges: on IMG_4933 (2026-11-16) the pose track had 506-512 of a 497-513 take-off, Claude
   // 489-509; taking the pose piece (0.058 s) failed the contact-time check and the whole jump
   // fell back to a wrong place. The app refines Claude's own edges from the raw foot.
-  const edges = r => {
+  const edges = (r, isTake = false) => {
     // the pose contact sharing the most frames with the run (a run can touch two)
     const shared = c => Math.min(c.to, r.to) - Math.max(c.td, r.td);
     const p = poseContacts.filter(c => shared(c) >= 0).sort((a, b) => shared(b) - shared(a))[0];
@@ -125,10 +125,15 @@ export function pickContacts(runs, poseContacts, takeoffAt, fps, sand = null) {
     // take-off, and the pose track's right 15 frames lost to the 0.6 rule (IMG_4933: 452-480 for 472-487).
     const len = p ? p.to - p.td + 1 : 0;
     const whole = p && len / fps >= 0.06 && (len >= 0.6 * (r.to - r.td + 1) || len / fps >= 0.09);
+    // The sprint pass's touchdowns (toe against the track, no Claude) sat within 1 frame of the hand on
+    // all 9 clips of 2026-11-20, where the pose track's deceleration peak moves between runs: Miška's
+    // IMG_5167 board touchdown read 735 one run and 738 the next (hand 735). Its toe-offs run late, so
+    // only the touchdown is taken, and only when the pose track's comes 3 or more frames after it.
+    if (isTake && whole && fromSteps && p.td - r.td >= 3 && p.td - r.td <= 6) return { td: r.td, to: p.to, from: 'pose' };
     return whole ? { td: p.td, to: p.to, from: 'pose' } : { td: r.td, to: r.to, from: 'claude' };
   };
   const take = real[ti], pen = real[ti - 1], third = real[ti - 2];
-  return { take: edges(take), pen: pen && edges(pen), third: third && edges(third) };
+  return { take: edges(take, true), pen: pen && edges(pen), third: third && edges(third) };
 }
 
 // Keeps only answers that fit a long jump: the right order and human contact and flight times.
@@ -221,7 +226,7 @@ export async function locateLanding({ frames, boxes, first, last, fps, client, T
 export function nameEvents(seen, guess, fps) {
   const runs = groundRuns(seen.ground);
   const at = seen.T === guess.TD && guess.TO != null ? Math.round((guess.TD + guess.TO) / 2) : seen.T;
-  const c = pickContacts(runs, guess.contacts ?? [], at, fps, seen.sand);
+  const c = pickContacts(runs, guess.contacts ?? [], at, fps, seen.sand, { fromSteps: !!seen.fromSteps });
   const named = {
     td3: c.third?.td ?? null, penTD: c.pen?.td ?? null, penTO: c.pen?.to ?? null,
     TD: c.take?.td ?? null, TO: c.take?.to ?? null, landing: seen.sand,

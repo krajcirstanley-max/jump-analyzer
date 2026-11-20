@@ -242,7 +242,8 @@ test('a metre metric is hidden with a reason when the scale fails', () => {
     assert.equal(m.status, 'hidden', k);
     assert.ok(m.reason, k);
   }
-  assert.notEqual(rows.find(x => x.key === 'takeoffAngle').status, 'hidden');
+  // The angle's horizontal speed is the arc's too, so without the runway it goes with the speeds.
+  assert.equal(rows.find(x => x.key === 'takeoffAngle').status, 'hidden');
   // Rise and vertical speed come from the time to the apex, so a failed scale doesn't hide them...
   for (const k of ['peakHeight', 'vyTO']) assert.notEqual(rows.find(x => x.key === k).status, 'hidden', k);
   // ...but an apex too close to the end of the seen arc does.

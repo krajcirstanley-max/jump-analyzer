@@ -64,7 +64,7 @@ function replay(d, a) {
   if (!L?.windows) return r;
   const r0 = { ...r }; delete r0.events; delete r0.locate; delete r0.ground; delete r0.groundError;
   const guess = locateGuess(r0, a.sex, r.ts, { height: a.height });
-  const seen = L.seen ? { ...L.seen, T: L.windows.T }
+  const seen = L.seen ? { ...L.seen, T: L.windows.T, fromSteps: L.seen.fromSteps ?? !!L.fast }
     : { ground: (L.runs ?? []).flatMap(span), sand: r.events?.landing ?? null, runThrough: r.events?.kind === 'runthrough', T: L.windows.T };
   const n = nameEvents(seen, guess, r.fps);
   if (n.events.TD != null) r.events = n.events; else delete r.events;

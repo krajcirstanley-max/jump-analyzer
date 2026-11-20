@@ -7,7 +7,7 @@ import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
 import { refineTouchdowns, refineClaudeEdges } from './refine.js';
-import { sharpen, has, P, torsoLength } from './kinematics.js';
+import { sharpen, has, P, torsoLength, centreOfMass } from './kinematics.js';
 import { techniqueScore, coaching, PHASES } from './coach.js';
 
 const KF_LABELS = {
@@ -60,7 +60,18 @@ function buildPhases(ev, metrics, score, last, runThrough = false) {
 // The flight with every metre replaced by the runway's. Angles and the apex timing are image
 // ratios and stay. The instant speeds at touchdown are left out: the flight into the board is
 // only 7-11 frames and read 0.3-0.5 m/s apart between methods on our clips.
-function withGround(f, g) {
+function withGround(f, g, hLand = NaN) {
+  // Vertical speed at toe-off from the time in the air: the centre of mass leaves the board at the
+  // runway's height and meets the sand at hLand, so vy = (hLand - hTO + g·T²/2) / T. Frame-exact
+  // contacts make T good to 0.02 s, and 0.1 m of height moves the angle by about 1°. The time to the
+  // fitted apex wandered on a following phone (2026-11-20, IMG_5162: apex 0.15 s into a 0.68 s
+  // flight, vy 1.2 m/s, 7.9°, and the advice to jump higher); across 11 runway clips it read 7.9-19.7°
+  // where the flight time reads 14.3-21.9°, inside the 15-24° of measured long jumps.
+  const hTO = g.series?.at(-1)?.h, Tf = g.flightTime;
+  const vyTime = Number.isFinite(hLand) && hLand > 0.2 && hLand < 1.3 && hTO > 0.6 && Tf > 0.3
+    ? (hLand - hTO + 9.81 * Tf * Tf / 2) / Tf : NaN;
+  const timed = vyTime > 0.5 && vyTime < 4.5;
+  const vy = timed ? vyTime : f.vyTO;
   return {
     ...f, ground: g, scaleSource: 'board', scaleOk: true, scaleWhy: null, fitWhy: f.scaleWhy,
     vxTO: g.vxTO, speedLast: g.speedLast, speedLoss: g.speedLoss, speedLossTO: g.speedLossPct,
@@ -73,9 +84,11 @@ function withGround(f, g) {
     // The fit's own gate (3 cm) is for a gravity scale; here it only has to place the apex, and a
     // far, panning phone leaves a few cm of wobble on the arc (IMG_4677: 3.0 cm, apex at 0.24 s of
     // 0.68 s seen, angle hidden for no good reason). 5 cm with the apex well inside the arc.
-    ...((f.apexOk || (f.fitRmsM >= 0 && f.fitRmsM < 0.05 && f.fitSeconds >= 0.3 && f.tUp > 0.05 && f.tUp < f.fitSeconds - 0.08)) && Number.isFinite(f.vyTO)
+    ...(timed
+      ? { vyTO: vy, vyTOtime: vyTime, peakHeight: (vy * vy) / (2 * 9.81) * 100, takeoffAngle: (Math.atan2(vy, g.vxTO) * 180) / Math.PI, angleOk: true, apexOk: true }
+      : (f.apexOk || (f.fitRmsM >= 0 && f.fitRmsM < 0.05 && f.fitSeconds >= 0.3 && f.tUp > 0.05 && f.tUp < f.fitSeconds - 0.08)) && Number.isFinite(f.vyTO)
       ? { takeoffAngle: (Math.atan2(f.vyTO, g.vxTO) * 180) / Math.PI, angleOk: true, apexOk: true } : {}),
-    takeoffSpeed: Math.hypot(g.vxTO, f.vyTO),
+    takeoffSpeed: Math.hypot(g.vxTO, vy),
     takeoffDist: g.takeoffDist, flightDistance: g.vxTO * g.flightTime, landingReach: g.landingReach, estDistance: g.jump,
   };
 }
@@ -391,7 +404,15 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   if (sUse && ground && !ground.error) { ground.approach = 10 / sUse; ground.approachFrom = split ? 'freelap' : 'cones'; }
   // Gravity-scale clip (no board): a typed Freelap time still gives the approach and the hold.
   const airOnly = sUse && !(ground && !ground.error) ? { ...air, approach: 10 / sUse, speedKeep: air.speedLast > 0 ? (air.speedLast * sUse / 10 - 1) * 100 : NaN } : air;
-  const flight = ground && !ground.error ? withGround(air, ground) : airOnly;
+  // The centre of mass above the sand at the landing frame, in metres: feet on the sand, the body's
+  // size there against the board's scale (the athlete is further from the phone by then).
+  const hLand = (() => {
+    const L = ev.landing, kp = L != null ? smooth[L] : null, k0 = smooth[ev.takeoff.to];
+    if (!kp || !k0 || !(ground?.pxPerM > 0) || !has(kp, 'lsho', 'rsho', 'lhip', 'rhip') || !has(k0, 'lsho', 'rsho', 'lhip', 'rhip')) return NaN;
+    const c = centreOfMass(kp, sex), feet = ['lheel', 'rheel', 'lbigtoe', 'rbigtoe'].filter(k => has(kp, k)).map(k => P(kp, k)[1]);
+    return c && feet.length ? (Math.max(...feet) - c[1]) / (ground.pxPerM * torsoLength(kp) / torsoLength(k0)) : NaN;
+  })();
+  const flight = ground && !ground.error ? withGround(air, ground, hLand) : airOnly;
   // Faster than any human jump (2026-11-17, a rerun of the sprint IMG_4866: the server named a
   // "take-off" mid-stride and it read vy 7.0, 66 m/s, a 5.8 m apex). Every checked jump leaves the
   // board at vy 1.6-2.7 and 6.6-8.6 m/s, so 4.5 and 13 sit far above any jump.

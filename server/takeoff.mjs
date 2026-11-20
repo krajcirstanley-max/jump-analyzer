@@ -52,5 +52,5 @@ export async function stepTakeoff({ frames, meta, res, wire, sex, onProgress }) 
   const steps = S.map(s => ({ td: s.f0, to: s.f1, rise: Number.isFinite(s.rise) ? +s.rise.toFixed(2) : null }));
   if (i < 0) return { error: 'no take-off among the contacts', steps, timing };
   const span = s => Array.from({ length: s.f1 - s.f0 + 1 }, (_, k) => s.f0 + k);
-  return { seen: { ground: S.slice(Math.max(0, i - 4), i + 1).flatMap(span), T: S[i].f0 }, steps, pick: i, timing };
+  return { seen: { ground: S.slice(Math.max(0, i - 4), i + 1).flatMap(span), T: S[i].f0, fromSteps: true }, steps, pick: i, timing };
 }

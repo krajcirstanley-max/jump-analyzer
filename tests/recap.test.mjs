@@ -41,8 +41,15 @@ test('two jumps: whole jump first, phases with values, same-measure improvement,
 test('"spolu" only from full run-ups, one model run on top of the fastest jump', { skip: !have }, () => {
   const J = [mk('4676', 1.09, null, FULL_RUNUP), mk('4677', 1.10, 6.85, FULL_RUNUP)];
   const P = plan(J, { height: 186 });
-  assert.ok(P.together && P.together.gain > 0.05 && P.together.gain < 0.4, JSON.stringify(P.together?.gain));
-  assert.equal(P.nth(P.together.speed), 1); assert.equal(P.nth(P.together.angle), 2);
+  // Since 2026-11-20 the angle comes from the flight time: 4677 leaves at 19.3° (was 15.4° from the
+  // fitted apex), already near its best angle, so the best parts are one jump and nothing is added.
+  assert.equal(P.together, null, JSON.stringify(P.together?.gain));
+  // A faster, flatter take-off still gets the other jump's angle on top, as one model run.
+  const flat = structuredClone(J[1]); const f = flat.jump.flight;
+  f.vxTO += 0.6; f.vyTO = 1.8; f.takeoffAngle = (Math.atan2(f.vyTO, f.vxTO) * 180) / Math.PI;
+  const Q = plan([J[1], flat], { height: 186 });
+  assert.ok(Q.together && Q.together.gain > 0.03 && Q.together.gain < 1, JSON.stringify(Q.together?.gain));
+  assert.equal(Q.together.speed, flat); assert.equal(Q.together.angle, J[1]);
 });
 
 test('one jump: no comparison shots', { skip: !have }, () => {

@@ -99,7 +99,13 @@ export function detectContacts(track, first, last, fps, opts = {}) {
     while (i < n) {
       if (!sideOn || !on(i)) { i++; continue; }
       let j = i;
-      while (j + 1 < n && on(j + 1)) j++;
+      // One frame off inside a stance is the swing foot passing it, not a toe-off: on Stanley's
+      // IMG_5166 (2026-11-20, raised take-off plank) its toe point jumped to the passing foot at
+      // 995 and 998, and the board contact ended at 995 for a hand-checked 1000.
+      for (;;) {
+        while (j + 1 < n && on(j + 1)) j++;
+        if (j + 2 < n && !on(j + 1) && on(j + 2)) j += 2; else break;
+      }
       if ((j - i + 1) / fps >= o.minContact) {
         const peak = (ay, lo, hi) => {
           let k = -1, best = -o.minAccel * vRun * fps * torso[Math.min(n - 1, Math.max(0, i))] / 10;
@@ -121,13 +127,14 @@ export function detectContacts(track, first, last, fps, opts = {}) {
         // contact (IMG_4596: slide to 1019, toe up at 1013). The toe rising well clear of its own
         // level earlier in the stance ends the contact; this only ever shortens it. Within one
         // contact the camera barely tilts, so a local vertical test holds here. The margin is
-        // wide because the toe rolls forward through push-off: 0.06 torso cut IMG_2674 by 6 frames.
+        // wide because the toe rolls forward through push-off: 0.06 torso cut IMG_2674 by 6 frames, and
+        // 0.15 cut the take-offs from a raised plank by 3-5 (IMG_5168, 5169, 2026-11-20).
         const toeY = k => at(k, s + 'bigtoe', 1);
         const base = [];
         for (let k = td + 2; k <= td + Math.floor((to - td) / 2); k++) if (Number.isFinite(toeY(k))) base.push(toeY(k));
         if (base.length >= 3) {
           base.sort((a, b) => a - b);
-          const level = base[base.length >> 1], clear = 0.15 * torso[Math.max(0, Math.min(n - 1, td))];
+          const level = base[base.length >> 1], clear = 0.2 * torso[Math.max(0, Math.min(n - 1, td))];
           for (let k = td + Math.ceil(o.minContact * fps); k <= to; k++) {
             if (toeY(k) < level - clear) { to = Math.max(td + 1, k - 1); break; }
           }
@@ -172,7 +179,13 @@ export function detectContactsVertical(track, first, last, fps, opts = {}) {
     while (i < n) {
       if (!on(i)) { i++; continue; }
       let j = i;
-      while (j + 1 < n && on(j + 1)) j++;
+      // One frame off inside a stance is the swing foot passing it, not a toe-off: on Stanley's
+      // IMG_5166 (2026-11-20, raised take-off plank) its toe point jumped to the passing foot at
+      // 995 and 998, and the board contact ended at 995 for a hand-checked 1000.
+      for (;;) {
+        while (j + 1 < n && on(j + 1)) j++;
+        if (j + 2 < n && !on(j + 1) && on(j + 2)) j += 2; else break;
+      }
       if ((j - i + 1) / fps >= o.minContact) {
         // Touchdown: strongest upward acceleration (the foot's fall being stopped) near the start.
         let td = i, best = Infinity;

@@ -229,7 +229,9 @@ export function flightMetrics(f, ev, sex = 'male') {
     // Speeds and metres need the runway: from the flight's arc alone they came 4-15 % off the runway
     // on eight clips that have both (2026-11-19: 6.5 vs 7.7, 7.8 vs 6.9 m/s), and 4.9 m/s for
     // Stanley's IMG_2432 when its runway failed. A typed Freelap time is its own measure and stays.
-    const noRunway = !board && !fromApex && key !== 'takeoffAngle' && key !== 'speedApproach' && !SCALE_FREE.has(key);
+    // The angle too: its horizontal speed is the same arc speed, and a phone that follows the jumper
+    // shrinks it (2026-11-20, IMG_5166 from a raised plank: 2.7 m/s, 46°; IMG_5169 31°).
+    const noRunway = !board && !fromApex && key !== 'speedApproach' && !SCALE_FREE.has(key);
     const usable = !raisedBox && !noRunway && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk && !(f.fitSeconds < 0.3) : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
     const status = !usable ? 'hidden' : value < lo ? 'low' : value > hi ? 'high' : 'ok';
     const arc = board ? { ...f, scaleWhy: f.fitWhy } : f;
