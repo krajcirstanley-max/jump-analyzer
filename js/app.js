@@ -420,13 +420,13 @@ async function analyzeFile(file) {
     showMsg('bad', 'Toto video sa tu nedá prehrať', 'Tento prehliadač nepozná jeho formát. Otvor aplikáciu v Safari na iPhone.');
     return summaryOf(r);
   }
-  await openPlayer(r, () => run === runId);
+  await openPlayer(r, () => run === runId, file);
   if (run !== runId) return { superseded: true };
   if (player && !window.__noPose) runAnalysis(file, run, false);
   return summaryOf(r);
 }
 
-async function openPlayer(r, stillCurrent) {
+async function openPlayer(r, stillCurrent, blob = null) {
   try {
     const src = new FrameSource(mb, r.track, r.packetTimestamps, r.keyTimestamps);
     if (!stillCurrent()) { src.dispose(); return; }
@@ -434,6 +434,8 @@ async function openPlayer(r, stillCurrent) {
     const t0 = performance.now();
     await player.show(0);
     r.firstFrameMs = performance.now() - t0;
+    // the phone's own decoder for dragging the timeline (the canvas keeps steps, pause and the drawings)
+    if (blob) { try { player.attachVideo(blob); } catch (e) { console.warn('no native video', e); } }
   } catch (e) {
     if (!stillCurrent()) return;
     console.warn('Decode failed', e);
@@ -609,7 +611,7 @@ async function resumeHeld() {
     currentClip = { file: h.file, recordedAt: h.recordedAt };
     hold(h);
     screenJob = job.jobId;
-    await openPlayer(r, () => run === runId);
+    await openPlayer(r, () => run === runId, clip);
     if (run !== runId || !player) return;
     setBusy(true);
     followCloud(run, opts => resumeCloudJob(job.jobId, opts));
@@ -957,7 +959,7 @@ async function openAttempt(id) {
       const r = await inspectClip(media.clip, mb, { name: rec.file });
       if (run !== runId) { r.input.dispose?.(); return; }
       current = r;
-      await openPlayer(r, () => run === runId);
+      await openPlayer(r, () => run === runId, media.clip);
       if (run !== runId) return;
       $('res-msg').classList.add('hidden');
       if (player) setOverlays();

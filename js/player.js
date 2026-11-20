@@ -101,7 +101,12 @@ export class Player {
     this.scrub.max = String(this.src.count - 1);
     this.canvas.style.touchAction = 'pan-y'; // the page still scrolls until zoomed in
 
-    this.scrub.addEventListener('input', () => { this.pause(); this.show(+this.scrub.value); });
+    // A drag on the timeline runs on the phone's own video decoder, like playback does: through
+    // the canvas every position was decoded from its keyframe and the drag stuttered while play ran
+    // smooth (Stanley, 2026-11-20). The exact frame is drawn once the finger lets go.
+    this.scrub.addEventListener('input', () => { this.pause(); this.#scrubTo(+this.scrub.value); });
+    this.scrub.addEventListener('change', () => this.#scrubEnd());
+    ['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach(t => this.scrub.addEventListener(t, () => this.#scrubEnd()));
     this.playBtn.addEventListener('click', () => (this.playing ? this.pause() : this.play()));
     root.querySelectorAll('[data-step]').forEach(b => this.#holdToRepeat(b, +b.dataset.step));
     root.querySelectorAll('[data-speed]').forEach(b => b.addEventListener('click', () => {
@@ -317,6 +322,11 @@ export class Player {
     // FrameSource may have evicted (closed) this bitmap; keep what's on the canvas.
     if (this.bmp && !this.bmp.width) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.scrubbing) {   // the video shows the picture underneath; only the drawings go on top
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const o of this.overlays) { try { o(ctx, this.toCanvas, this.index); } catch (e) { console.warn('overlay failed', e); } }
+      return;
+    }
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (!this.bmp) return;
@@ -384,6 +394,55 @@ export class Player {
     this.#badge(false);
     if (this.videoOn) { this.#stopVideo(); return; }
     if (this.head.has(this.index)) this.show(this.target); // swap the head frame for a sharp one
+  }
+
+  // ---------- scrubbing on the video ----------
+  #canScrubVideo() { return !!this.video && !this.video.error && this.view.s <= 1.01; }
+
+  #scrubTo(i) {
+    if (!this.#canScrubVideo()) { this.show(i); return; }
+    const v = this.video;
+    if (!this.scrubbing) {
+      this.scrubbing = true;
+      this.#placeVideo();
+      v.style.transform = this.mirror ? 'scaleX(-1)' : '';
+      v.style.visibility = 'visible';
+      // iOS shows nothing on a video that never played: a muted play/pause inside the gesture wakes it
+      if (v.readyState < 2) v.play().then(() => { if (this.scrubbing) v.pause(); }).catch(() => {});
+    }
+    this.scrubTarget = i;
+    this.#videoFrame(i);
+    this.#redraw();
+    if (!this.seeking) this.#seekVideo(i);
+  }
+
+  // One seek at a time, always to the newest position: a queue of seeks lags behind the finger.
+  #seekVideo(i) {
+    const v = this.video;
+    if (!v) return;
+    this.seeking = true;
+    const done = () => {
+      v.removeEventListener('seeked', done);
+      clearTimeout(this.seekTimer);
+      this.seeking = false;
+      if (this.scrubbing && this.scrubTarget !== i) this.#seekVideo(this.scrubTarget);
+    };
+    v.addEventListener('seeked', done);
+    this.seekTimer = setTimeout(done, 400);   // a seek the browser drops must not stop the drag
+    v.currentTime = this.ts[i] - this.ts[0];
+  }
+
+  // Back to the canvas on the exact frame, swapped in once it is drawn.
+  #scrubEnd() {
+    if (!this.scrubbing) return;
+    this.scrubbing = false;
+    const v = this.video, i = this.scrubTarget ?? this.index;
+    this.show(i).then(() => {
+      if (this.scrubbing || this.videoOn || !v) return;
+      v.style.visibility = 'hidden';
+      v.style.transform = '';
+      this.#redraw();
+    });
   }
 
   // ---------- native playback ----------
