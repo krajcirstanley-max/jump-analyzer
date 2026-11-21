@@ -366,8 +366,21 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   // board, and the whole jump was refused as "no take-off"). Without it the jump still shows, its
   // metres from the gravity fit or hidden. Every checked jump: 6.6-10 m/s into and off the board.
   if (!(speedLast > 3 && speedLast < 13) || !(vxTO > 3 && vxTO < 13)) return { error: `runway speeds not human: ${speedLast?.toFixed?.(1)} / ${vxTO?.toFixed?.(1)} m/s` };
+  // Every run-up step the runway rectangle reaches (Stanley 2026-11-21: "musím vidieť či aspoň
+  // posledných 20 m každým krokom zrýchľujem"): the centre of mass from one touchdown to the next,
+  // as the last-step speed above, and the toe's place, in metres from the sand edge of the board.
+  const seq = [...(ev.contacts ?? []).filter(c => c.foot && c.to >= c.td && c.td < T.td - 2).sort((a, b) => a.td - b.td), { ...T, foot: s }];
+  const runSteps = [];
+  for (let n = 0; n < seq.length - 1; n++) {
+    const c = seq[n], nx = seq[n + 1];
+    if (![c.td - 1, c.td, c.td + 1, nx.td - 1, nx.td, nx.td + 1].every(ok)) continue;
+    const toes = []; for (let i = c.td + 1; i <= c.to - 1; i++) toes.push(...footX(i, [c.foot + 'bigtoe']));
+    const dt = ts[nx.td] - ts[c.td], v = (avgX(c.td) - avgX(nx.td)) / dt;
+    if (!(dt > 0.12 && dt < 0.45) || !(v > 3 && v < 13)) continue;
+    runSteps.push({ td: c.td, to: c.to, foot: c.foot, x: avgX(c.td), toeX: toes.length ? median(toes) * boardM : NaN, speed: v, stepMs: dt * 1000, contactMs: ((c.to - c.td + 1) / fps) * 1000 });
+  }
   return {
-    steps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
+    steps, runSteps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
     boardM: boardM0, fix, implied, legRatio, bodyFix, onPlank: ground.lineM != null, yAth, raised, pxPerM, splits,
     speedLast, vxTO, speedLoss: vxTO - speedLast, speedLossPct: ((vxTO - speedLast) / speedLast) * 100,
     // + behind the take-off line (legal, distance given away), - past it towards the sand.
