@@ -1,6 +1,6 @@
 // The jump analysis as data: no DOM, importable in Node, so phone and server cannot disagree.
 // Shape: docs/v1-contract.md.
-import { detectContacts, keyFrames, withEvents } from './events.js';
+import { detectContacts, keyFrames, withEvents, approachToeOffs } from './events.js';
 import { countSteps } from './stepcount.js';
 import { adjustForRunup, judgedSteps, expectedDistance } from './runup.js';
 import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from './metrics.js';
@@ -360,6 +360,9 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
     }
   }
   ev.keyFrames = ev.keyFrames.map(k => ({ ...k, label: KF_LABELS[k.id] ?? k.label, ...(handUsed?.[k.id] != null ? { hand: true } : {}) }));
+  contacts = approachToeOffs(contacts, [ev.pen, ev.takeoff], fps);
+  if (ev.contacts) ev.contacts = approachToeOffs(ev.contacts, [ev.pen, ev.takeoff], fps);
+  if (ev.third) { const t = contacts.find(c => c.foot === ev.third.foot && c.td === ev.third.td); if (t && t.to !== ev.third.to) ev.third = { ...ev.third, to: t.to, contactTime: t.contactTime }; }
   const dir = contacts[0]?.dir ?? 1;
   const times = ts ?? Array.from({ length: clean.length }, (_, i) => i / fps);
   const air = flightAnalysis(smooth, ev, times, sex, dir, height);

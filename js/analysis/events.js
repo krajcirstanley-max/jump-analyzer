@@ -16,6 +16,8 @@ export const DEFAULTS = {
   jumpRise: 0.6,     // torso lengths the centre of mass rises after the takeoff contact
   riseWindow: 0.35,  // s: window after a contact in which that rise is measured
   landFall: 2.0,     // torso lengths/s: feet must be falling at least this fast before landing
+  toShift: -1,       // frames from the toe's upward-acceleration peak to the last frame on the ground
+  splitGap: 0.15,    // s: the same foot again sooner than this, with no other step between, is the same stance
 };
 
 // Per-foot series over the analysed range: lowest foot point y and torso scale.
@@ -119,7 +121,7 @@ export function detectContacts(track, first, last, fps, opts = {}) {
         const tdV = peak(ayLow, i - 3, i + reach);
         const toV = peak(ayToe, j - 5, j + 3);
         const td = tdV >= 0 ? tdV : i;
-        let to = toV >= 0 ? toV - 1 : j;
+        let to = toV >= 0 ? toV + o.toShift : j;
         // A toe peak before the touchdown is noise, not a contact of 0 ms (IMG_4676 before the
         // foot-collapse fix: 543-542 on the board); the slide's own end stands instead.
         if (to <= td) to = Math.max(j, td + 1);
@@ -141,7 +143,7 @@ export function detectContacts(track, first, last, fps, opts = {}) {
         }
         contacts.push({
           foot: s, td: td + first, to: to + first,
-          tdAgree: tdV >= 0 && Math.abs(tdV - i) <= 2, toAgree: toV >= 0 && Math.abs(toV - 1 - j) <= 2,
+          tdAgree: tdV >= 0 && Math.abs(tdV - i) <= 2, toAgree: toV >= 0 && Math.abs(toV - 1 - j) <= 2, toPeak: toV >= 0 && to === toV + o.toShift,
           tdSlide: i + first, toSlide: j + first,
         });
       }
@@ -150,7 +152,35 @@ export function detectContacts(track, first, last, fps, opts = {}) {
   }
   if (!sideOn) return detectContactsVertical(track, first, last, fps, opts);
   contacts.sort((a, b) => a.td - b.td);
-  return contacts.map(c => ({ ...c, dir, contactTime: (c.to - c.td + 1) / fps }));
+  return mergeSplit(contacts, fps, o).map(c => ({ ...c, dir, contactTime: (c.to - c.td + 1) / fps }));
+}
+
+// The run-up's own steps (not the penultimate or the board contact, which the server names and
+// hand frames check): their last frame on the ground is the toe's upward-acceleration peak itself,
+// not the frame before it. Blind reads of every run-up contact of 29 jumps (2026-11-21): toe-offs
+// within a frame 209 -> 241 of 273, the mean error -0.60 -> +0.08 frame. The penultimate and board
+// contacts keep toShift (truth.json, read on 3x crops, agrees with it there).
+export const APPROACH_TO = 1;
+export function approachToeOffs(contacts, keep, fps) {
+  // only steps that end before the first kept contact starts (the server's naming passes run this
+  // too, and a penultimate contact it has not named yet must not move)
+  const before = Math.min(...keep.filter(Boolean).map(k => k.td - 3));
+  if (!Number.isFinite(before)) return contacts;
+  return contacts.map(c => (c.toPeak && c.to + APPROACH_TO < before ? { ...c, to: c.to + APPROACH_TO, contactTime: (c.to + APPROACH_TO - c.td + 1) / fps } : c));
+}
+
+// One stance read as two: the same foot twice in a row with no step of the other foot between and
+// under o.splitGap s apart is one contact (blind reads of every run-up contact, 2026-11-21: 12 such
+// pairs in 29 jumps, e.g. IMG_1085 l 551-558 + 564-568 where the shoe stood 550-564; the swing foot
+// passing it or the pose jumping to it cut the stance). A real missed step is a step time apart.
+function mergeSplit(contacts, fps, o) {
+  const out = [];
+  for (const c of contacts) {
+    const p = out.at(-1);
+    if (p && p.foot === c.foot && (c.td - p.to - 1) / fps < o.splitGap) { out[out.length - 1] = { ...p, to: Math.max(p.to, c.to), toAgree: c.toAgree, toSlide: c.toSlide, merged: true }; continue; }
+    out.push(c);
+  }
+  return out;
 }
 
 // Fallback for head-on footage: ground line + vertical stillness.
