@@ -7,7 +7,7 @@ import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 // 2: contact edges against the frames by hand, the stand's last piece on the box (2026-11-18)
 // 3: both feet counted within 12 cm (a side view read single-leg), the landing found after the feet left the picture (2026-11-18 evening)
 // 4: a CMJ filmed from the front is not a box stand, two feet planted in sync count from the side (2026-11-18 late)
-const RSI_ALGO = 4;
+const RSI_ALGO = 5;   // 5 (2026-11-21): toe-off from the peak rise, edges rounded (blind reads of every contact)
 
 const NAMES = {
   drop_jump: 'Drop jump', drop_jump_single: 'Drop jump jednonož', pogo: 'Pogo', repeated_hops: 'Opakované odrazy',

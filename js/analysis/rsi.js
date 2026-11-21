@@ -439,7 +439,7 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
 // all 14 toe-offs of the hand-checked set within one frame, on two server runs whose pose differed
 // by up to two frames. A phone that follows the athlete smears the stop over 2-3 frames: there the
 // pose's own edges stand.
-const PX_TD = 0.4, PX_TO = 0.5;
+export const EDGE = { td: 0.4, to: 0.5, toFeet: "first", tdFeet: "last", toRound: "round", tdRound: "round", peak: true };
 function vyOf(motion) {
   const by = new Map();
   for (const m of motion ?? []) if (m?.g) by.set(m.f, { l: m.l ? m.l[1] - m.g[1] : NaN, r: m.r ? m.r[1] - m.g[1] : NaN });
@@ -450,16 +450,20 @@ function stopAt(v, foot, c) {        // sub-frame time a falling toe stops, sear
   for (let f = c - 6; f <= c + 5; f++) {
     const fall = med4([v(f - 5)[foot], v(f - 4)[foot], v(f - 3)[foot], v(f - 2)[foot]]);
     if (!(fall > 3)) continue;
-    const a = v(f - 1)[foot], b = v(f)[foot], th = PX_TD * fall;
+    const a = v(f - 1)[foot], b = v(f)[foot], th = EDGE.td * fall;
     if (a >= th && b < th) return f - 1 + (a - th) / (a - b);
   }
   return NaN;
 }
 function leaveAt(v, foot, c) {       // sub-frame time a toe leaves the floor, searched around frame c
   for (let f = c - 4; f <= c + 6; f++) {
-    const rise = med4([v(f + 2)[foot], v(f + 3)[foot], v(f + 4)[foot]]);
+    // EDGE.peak: the rise is the fastest of the next 4 frames, and the toe must have stood just
+    // before. A wobble of the toe's match in the air (1794932274606 run 1: -28, -24, -14, -6, -22
+    // px a frame) looked like a second take-off to the median rule and put it 4 frames late.
+    const rise = EDGE.peak ? Math.min(...[1, 2, 3, 4].map(k => v(f + k)[foot]).filter(Number.isFinite)) : med4([v(f + 2)[foot], v(f + 3)[foot], v(f + 4)[foot]]);
     if (!(rise < -3)) continue;
-    const a = v(f - 1)[foot], b = v(f)[foot], th = PX_TO * rise;
+    const a = v(f - 1)[foot], b = v(f)[foot], th = EDGE.to * rise;
+    if (EDGE.peak && !(Math.abs(v(f - 2)[foot]) < -0.5 * rise)) continue;
     if (a > th && b <= th) return f - 1 + (a - th) / (a - b);
   }
   return NaN;
@@ -488,9 +492,11 @@ export function pixelEdges(r, motion, fps) {
   const fin = x => x.filter(Number.isFinite);
   const events = r.events.map(e => {
     if (e.onBox) return { ...e };
-    const tTD = Math.max(...fin([stopAt(v, 'l', e.td), stopAt(v, 'r', e.td)]));
-    const tTO = Math.min(...fin([leaveAt(v, 'l', e.to), leaveAt(v, 'r', e.to)]));
-    const td = Number.isFinite(tTD) ? Math.ceil(tTD) : e.td, to = Number.isFinite(tTO) ? Math.floor(tTO) : e.to;
+    const sv = fin([stopAt(v, 'l', e.td), stopAt(v, 'r', e.td)]);
+    const tTD = EDGE.tdFeet === 'first' ? Math.min(...sv) : Math.max(...sv);
+    const lv = fin([leaveAt(v, 'l', e.to), leaveAt(v, 'r', e.to)]);
+    const tTO = EDGE.toFeet === 'last' ? Math.max(...lv) : Math.min(...lv);
+    const td = Number.isFinite(tTD) ? (EDGE.tdRound === "round" ? Math.round(tTD) : Math.ceil(tTD)) : e.td, to = Number.isFinite(tTO) ? (EDGE.toRound === 'round' ? Math.round(tTO) : Math.floor(tTO)) : e.to;
     return { ...e, td, to: to > td ? to : e.to, edges: Number.isFinite(tTD) || Number.isFinite(tTO) ? 'pixels' : 'pose' };
   });
   const jumps = r.jumps.map(j => {
