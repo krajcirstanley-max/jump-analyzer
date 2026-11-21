@@ -197,7 +197,15 @@ export function fiveCard(legs, fiveM, marks = null) {
 // Options: the athlete's 11-1 m less 2, 4.5 and 7 %.
 export const TARGET_SHARE_RATE = 0.7;
 export function targetOptions(near) { return [...new Set([0.98, 0.955, 0.93].map(f => Math.round(near * f * 100) / 100))]; }
-export function targetPlan(legs, marks, steps, ts, target) {
+// Shapes of the target (Stanley 2026-11-21: "môže byť aj iná tá krivka… lepšie zrýchlenie, agresívnejšie
+// budovanie rýchlosti"), as the 21-11 m speed over the 11-1 m speed:
+//  own   - his own ratio (better jumpers run the same curve higher, Koyama 2011)
+//  elite - 0.97, the 8.00-8.10 m group's laser curve (Koyama 2011), last 10 m flat (Berlin 2009)
+//  fast  - 0.99, the speed built by 21 m: longer above 95 % of the peak, which goes with distance
+//          (r = 0.70 men, Zhou & Kang 2000), at the cost the same authors name: too fast too early
+//          spoils the take-off
+export const TARGET_SHAPES = { own: null, elite: 0.97, fast: 0.99 };
+export function targetPlan(legs, marks, steps, ts, target, shape = 'own') {
   const pieces = fiveFromMarks(legs, marks);
   if (pieces.length !== 3 || !(target > 0.5)) return null;
   const L = legs.filter(Number.isFinite), far = L.at(-2), near = L.at(-1);
@@ -206,6 +214,8 @@ export function targetPlan(legs, marks, steps, ts, target) {
   const dip = now[2].v / now[1].v - 1;
   // under 1 % is inside what the 5 m shares can tell (the far/near ratio sat 0-3 % off Freelap's)
   if (dip < -0.01) tgt[1].v = tgt[2].v = 10 / target;
+  const ratioNow = (10 / far) / (10 / near), ratio = TARGET_SHAPES[shape] ?? ratioNow;
+  if (shape !== 'own' && TARGET_SHAPES[shape]) { tgt[0].v = ratio * 10 / target; tgt[1].v = tgt[2].v = 10 / target; }
   // the steps that fall in 21-11 m by the cone marks (video clock, as the steps)
   let rate = null, contact = null;
   if (steps?.length && ts?.length && Number.isFinite(marks?.[21]) && Number.isFinite(marks?.[11])) {
@@ -219,15 +229,16 @@ export function targetPlan(legs, marks, steps, ts, target) {
     if (cts.length >= 3) contact = cts.reduce((a, b) => a + b, 0) / cts.length;
   }
   const v0 = now[0].v, v1 = tgt[0].v, r = v1 / v0;
-  return { now, tgt, far, near, target, t21: far / k, dip, v0, v1,
+  return { now, tgt, far, near, target, t21: 10 / tgt[0].v, dip, v0, v1, shape, ratio, ratioNow,
     rate0: rate, rate1: rate ? rate * r ** TARGET_SHARE_RATE : null, len0: rate ? v0 / rate : null, len1: rate ? v1 / (rate * r ** TARGET_SHARE_RATE) : null,
     ct0: contact, ct1: contact != null ? contact - 0.013 * (v1 - v0) : null };
 }
-export function targetCard(legs, marks, steps, ts, target, recId = '') {
+export function targetCard(legs, marks, steps, ts, target, recId = '', shape = 'own') {
   const L = (legs ?? []).filter(Number.isFinite);
   if (L.length < 2) return rbCard('Cieľová rýchlosť', '<p class="note">Cieľ appka ukáže, keď má rozbeh časy z Freelapu (21–11 a 11–1 m).</p>');
   const opts = targetOptions(L.at(-1)), sel = opts.includes(target) ? target : opts[1];
-  const P = targetPlan(L, marks, steps, ts, sel);
+  const shp = shape in TARGET_SHAPES ? shape : 'own';
+  const P = targetPlan(L, marks, steps, ts, sel, shp);
   if (!P) return rbCard('Cieľová rýchlosť', '<p class="note">Na krivku treba vo videu kužeľ pri doske, klobúčik na 5,2 m a kužeľ na 10,2 alebo 20,2 m.</p>');
   const W = 340, H = 190, x = m => 24 + (21 - m) / 20 * (W - 40);
   const lo = Math.floor(Math.min(...P.now.map(p => p.v)) - 0.4), hi = Math.ceil(Math.max(...P.tgt.map(p => p.v)) + 0.2);
@@ -240,16 +251,21 @@ export function targetCard(legs, marks, steps, ts, target, recId = '') {
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Rýchlosť teraz a cieľ">${grid.join('')}${marksSvg}${path(P.now, 'stroke="var(--accent)" stroke-width="2.5"')}${path(P.tgt, 'stroke="var(--warn)" stroke-width="2.5" stroke-dasharray="6 4"')}${dots(P.now, 'var(--accent)')}${dots(P.tgt, 'var(--warn)')}</svg>`;
   const row = (a, b, c, hl) => `<div class="sp-row rb-row${hl ? ' hl' : ''}"><span style="flex:1">${a}</span><span class="sp-n" style="width:70px">${b}</span><span class="sp-n" style="width:22px;color:var(--muted)">→</span><span class="sp-n" style="width:70px"><b>${c}</b></span></div>`;
   const chips = opts.map(t => `<button class="rb-chip${t === sel ? ' on' : ''}" data-rb-target="${num(t, 2)}" data-rb-target-rec="${esc(recId)}">${num(t, 2)} s · ${num(10 / t, 1)} m/s</button>`).join('');
+  const shapeChips = [['own', 'Tvoj tvar'], ['elite', 'Ako 8 m skokani'], ['fast', 'Rýchlejší nábeh']].map(([k, lb]) => `<button class="rb-chip${k === shp ? ' on' : ''}" data-rb-shape="${k}" data-rb-target-rec="${esc(recId)}">${lb}</button>`).join('');
   const d = P.dip * 100;
-  const hold = Math.abs(d) < 1 ? 'Tvar nechaj: od 21 m pridávaš a posledných 10 m držíš, presne ako finalisti.'
+  const pct = x => num(Math.abs(1 - x) * 100, 0);
+  const shapeTxt = shp === 'elite' ? `Tvar 8 m skokanov (Koyama 2011, laser): 21–11 m o ${pct(0.97)} % pomalšie ako 11–1 m, posledných 10 m rovno (teraz o ${pct(P.ratioNow)} % pomalšie).`
+    : shp === 'fast' ? `Rýchlejší nábeh: rýchlosť postavená už do 21 m, 21–11 m len o ${pct(0.99)} % pomalšie ako 11–1 m (teraz ${pct(P.ratioNow)} %). Za: dlhšie bežíš pri vyše 95 % maxima, a to u mužov súvisí s dĺžkou skoku (r = 0,70, Zhou a Kang 2000). Proti: tí istí autori píšu, že priskoro rýchlo sťažuje odraz a trafenie dosky; viac práce je na prvých krokoch, nie pri doske.`
+    : '';
+  const hold = shp !== 'own' ? shapeTxt : Math.abs(d) < 1 ? 'Tvar nechaj: od 21 m pridávaš a posledných 10 m držíš, presne ako finalisti.'
     : d < 0 ? `Od 21 do 11 m pridávaš správne. Posledných 5 m o ${num(-d, 1)} % pomalšie, finalisti tam držia: cieľová krivka drží až do dosky.`
     : 'Tvar nechaj: zrýchľuješ až do dosky.';
   const stepRows = P.rate0 ? row('Krokov za sekundu (21–11 m)', num(P.rate0, 2), num(P.rate1, 2), 0) + row('Dĺžka kroku', `${num(P.len0, 2)} m`, `${num(P.len1, 2)} m`, 0) + (P.ct0 != null ? row('Na zemi', `${Math.round(P.ct0 * 1000)} ms`, `${Math.round(P.ct1 * 1000)} ms`, 0) : '') : '';
-  return rbCard('Cieľová rýchlosť', `<p class="note" style="margin-bottom:8px">Čas 11–1 m, ktorý chceš bežať:</p><div class="rb-chips">${chips}</div>
+  return rbCard('Cieľová rýchlosť', `<p class="note" style="margin-bottom:8px">Čas 11–1 m, ktorý chceš bežať:</p><div class="rb-chips">${chips}</div><p class="note" style="margin-bottom:6px">Tvar krivky:</p><div class="rb-chips">${shapeChips}</div>
     ${svg}
     <p class="note s"><span style="color:var(--accent);font-weight:700">━ teraz</span> (${num(P.far, 2)} / ${num(P.near, 2)} s) &nbsp; <span style="color:var(--warn);font-weight:700">╍ cieľ</span> (${num(P.t21, 2)} / ${num(P.target, 2)} s). Rýchlosť v m/s v úsekoch 21–11, 11–6 a 6–1 m.</p>
     <div style="margin-top:10px">${row('21–11 m', `${num(P.far, 2)} s`, `${num(P.t21, 2)} s`, 0)}${row('11–1 m', `${num(P.near, 2)} s`, `${num(P.target, 2)} s`, 1)}${stepRows}</div>
-    <p class="note s" style="margin-top:10px"><b>Ako to má vyzerať.</b> ${hold} Celá krivka ide o ${num(P.v1 - P.v0, 1)} m/s vyššie, takže rýchlosť musí byť postavená už medzi 21 a 11 m (${num(P.v1, 2)} m/s), nie dobehnutá pri doske. Navyše príde hlavne z rýchlejšieho kroku: kratšie na zemi, krok skoro rovnako dlhý.</p>
+    <p class="note s" style="margin-top:10px"><b>Ako to má vyzerať.</b> ${hold} Medzi 21 a 11 m o ${num(P.v1 - P.v0, 1)} m/s vyššie (${num(P.v1, 2)} m/s): rýchlosť musí byť postavená tam, nie dobehnutá pri doske. Navyše príde hlavne z rýchlejšieho kroku: kratšie na zemi, krok skoro rovnako dlhý.</p>
     <p class="note s"><b>Povel:</b> „stlač zem pod seba“</p>
     <p class="note s">Tvar krivky: Koyama 2011 (965 skokov, laser), 21–11 m asi o 3 % pomalšie ako 11–1 m u teba aj u 8 m skokanov. Krok: odhad z výskumu (Kivi 2001, Hunter 2004: pri vyššej rýchlosti hlavne frekvencia). Tvoj vlastný pomer appka zistí, keď zabehneš rýchlejšie.</p>`);
 }
@@ -522,7 +538,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   const fiveHtml = rec => fiveCard(runOf(rec)?.legs, rec.fiveM, rec.marks ?? null);
   const TARGET_KEY = who => `jump.rbTarget.${who}`;
   const targetOf = rec => { try { return parseFloat(localStorage.getItem(TARGET_KEY(rec.who))) || null; } catch { return null; } };
-  const targetHtml = rec => `<div data-rb-target-box>${targetCard(runOf(rec)?.legs, rec.marks ?? null, rec.steps, rec.ts, targetOf(rec), rec.id)}</div>`;
+  const shapeOf = rec => { try { return localStorage.getItem(`${TARGET_KEY(rec.who)}.shape`) || 'own'; } catch { return 'own'; } };
+  const targetHtml = rec => `<div data-rb-target-box>${targetCard(runOf(rec)?.legs, rec.marks ?? null, rec.steps, rec.ts, targetOf(rec), rec.id, shapeOf(rec))}</div>`;
   const rhythmHtml = rec => rhythmCard(rec.steps, rec.ts, rec.who, runOf(rec)?.steps ?? RUNUP_STEPS);
 
   // ---------- comment ----------
@@ -612,6 +629,12 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   const parse = s => { const v = parseFloat(String(s ?? '').replace(',', '.')); return Number.isFinite(v) && v > 0.3 && v < 3 ? v : null; };
   root.addEventListener('click', e => {
     // the target time: remembered per athlete, only the target card redrawn (the video keeps playing)
+    const sp = e.target.closest('[data-rb-shape]');
+    if (sp) {
+      const rec = load().find(x => x.id === sp.dataset.rbTargetRec);
+      if (rec) { try { localStorage.setItem(`${TARGET_KEY(rec.who)}.shape`, sp.dataset.rbShape); } catch {} const box = root.querySelector('[data-rb-target-box]'); if (box) box.outerHTML = targetHtml(rec); }
+      return;
+    }
     const tp = e.target.closest('[data-rb-target]');
     if (tp) {
       const rec = load().find(x => x.id === tp.dataset.rbTargetRec), t = parseFloat(tp.dataset.rbTarget.replace(',', '.'));

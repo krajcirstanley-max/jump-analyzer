@@ -101,3 +101,16 @@ test('target plan on the run-ups across the hall: every one with Freelap gets a 
     assert.ok(Math.abs(P.t21 / P.target - far / near) < 1e-9, `${id} shape`);
   }
 });
+
+test('target shapes: own ratio, the 8 m group 0.97, a faster build-up 0.99, the last 10 m flat', () => {
+  const marks = { 1: 10, 6: 9.475, 11: 8.95, 21: 7.87 };
+  const ts = [], steps = []; for (let t = 7.6; t < 10.05; t += 0.24) { ts.push(t); steps.push({ contact: 0.12, air: 0.12, td: 0, missing: false }); }
+  const own = targetPlan([1.08, 1.05], marks, steps, ts, 0.98, 'own');
+  const elite = targetPlan([1.08, 1.05], marks, steps, ts, 0.98, 'elite');
+  const fast = targetPlan([1.08, 1.05], marks, steps, ts, 0.98, 'fast');
+  assert.ok(Math.abs(own.t21 - 1.08 * 0.98 / 1.05) < 1e-9);
+  assert.ok(Math.abs(elite.t21 - 0.98 / 0.97) < 1e-9 && Math.abs(fast.t21 - 0.98 / 0.99) < 1e-9);
+  for (const P of [elite, fast]) assert.ok(Math.abs(P.tgt[1].v - 10 / 0.98) < 1e-9 && Math.abs(P.tgt[2].v - 10 / 0.98) < 1e-9);
+  assert.ok(fast.rate1 > elite.rate1 && fast.ct1 < elite.ct1);
+  assert.match(targetCard([1.08, 1.05], marks, steps, ts, 0.98, 'x', 'fast'), /Zhou a Kang/);
+});
