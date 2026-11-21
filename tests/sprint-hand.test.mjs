@@ -12,7 +12,9 @@ const DIR = new URL('./real/sprint18/', import.meta.url);
 const HAND = {
   cut18: { 21: [[21, 22], [35, 36]], 46: [[45, 46], [60, 61]], 76: [76, 89], 102: [102, [114, 115]], 131: [131, 143], 156: [156, 168], 184: [[183, 184], 196], 209: [208, [220, 221]], 236: [[235, 236], 247],
     266: [[259, 260], 272],   // the pose lost the toe 262-265: the touchdown read 266 before the toe was filled in
-    287: [287, 297], 312: [[311, 312], [322, 323]] },
+    // 297 was read on a toe-following crop (2026-11-18); the 12-frame re-reads of 2026-11-21 found
+    // that crop ends a roll-off over the tip up to 2 frames early, and this clip is not here to read again
+    287: [287, [297, 299]], 312: [[311, 312], [322, 323]] },
   sp1794744974224: { 651: [651, [662, 663]], 702: [[702, 703], [713, 714]], 730: [[730, 731], [741, 742]], 782: [782, 793], 833: [[833, 834], [843, 844]], 942: [942, [951, 952]], 971: [[971, 972], 981] },
   // 647: the shoe sweeps back low over the track at 645-646; by eye down at 647-648, the toe reads 645
   sp1794744749028: { 587: [[587, 588], [598, 599]], 647: [[645, 648], [657, 658]], 730: [[729, 730], [742, 743]], 843: [[842, 843], [852, 853]] },

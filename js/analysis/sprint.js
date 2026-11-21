@@ -100,10 +100,18 @@ export function startOf(contacts, o = SPRINT) {
 export function stepsOf(contacts, start) {
   const list = contacts.filter(c => !start || c.td >= start.firstStep - 1e-6).sort((x, y) => x.td - y.td);
   const out = [];
-  for (const c of list) {
-    const prev = out.at(-1);
-    if (prev && c.td < prev.to) { if (c.to - c.td > prev.to - prev.td) out[out.length - 1] = c; continue; } // overlap: keep the longer
-    if (prev && prev.foot === c.foot) { if (c.to - c.td > prev.to - prev.td) out[out.length - 1] = c; continue; }
+  const longer = (x, y) => x.to - x.td > y.to - y.td;
+  // Head-on, the feet cross and each foot's finder also reads the other foot's stance. A second
+  // stance of the same foot that overlaps the next stance of the other foot is that ghost: length
+  // alone picked it once a toe-off moved by a frame (2026-11-21, clip 127755 lost its l 453).
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i], prev = out.at(-1), next = list[i + 1];
+    if (prev && c.td < prev.to) { if (longer(c, prev)) out[out.length - 1] = c; continue; } // overlap: keep the longer
+    if (prev && prev.foot === c.foot) {
+      if (next && next.foot !== c.foot && next.td < c.to) continue;   // a ghost on the next real stance
+      if (longer(c, prev)) out[out.length - 1] = c;
+      continue;
+    }
     out.push(c);
   }
   return out.map((c, i) => {
@@ -123,7 +131,7 @@ export function stepsOf(contacts, start) {
 // Bumped when the contact rule changes, so the phone knows which analyses to run again.
 // 3 (2026-11-18): the server keeps the phone's bob in the track's motion and fills a lost toe.
 // 4 (2026-11-18): 60 fps clips get their own thresholds (STANCE_60).
-export const SPRINT_ALGO = 5;
+export const SPRINT_ALGO = 6;
 const realToe = (motion, foot, a, b) => motion.slice(a, b + 1).some(m => m && m[foot] && !m[`${foot}f`]);
 export const STANCE = { T: 2.0, edge: 0.45, minLen: 5, wide: 3.2, xw: 1 };
 // 60 fps (2026-11-18, Stanley's runs of 4 July filmed at 60): the thresholds are speeds per 1/120 s
@@ -155,8 +163,9 @@ export function footStances(motion, foot, ts, fps, { T = STANCE.T, edge = STANCE
     // only when it is the stance and not a piece of it (a far foot's rule breaks into bits)
     let r = refineEdges(precise, motion, x, y);
     if (r && r.b - r.a < 0.7 * (motion[y].f + 1 - motion[x].f)) r = null;
-    const fb = r ? r.b : motion[y].f + 1, half = 0.5 / fps;
+    const half = 0.5 / fps;
     const fa = settleBack(motion, foot, r ? r.a : motion[x].f, fps, noise);
+    const fb = toeOff(motion, foot, fa, r ? r.b : motion[y].f + 1, fps);
     out.push({ foot, a: fa, b: fb, floor: m[k], td: ts[fa] - ts[0] - half, to: (ts[fb] ?? ts[fb - 1] + 1 / fps) - ts[0] + half });
   }
   return out;
@@ -177,6 +186,36 @@ function settleBack(motion, foot, fa, fps, noise = 1, o = SPRINT) {
   };
   let a = fa; while (fa - (a - 1) <= max && ok(a - 1)) a--;
   return a;
+}
+
+// The toe-off, from two misreads of the toe's patch (2026-11-21, every toe-off of 17 runs read
+// blind, the 34 that disagreed read again on 12-frame crops):
+//  - close and with the phone panning fast, the patch locks onto the track under a toe that is
+//    already rising: the stance ran 2-4 frames long. The pose's own toe point does rise, so from
+//    the stance's middle on the contact ends where that point climbs over TOE.trim %h a frame
+//    (120 fps only: at 60 the point jitters too much for it).
+//  - rolling off over the tip, the patch (centred behind the tip) climbs slowly while the tip is
+//    still down: the stance ended 2-3 frames early. Up to TOE.n frames that climb slowly (under
+//    TOE.roll %h a frame, the point not jumping either) still count.
+// 120 fps toe-offs within a frame of the hand: 171 -> 188 of 196; 60 fps 99 -> 100 of 104.
+export const TOE = { trim: 2, roll: 1.3, n: 2, jump: 1.2 };
+function toeOff(motion, foot, fa, fb, fps) {
+  const k = 120 / fps, byF = new Map(); for (const m of motion) if (m) byF.set(m.f, m);
+  const feat = f => {
+    const m = byF.get(f), n = byF.get(f + 1), t = m?.[foot];
+    if (!m || !t || !m.g || !m.h) return null;
+    const nt = n?.[foot], pt = t.length >= 5 && nt?.length >= 5;
+    return { vy: ((t[1] - m.g[1]) / m.h) * 100 * k, vx: ((t[0] - m.g[0]) / m.h) * 100 * k, ky: pt ? ((nt[4] - t[4] - m.g[1]) / m.h) * 100 * k : null };
+  };
+  let b = fb;
+  if (fps >= 90) for (let f = Math.round((fa + fb) / 2); f < fb; f++) { const q = feat(f); if (q?.ky != null && q.ky < -TOE.trim) { b = f; break; } }
+  for (let i = 0; i < TOE.n; i++) {
+    const q = feat(b);
+    // a tip still down does not slide along the track either (cut18 287: 6 %h a frame sideways)
+    if (!q || q.vy > 0.3 || q.vy < -TOE.roll * (fps < 90 ? 2 : 1) || (q.ky != null && q.ky < -TOE.jump) || (fps >= 90 && Math.abs(q.vx) > SPRINT.plantedX)) break;
+    b++;
+  }
+  return b;
 }
 
 // The edges of a stance found by its trough: the hand-checked rule's contact (vertical speed under

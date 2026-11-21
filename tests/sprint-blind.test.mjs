@@ -32,11 +32,13 @@ test('blind hand reads: touchdowns and toe-offs of every step', { skip: !have },
     }
   }
   const rate = a => a.filter(x => Math.abs(x) <= 1).length / a.length, mean = a => a.reduce((x, y) => x + y, 0) / a.length;
-  // 2026-11-21 with the settle rule: 120 fps TD 181/198 within a frame, mean +0.01; TO 154/188;
-  // 60 fps TD 78/93, TO 85/94. The floors leave a little room for the pose's run-to-run wobble.
-  assert.ok(rate(tally[120].td) >= 0.9, `120 fps touchdowns within a frame ${rate(tally[120].td)}`);
+  // 2026-11-21 with the settle and toe-off rules, every step found (shown or not): 120 fps TD 96 %
+  // within a frame, TO 96 %; 60 fps TD 90 %, TO 96 %; no bias either way. A second pose run of the
+  // same clips (T4) gave 95 / 95 / 88 / 94. The floors leave room for that run-to-run wobble.
+  assert.ok(rate(tally[120].td) >= 0.93, `120 fps touchdowns within a frame ${rate(tally[120].td)}`);
   assert.ok(Math.abs(mean(tally[120].td)) <= 0.25, `120 fps touchdown bias ${mean(tally[120].td)}`);
-  assert.ok(rate(tally[120].to) >= 0.85, `120 fps toe-offs within a frame ${rate(tally[120].to)}`);
-  assert.ok(rate(tally[60].td) >= 0.85, `60 fps touchdowns within a frame ${rate(tally[60].td)}`);
-  assert.ok(rate(tally[60].to) >= 0.9, `60 fps toe-offs within a frame ${rate(tally[60].to)}`);
+  assert.ok(rate(tally[120].to) >= 0.93, `120 fps toe-offs within a frame ${rate(tally[120].to)}`);
+  assert.ok(Math.abs(mean(tally[120].to)) <= 0.25, `120 fps toe-off bias ${mean(tally[120].to)}`);
+  assert.ok(rate(tally[60].td) >= 0.86, `60 fps touchdowns within a frame ${rate(tally[60].td)}`);
+  assert.ok(rate(tally[60].to) >= 0.93, `60 fps toe-offs within a frame ${rate(tally[60].to)}`);
 });

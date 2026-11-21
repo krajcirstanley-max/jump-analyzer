@@ -20,8 +20,11 @@ test('Stanley fly: contact about 0.1 s, not the 0.16 s it looks like by eye', ()
   for (const f of [713, 738, 765, 789, 816]) assert.ok(tds.some(t => Math.abs(t - f) <= 1), `touchdown near ${f}`);
   const a = analyzeSprint(v, { legs: [1.04, 1.01], lap: 2.05 }, { who: 'stanley' });
   near(a.freq, 4.66, 0.06, 'frequency'); // his own 4-step count for 18.10: 4.65
-  near(a.contact, 0.098, 0.01, 'contact');
-  near(a.flight, 0.118, 0.01, 'flight');
+  // This clip is also sp1795034127755 of the blind set (2026-11-21): its four Freelap-stretch steps
+  // read 13.3 frames on the ground on average (0.111 s) and flights of 0.100 s, so 0.098 / 0.118
+  // (one earlier reading) were a frame short on the ground and a frame long in the air.
+  near(a.contact, 0.111, 0.006, 'contact');
+  near(a.flight, 0.100, 0.008, 'flight');
   near(a.legStats[0].stepLength, 2.06, 0.03, 'step length 1st 10 m');
   near(a.legStats[1].stepLength, 2.12, 0.03, 'step length 2nd 10 m');
 });
