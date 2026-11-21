@@ -184,6 +184,13 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
       // a run-up keeps its own take-off rule (trustTakeoff: a run-through is the long flight, events.js)
       const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true, trustTakeoff: mode === 'rozbeh' });
       if (!pre.error) await runGround(pre);
+      // A run-up whose named take-off shows no runway (2026-11-21, IMG_5157: Claude named a step in the
+      // sand): the runway is measured again at the pose's own run-up pick, so the board cone is there for
+      // the phone to check the two against (rozbeh-view.js boardCone).
+      if (mode === 'rozbeh' && result.groundError && result.events?.TD != null) {
+        const own = analyzeJump({ ...fromWire(result), events: { kind: 'runthrough' } }, sex, meta.ts, { height, pb, preGround: true, trustTakeoff: true });
+        if (!own.error && Math.abs(own.takeoff.td - result.events.TD) > 6) { delete result.groundError; await runGround(own); }
+      }
     }
     onProgress?.({ stage: 'analysis', done: 0, total: 1 });
     // split: Freelap's 1-11 m time the phone paired with this clip (2026-11-20), as if typed

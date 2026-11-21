@@ -213,7 +213,15 @@ export const footOf = (i, len, who) => { const t = TAKEOFF_FOOT[who] ?? 'r'; ret
 
 export function rozbehNumbers(result, sex, height) {
   const res = { ...result, events: result?.events ? { ...result.events, kind: 'runthrough' } : result?.events };
-  const j = analyzeJump(res, sex, res.ts ?? null, { height, trustTakeoff: true });
+  let j = analyzeJump(res, sex, res.ts ?? null, { height, trustTakeoff: true });
+  // The board cone (0.2 m) is passed within about 0.1 s of the take-off touchdown. When the server's
+  // named take-off has no cone passing there but the pose's own run-up pick does, the pose's stands
+  // (2026-11-21, IMG_5157 with Claude: named 1178, a step in the sand; the pose and the cone: 1100).
+  const boardCone = jj => { if (jj.error || !result.ground?.cones) return null; const c = coneTimes(result.ground.cones, res.smooth, res.ts ?? [], { td: jj.takeoff?.td, sex }); return !c.error && c.crossings.some(x => x.cone === 0.2); };
+  if (!j.error && result.events?.TD != null && boardCone(j) === false) {
+    const j2 = analyzeJump({ ...res, events: { kind: 'runthrough' } }, sex, res.ts ?? null, { height, trustTakeoff: true });
+    if (boardCone(j2)) j = j2;
+  }
   if (j.error) return { error: j.error };
   const m = Object.fromEntries((j.metrics ?? []).map(x => [x.key, x.status === 'hidden' ? null : x.value]));
   const g = j.flight?.ground && !j.flight.ground.error ? j.flight.ground : null;
@@ -378,7 +386,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const run = runOf(rec), s = splitsWithVideo(run?.legs, rec.videoSplits);
     const form = `<details class="rb-type"${s ? '' : ' open'}><summary>${s ? 'Upraviť časy' : 'Zadať časy z Freelapu'}</summary>
       <div class="sp-g2">${[['21–11 m', 's21_11'], ['11–1 m', 's1_11']].map(([lb, k]) => `<label class="sp-cd"><span class="sp-lb">${lb}</span><input class="rb-in" inputmode="decimal" data-rb-leg="${k}" value="${s?.[k] != null ? num(s[k], 2) : ''}" placeholder="0,00"></label>`).join('')}</div>
-      <p class="note s">11–6 a 6–1 rozdelí appka z videa, keď je vo videu kužeľ na 6 m.</p>
+      <p class="note s">11–6 a 6–1 rozdelí appka z videa podľa klobúčika 5,2 m od dosky.</p>
       <button class="btn" data-rb-save="${esc(rec.id)}">Uložiť časy</button></details>`;
     if (!s) return card('Freelap · posledných 21 m', `<p class="note">K tomuto rozbehu sa nenašiel beh z Freelapu.</p>${form}`);
     const cells = s.s11_6 != null

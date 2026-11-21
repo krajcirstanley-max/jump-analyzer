@@ -4,7 +4,7 @@
 // every jump checked, so the take-off is picked from them by rule:
 //  - near the camera: the athlete's torso at least 0.7 of its largest size in the clip (the far
 //    steps are small and their centre of mass jitters, IMG_4954's first step rose "2.8")
-//  - the body thrown up right after the toe-off: the centre of mass rises at least 1.3 torso
+//  - the body thrown up right after the toe-off: the centre of mass rises at least 1.7 torso
 //    lengths a second over the next 6 frames. Checked on 21 jumps (bench, outdoor 19 Nov, box
 //    take-offs): every take-off 2.0-6.9, every other near step under 1.3 (most under 0.6)
 //  - not crouched: hips over the ankles at least 0.75 of the run's median (getting up in the sand)
@@ -16,7 +16,9 @@ import { centreOfMass, has, torsoLength, P } from '../js/analysis/kinematics.js'
 import { fromWire } from '../js/cloud.js';
 import { stepsOf } from './sprint.mjs';
 
-export const RISE_MIN = 1.3, NEAR_MIN = 0.7, CROUCH = 0.75;
+// RISE_MIN 1.7 (2026-11-21): a server run of Miška's run-through 5167 gave a step before the board 1.33
+// and took it; every take-off picked on 79 stored runs rose 2.0 or more.
+export const RISE_MIN = 1.7, NEAR_MIN = 0.7, CROUCH = 0.75;
 
 // steps: [{ td, to }] in seconds (sprintFromMotion). Returns { S, i }: every step with its frames
 // and measures, and the take-off's index (-1 if none).
