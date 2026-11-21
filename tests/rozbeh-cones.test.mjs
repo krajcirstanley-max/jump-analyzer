@@ -114,3 +114,12 @@ test('target shapes: own ratio, the 8 m group 0.97, a faster build-up 0.99, the 
   assert.ok(fast.rate1 > elite.rate1 && fast.ct1 < elite.ct1);
   assert.match(targetCard([1.08, 1.05], marks, steps, ts, 0.98, 'x', 'fast'), /Zhou a Kang/);
 });
+
+// The board contact (boardContact, 2026-11-22) against the blind reads of the board step: the pose alone
+// was 0.02 s short on average (up to 25 ms); now within 13 ms, 8 ms on average.
+const HAND_BOARD = { 5151: 0.146, 5152: 0.129, 5153: 0.142, 5154: 0.125, 5155: 0.104, 5156: 0.129, 5157: 0.104, 5158: 0.129 };
+test('board contact of the run-ups across the hall within 1.5 frames of the hand reads', { skip: !have }, () => {
+  const err = Object.keys(HAND_BOARD).map(id => nums(id).take.contact - HAND_BOARD[id]);
+  assert.ok(err.every(e => Math.abs(e) <= 0.014), err.map(e => Math.round(e * 1000)).join(' '));
+  assert.ok(err.reduce((a, e) => a + Math.abs(e), 0) / err.length <= 0.01);
+});

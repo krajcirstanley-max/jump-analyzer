@@ -9,11 +9,13 @@ import { NORMS } from './analysis/metrics.js';
 import { APPROVED_CUES } from './analysis/coach.js';
 import { pairRun } from './analysis/sprint.js';
 import { coneTimes } from './analysis/conetimes.js';
+import { rozbehTimeline, hudOverlay } from './hud.js';
+import { burnAndSave } from './burn.js';
 import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJump } from './cloud.js';
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 9;   // 9 (2026-11-21): sprint-pass step edges, cone passings at the hips; 8: cone marks read in the picture, the run-through take-off rule; 7: 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
+const RB_ALGO = 10;   // 10 (2026-11-22): overlay timing and cone places; 9 (2026-11-21): sprint-pass step edges, cone passings at the hips; 8: cone marks read in the picture, the run-through take-off rule; 7: 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -296,6 +298,17 @@ export function rhythmCard(steps, ts, who, total = RUNUP_STEPS) {
 export const TAKEOFF_FOOT = { stanley: 'r', miska: 'r' };
 export const footOf = (i, len, who) => { const t = TAKEOFF_FOOT[who] ?? 'r'; return (len - 1 - i) % 2 === 0 ? t : (t === 'r' ? 'l' : 'r'); };
 
+// The board contact of a run-up (2026-11-22, the eight across the hall against blind reads): the
+// pose's touchdown came 1-3 frames late and the contact 0.02 s short (0.083-0.142 against 0.104-0.146 s);
+// the sprint pass's toe-off was right on 6 of 7 and its touchdown 3 early to 2 late. The toe-off from the
+// sprint pass and the touchdown halfway between the two put all 7 within a frame of the hand reads.
+export function boardContact(j, motion, fallback) {
+  const td = j.takeoff?.td, m = Number.isInteger(td) ? (motion ?? []).filter(q => Math.abs(q[0] - td) <= 4).sort((a, b) => Math.abs(a[0] - td) - Math.abs(b[0] - td))[0] : null;
+  if (!m || !(m[1] > m[0])) return fallback;
+  const tdB = Math.round((m[0] + td) / 2);
+  return (m[1] - tdB + 1) / j.fps;
+}
+
 export function rozbehNumbers(result, sex, height) {
   const res = { ...result, events: result?.events ? { ...result.events, kind: 'runthrough' } : result?.events };
   let j = analyzeJump(res, sex, res.ts ?? null, { height, trustTakeoff: true });
@@ -311,13 +324,15 @@ export function rozbehNumbers(result, sex, height) {
   const m = Object.fromEntries((j.metrics ?? []).map(x => [x.key, x.status === 'hidden' ? null : x.value]));
   const g = j.flight?.ground && !j.flight.ground.error ? j.flight.ground : null;
   const sp = id => g?.steps?.find(s => s.id === id)?.speed ?? null;
+  const t0 = res.ts?.[0] ?? 0;
+  const ct = coneTimes(result.ground?.cones, res.smooth, res.ts ?? [], { td: j.takeoff?.td, sex });
   const back = withMotion(stepsBack(res.clean, res.first ?? 0, res.last ?? res.clean.length - 1, j.fps, { ...j.takeoff, foot: j.takeoffFoot }, j.pen, { backS: 3.4 }), result.motionSteps, j.fps);
   return {
     steps: back.map(r => ({ foot: r.foot, contact: r.contact, air: r.air, td: r.td, missing: !!r.missing })),
     ts: back.map(r => res.ts?.[r.td] ?? r.td / j.fps),
     stepCount: j.stepCount?.count ?? null, stepSeen: !!j.stepCount?.seen,
     pen: { contact: m.contactPen != null ? m.contactPen / 1000 : null, knee: m.penKnee },
-    take: { contact: m.contactTO != null ? m.contactTO / 1000 : null, kneeTD: m.kneeTD, kneeTO: m.kneeTO, angle: m.takeoffAngle },
+    take: { contact: boardContact(j, result.motionSteps, m.contactTO != null ? m.contactTO / 1000 : null), kneeTD: m.kneeTD, kneeTO: m.kneeTO, angle: m.takeoffAngle },
     speeds: g ? { third: sp('third'), pen: sp('pen'), take: sp('take') } : null,
     // 1-6 and 6-11 m only from a cone seen at the 6 m mark (ground.js): without one the mark came
     // out 1.8 m off on IMG_4677 (2026-11-14), too loose to split anything
@@ -326,7 +341,12 @@ export function rozbehNumbers(result, sex, height) {
     fiveM: g?.splits?.fiveM?.length ? g.splits.fiveM : null,
     // the cone marks read in the picture (2026-11-21: filmed across the hall the runway's metres
     // can't place the cones), the 5 m card's source whenever any were passed
-    marks: (() => { const c = coneTimes(result.ground?.cones, res.smooth, res.ts ?? [], { td: j.takeoff?.td, sex }); return c.error ? null : c.marks; })(),
+    marks: ct.error ? null : ct.marks,
+    // for the overlay (hud.js): the same moments from the clip's first frame, and each cone's place in
+    // the frames around its passing (frame pixels of the server's W)
+    overlay: ct.error ? null : { t0, W: result.W ?? null, marks: Object.fromEntries(Object.entries(ct.marks).map(([k, v]) => [k, +(v - t0).toFixed(4)])),
+      gates: ct.crossings.map(c => ({ mark: c.mark, at: (c.at ?? []).map(([i, x, y]) => [+((res.ts?.[i] ?? i / j.fps) - t0).toFixed(4), Math.round(x), Math.round(y)]) })) },
+    tdT: Number.isInteger(j.takeoff?.td) ? +(((res.ts?.[j.takeoff.td] ?? j.takeoff.td / j.fps) - t0)).toFixed(4) : null,
     frames: { penTD: j.pen?.td ?? null, TD: j.takeoff?.td ?? null, TO: j.takeoff?.to ?? null },
   };
 }
@@ -536,6 +556,19 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   }
 
   const fiveHtml = rec => fiveCard(runOf(rec)?.legs, rec.fiveM, rec.marks ?? null);
+  // The overlay on the video (hud.js): Freelap's clock through the cones, then the board panel. The
+  // ring is full for the fastest last 5 m of the athlete's run-ups that day.
+  const v61Of = r => { const L = runOf(r)?.legs; const p = fiveFromMarks(L, r.marks); return p.find(x => x.to === 6)?.v ?? (L?.length ? 10 / L.at(-1) : null); };
+  function hudTimeline(rec, k = 1) {
+    const legs = runOf(rec)?.legs ?? null, ov = rec.overlay ?? null, pieces = fiveFromMarks(legs, rec.marks);
+    const day = new Date(rec.at).toDateString();
+    const bestV = Math.max(...load().filter(r => r.who === rec.who && new Date(r.at).toDateString() === day && !r.pending && !r.error).map(v61Of).filter(Number.isFinite));
+    const p116 = pieces.find(x => x.to === 11 && x.from === 6), p61 = pieces.find(x => x.to === 6 && x.from === 1);
+    const d = p116 && p61 ? (p61.v / p116.v - 1) * 100 : null;
+    const verdict = d == null ? '' : Math.abs(d) < 1 ? 'drží rýchlosť do dosky' : d > 0 ? `zrýchľuje do dosky +${num(d, 1)} %` : `posledných 5 m −${num(-d, 1)} %`;
+    return rozbehTimeline({ legs, pieces, marks: ov?.marks ?? {}, tdT: rec.tdT, contact: rec.take?.contact, verdict, name: athletes[rec.who]?.name ?? '',
+      bestV: Number.isFinite(bestV) ? bestV : null, gates: (ov?.gates ?? []).map(g => ({ mark: g.mark, at: g.at.map(([t, x, y]) => [t, x * k, y * k]) })) });
+  }
   const TARGET_KEY = who => `jump.rbTarget.${who}`;
   const targetOf = rec => { try { return parseFloat(localStorage.getItem(TARGET_KEY(rec.who))) || null; } catch { return null; } };
   const shapeOf = rec => { try { return localStorage.getItem(`${TARGET_KEY(rec.who)}.shape`) || 'own'; } catch { return 'own'; } };
@@ -601,7 +634,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     if (rec) shownSig = `${!!rec.pending}|${rec.error ?? ''}|${(rec.typed ?? []).join(',')}`;
     if (!rec) { root.innerHTML = '<div class="card"><p class="note">Rozbeh sa nenašiel.</p></div>'; return; }
     const name = athletes[rec.who]?.name ?? '';
-    const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox player" data-rb-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div></section>` : '';
+    const burnBtn = rec.hasClip && !rec.pending && !rec.error ? `<button class="btn" data-rb-burn="${esc(rec.id)}">Uložiť video s overlay do Fotiek</button>` : '';
+    const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox player" data-rb-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>${burnBtn}</section>` : '';
     const state = rec.pending ? `<section class="card"><p class="note" data-rb-state>◌ ${esc(rec.stage ?? 'analýza beží')}… Video si môžeš pozrieť hneď, čísla sa doplnia samé.</p></section>`
       : rec.error ? `<section class="card"><p class="banner bad">${esc(rec.error)}</p><button class="btn" data-rb-retry="${esc(rec.id)}">Skúsiť znova</button></section>` : '';
     const n = runOf(rec)?.steps ?? RUNUP_STEPS;
@@ -609,6 +643,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       ${rec.pending || rec.error ? '' : commentHtml(rec) + freelapHtml(rec) + fiveHtml(rec) + targetHtml(rec) + rhythmHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
       <section class="card"><button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
     mountVideo(rec);
+    // typed Freelap times or a new reading change the overlay of the video already playing
+    if (player?.id === rec.id && player.hud) { player.hud.tl = hudTimeline(rec, player.hud.k); player.p?.player?.refresh?.(); }
     if (!rec.pending && !rec.error && rec.comment?.sig !== commentSig(rec) && !commenting.has(rec.id)) comment(rec);
   }
   async function mountVideo(rec) {
@@ -620,7 +656,10 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     box.innerHTML = '';
     try {
       const p = await makePlayer(box, blob);
-      player = { id: rec.id, el: box, p };
+      const src = p.player?.src, k = src?.width && rec.overlay?.W ? src.width / rec.overlay.W : 1;
+      const hud = { tl: hudTimeline(rec, k), k };
+      if (p.player?.overlays && src) p.player.overlays.push(hudOverlay(t => hud.tl(t), p.player, { W: src.width, H: src.height }));
+      player = { id: rec.id, el: box, p, hud };
       // opens at the last steps: the start of the clip is the far, empty run-up
       const at = rec.frames?.penTD ?? rec.frames?.TD;
       if (Number.isFinite(at)) await p.player?.show?.(Math.max(0, at - 90));
@@ -629,6 +668,12 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   const parse = s => { const v = parseFloat(String(s ?? '').replace(',', '.')); return Number.isFinite(v) && v > 0.3 && v < 3 ? v : null; };
   root.addEventListener('click', e => {
     // the target time: remembered per athlete, only the target card redrawn (the video keeps playing)
+    const bn = e.target.closest('[data-rb-burn]');
+    if (bn) {
+      const rec = load().find(x => x.id === bn.dataset.rbBurn);
+      if (rec) loadClip(rec.id).then(blob => { if (!blob) return alert('Video sa v telefóne nenašlo.'); return burnAndSave(bn, blob, hudTimeline(rec, 1), { serverW: rec.overlay?.W ?? null, name: 'rozbeh' }); });
+      return;
+    }
     const sp = e.target.closest('[data-rb-shape]');
     if (sp) {
       const rec = load().find(x => x.id === sp.dataset.rbTargetRec);

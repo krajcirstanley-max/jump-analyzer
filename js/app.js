@@ -24,6 +24,8 @@ import { initRecap, recapButtons } from './recap-view.js';
 import { CLOUD_URL } from './config.js';
 import { cloudReady, getCloudToken, setCloudToken, analyzeInCloud, enableNotifications, pendingCloudJob, resumeCloudJob, warmCloud, askAboutJump } from './cloud.js';
 import { whatIf, bestAngle } from './analysis/whatif.js';
+import { jumpTimeline, hudOverlay } from './hud.js';
+import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
@@ -426,7 +428,9 @@ async function analyzeFile(file) {
   return summaryOf(r);
 }
 
+let shownClip = null;   // the clip in the player, for the copy with the overlay burned in
 async function openPlayer(r, stillCurrent, blob = null) {
+  shownClip = blob;
   try {
     const src = new FrameSource(mb, r.track, r.packetTimestamps, r.keyTimestamps);
     if (!stillCurrent()) { src.dispose(); return; }
@@ -745,8 +749,44 @@ function setOverlays() {
     const ideal = best && !ok ? best : null;
     flightIdeal = best ? { frame: to, you: best.from, ideal: best.angle, gain: best.gain, ok } : null;
     player.overlays.push(flightOverlay(jump, pose, k, idealState, { com: kp && centreOfMass(kp, sex), idealCom: idTO?.kp ? centreOfMass(idTO.kp, sex) : null, ideal }));
+    // the jump's panel over the video (hud.js), the same as burned into the copy for Photos
+    player.overlays.push(hudOverlay(jumpTimeline(jumpHudData()), player, { W: player.src.width, H: player.src.height }, jumpHit));
+    hookRingTap();
   }
   syncIdeal(player.index);
+}
+// The copy for Photos with the jump's panel burned in, from the numbers of this moment (tape, Freelap).
+document.addEventListener('click', e => {
+  const b = e.target.closest('#res-burn');
+  if (!b || !shownClip || !jump || jump.error) return;
+  burnAndSave(b, shownClip, jumpTimeline(jumpHudData()), { name: 'skok' });
+});
+// What the jump's overlay shows: the tape when typed, else the estimate; Freelap's speed when paired.
+const jumpHit = { ring: null };
+function jumpHudData() {
+  const m = Object.fromEntries((jump.metrics ?? []).filter(x => x.status !== 'hidden').map(x => [x.key, x.value]));
+  const ts = player?.ts ?? [], at = i => (Number.isInteger(i) && ts[i] != null ? ts[i] - ts[0] : null);
+  const split = jump.split ?? null;
+  return { name: ATHLETES[resultAthlete ?? athlete]?.name ?? '', split, toT: at(jump.takeoff?.to), landT: at(jump.landing),
+    approach: split > 0 ? 10 / split : m.speedApproach ?? m.speedLast ?? null, contact: m.contactTO != null ? m.contactTO / 1000 : null,
+    angle: m.takeoffAngle ?? null, height: m.peakHeight ?? null, tape: jump.measured ?? null, est: m.estDistance ?? null, flight: m.flight != null ? m.flight / 1000 : null };
+}
+// A tap on the ring opens the tape field (Stanley, 2026-11-22: "musím vedieť prísť a zmeniť ten
+// odhad vzdialenosti"): a typed distance re-runs every number and the overlay with it.
+let ringHooked = null;
+function hookRingTap() {
+  const c = player?.canvas; if (!c || ringHooked === c) return;
+  ringHooked = c;
+  let down = null;
+  c.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+  c.addEventListener('pointerup', e => {
+    const r = jumpHit.ring; if (!r || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 8) return;
+    const box = c.getBoundingClientRect(), sx = c.width / box.width, sy = c.height / box.height;
+    const x = (e.clientX - box.left) * sx, y = (e.clientY - box.top) * sy;
+    if (x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) return;
+    const f = document.querySelector('[data-measured]');
+    if (f) { f.closest('details')?.setAttribute('open', ''); f.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => f.focus(), 350); }
+  });
 }
 
 function showJump() {

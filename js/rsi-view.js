@@ -2,6 +2,8 @@
 // names the drill, and the screen shows contact time, flight, jump height and both RSI forms.
 // Results are kept per athlete in this browser (numbers only, no video) for the trend. The server
 // tells who is in the clip (no athlete switch since 2026-11-12); a tap on the name moves a result.
+import { marksTimeline } from './hud.js';
+import { burnAndSave } from './burn.js';
 import { withPath, trimJump } from './viewcopy.js';
 import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 // 2: contact edges against the frames by hand, the stand's last piece on the box (2026-11-18)
@@ -204,7 +206,7 @@ function videoHtml(rec) {
   const b = bestOf(rec), n = rec.jumps?.length ?? 0;
   const strip = n > 1 ? `<div class="rsi-strip">${rec.jumps.map((j, k) => `<span data-k="${k}"${j === b ? ' class="best"' : ''}></span>`).join('')}</div>` : '';
   return `<div class="sp-video rsi-video"><div class="sp-vbox player rsi-player" data-rsi-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
-    ${rec.pending ? `<span class="pd-chip">${rec.error ? '⚠ analýza zlyhala' : '◌ analýza beží'}</span>` : '<div class="rsi-ov hidden"></div>'}${strip}</div>${HAS_PLAYER ? '' : RATES}`;
+    ${rec.pending ? `<span class="pd-chip">${rec.error ? '⚠ analýza zlyhala' : '◌ analýza beží'}</span>` : '<div class="rsi-ov hidden"></div>'}${strip}</div>${HAS_PLAYER ? '' : RATES}${!rec.pending && rec.marks?.length ? `<button class="btn" data-rsi-burn="${esc(rec.id)}">Uložiť video s overlay do Fotiek</button>` : ''}`;
 }
 // The scoreboard over the video: height left, contact right, RSI in the ring (full = the best).
 const RING = 2 * Math.PI * 44;
@@ -355,6 +357,13 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
     show(rec, who); renderHistory();
   });
   root.addEventListener('click', e => {
+    // the scoreboard burned into a copy for Photos (an RSI clip filmed in the app already has it)
+    const bn = e.target.closest('[data-rsi-burn]');
+    if (bn) {
+      const rec = Object.keys(athletes).flatMap(a => load(a)).find(r => r.id === bn.dataset.rsiBurn);
+      if (rec && loadClip) loadClip(rec.id).then(blob => { if (!blob) return alert('Video sa v telefóne nenašlo.'); return burnAndSave(bn, blob, marksTimeline(rec.marks), { name: 'rsi' }); });
+      return;
+    }
     const rt = e.target.closest('[data-rate]');
     if (rt) {
       live?.rate?.(+rt.dataset.rate);

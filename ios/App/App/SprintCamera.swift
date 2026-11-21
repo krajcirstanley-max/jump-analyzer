@@ -52,6 +52,7 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "trimJump", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "trimRange", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "keepAwake", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveChunk", returnType: CAPPluginReturnPromise),
     ]
     private weak var recorder: RecorderViewController?
     private var galleryDelegate: GalleryPickerDelegate?
@@ -185,6 +186,29 @@ public class SprintCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         }.resume()
+    }
+
+    /// A video made in the page (the overlay burned in, js/burn.js) into Photos, in pieces: the page
+    /// sends it as base64 slices with one id; the last slice saves the file to Photos and removes it
+    /// (2026-11-22, Stanley: overlay "aj vypálené v galérii"). Resolves { saved: true } on the last.
+    @objc func saveChunk(_ call: CAPPluginCall) {
+        guard let id = call.getString("id"), id.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil,
+              let b64 = call.getString("data"), let data = Data(base64Encoded: b64) else { call.reject("Bad chunk"); return }
+        let last = call.getBool("last") ?? false
+        let dst = FileManager.default.temporaryDirectory.appendingPathComponent("burn-\(id).mp4")
+        do {
+            if call.getBool("first") ?? false { try? FileManager.default.removeItem(at: dst) }
+            if !FileManager.default.fileExists(atPath: dst.path) { FileManager.default.createFile(atPath: dst.path, contents: nil) }
+            let h = try FileHandle(forWritingTo: dst); h.seekToEndOfFile(); h.write(data); try h.close()
+        } catch { call.reject("Video sa nepodarilo zapísať"); return }
+        if !last { call.resolve(["ok": true]); return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { try? FileManager.default.removeItem(at: dst); call.reject("Appka nemá prístup k Fotkám"); return }
+            PHPhotoLibrary.shared().performChanges({ PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: dst, options: nil) }) { ok, e in
+                try? FileManager.default.removeItem(at: dst)
+                if ok { call.resolve(["saved": true]) } else { call.reject(e?.localizedDescription ?? "Video sa nepodarilo uložiť") }
+            }
+        }
     }
 
     /// A Freelap run: a new one, or the same run again with its intermediate.

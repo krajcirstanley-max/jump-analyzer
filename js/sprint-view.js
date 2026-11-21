@@ -11,6 +11,8 @@ import { withPath, trimRange } from './viewcopy.js';
 import { CHIPS } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { legsFormHtml, readLegs } from './freelap-view.js';
+import { sprintTimeline, hudOverlay } from './hud.js';
+import { burnAndSave } from './burn.js';
 import { sprintAdvice, runSummary } from './analysis/sprint-advice.js';
 import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 import { analyzeSprint, pairRun, modeOfRun, runMetres, cleanSteps, SPRINT_ALGO } from './analysis/sprint.js';
@@ -453,6 +455,13 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         const made = await makePlayer(box, blob);
         if (live !== mine || !box.isConnected) { made.player?.dispose?.(); made.input?.dispose?.(); return; }
         Object.assign(mine, made);
+        // Freelap over an uploaded clip (filmed in the app it is already burned in: finishAt heard)
+        const { run, a } = view(rec);
+        if (run && rec.video?.finishAt == null && made.player?.overlays && made.player.src) {
+          const legs = cleanLegs(run).legs, zero = a?.kind === 'accel' ? rec.video?.start?.release ?? null : null;
+          made.player.overlays.push(hudOverlay(sprintTimeline({ legs, lap: run.lap, zero, name: name(run) }), made.player, { W: made.player.src.width, H: made.player.src.height }));
+          made.player.refresh?.();
+        }
         box.closest('section')?.querySelector('.sp-rate')?.classList.add('hidden');   // the player has its own speeds
         return;
       } catch (e) { console.warn('Sprint clip: own player failed', e); box.classList.remove('player'); }
@@ -471,7 +480,10 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     now.innerHTML = clipUrl ? `<video src="${clipUrl}" controls playsinline muted preload="metadata"></video>` : '<p class="note">Video sa nenašlo v telefóne.</p>';
   }
 
-  const delHtml = rec => `<button class="btn danger" data-sp-del="${esc(rec.id)}">Zmazať beh</button>`;
+  // the copy for Photos with Freelap burned in: only for a clip from the gallery (one filmed in the app
+  // was written with it already)
+  const burnTl = rec => { const { run, a } = view(rec); return run && rec.video?.finishAt == null ? sprintTimeline({ legs: cleanLegs(run).legs, lap: run.lap, zero: a?.kind === 'accel' ? rec.video?.start?.release ?? null : null, name: name(run) }) : null; };
+  const delHtml = rec => `${rec.hasClip && !rec.pending && burnTl(rec) ? `<button class="btn" data-sp-burn="${esc(rec.id)}">Uložiť video s overlay do Fotiek</button>` : ''}<button class="btn danger" data-sp-del="${esc(rec.id)}">Zmazať beh</button>`;
   function remove(id) {
     const list = load(), r = list.find(x => x.id === id);
     if (!r) return;
@@ -482,6 +494,12 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     draw(); onDeleted(r);
   }
   root.addEventListener('click', e => {
+    const bn = e.target.closest('[data-sp-burn]');
+    if (bn) {
+      const rec = load().find(x => x.id === bn.dataset.spBurn), tl = rec && burnTl(rec);
+      if (tl && loadClip) loadClip(rec.id).then(blob => { if (!blob) return alert('Video sa v telefóne nenašlo.'); return burnAndSave(bn, blob, tl, { name: 'sprint' }); });
+      return;
+    }
     const del = e.target.closest('[data-sp-del]');
     if (del) { if (armOrGo(del)) remove(del.dataset.spDel); return; }
     if (e.target.closest('[data-sp="film"]')) return film();
