@@ -4,7 +4,7 @@
 // jump job and reads the answer with the same analyzeJump, as a run-through. Freelap gives the
 // splits (cones 1 · 6 · 11 · 21 m from the board), the video the steps and the take-off.
 import { analyzeJump } from './analysis/jump.js';
-import { detectContacts } from './analysis/events.js';
+import { detectContacts, approachToeOffs } from './analysis/events.js';
 import { NORMS } from './analysis/metrics.js';
 import { APPROVED_CUES } from './analysis/coach.js';
 import { pairRun } from './analysis/sprint.js';
@@ -12,7 +12,7 @@ import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJu
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 5;
+const RB_ALGO = 6;   // 6 (2026-11-21): run-up toe-offs at the toe peak, split stances merged
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -41,7 +41,8 @@ export function splitsOf(legs) {
 // `backS` seconds before the take-off (the Freelap zone). A single short miss had cut every step
 // before it from the jump timeline (2026-11-19, IMG_4656: 3 of about 9 steps shown).
 export function stepsBack(clean, first, last, fps, takeoff, pen, { backS = 2.6 } = {}) {
-  const raw = detectContacts(clean, first, last, fps).filter(c => c.to >= c.td && c.td < takeoff.td - 2).sort((a, b) => a.td - b.td);
+  // the run-up's own toe-offs as in Skok (approachToeOffs: the toe's peak, not the frame before)
+  const raw = approachToeOffs(detectContacts(clean, first, last, fps), [pen, takeoff], fps).filter(c => c.to >= c.td && c.td < takeoff.td - 2).sort((a, b) => a.td - b.td);
   const cs = [];
   for (const c of raw) { const p = cs.at(-1); if (p && c.td <= p.to + 1) { if (c.to - c.td > p.to - p.td) cs[cs.length - 1] = c; continue; } cs.push(c); }
   // the running rhythm from the contacts of the last 2.5 s (one pair can be wrong: IMG_4658's pen and
