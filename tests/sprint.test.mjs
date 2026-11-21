@@ -31,7 +31,9 @@ test('Miška accel: first step, timer zero, steps per 10 m, contacts shortening'
   const v = sprintFromMotion({ motion: m.motion, ts: m.ts, fps: m.fps });
   assert.equal(v.modeGuess, 'accel');
   const hand = [1192, 1230, 1261, 1292, 1323, 1352, 1381, 1409, 1440, 1468, 1497, 1525, 1555];
-  hand.forEach((f, i) => near(v.steps[i].frames[0], f, 1.5, `touchdown ${i + 1}`));
+  // ±2: read by eye in one pass (2026-11-13); the settle rule (2026-11-21, 198 blind reads) takes
+  // touchdowns up to a frame earlier, and the clip is not here to read again
+  hand.forEach((f, i) => near(v.steps[i].frames[0], f, 2, `touchdown ${i + 1}`));
   near(v.start.release * m.fps, 1150, 3, 'Touch Pro release frame (hand off 1148-1153)');
   const a = analyzeSprint(v, { legs: [1.99, 1.3], lap: 3.29 }, { who: 'miska' });
   assert.equal(a.kind, 'accel');
@@ -129,7 +131,8 @@ test('far and near: every stance of a panned fly, alternating, a running stride 
   for (const f of [574, 598, 626, 654, 678, 700, 730, 755, 782, 807, 833, 858, 886, 911, 943, 970]) assert.ok(tds.some(t => Math.abs(t - f) <= 2), `stance near ${f}`);
   const run = v.steps.filter(s => s.frames[0] >= 570 && s.frames[0] <= 975);
   assert.ok(run.every((s, i) => i === 0 || s.foot !== run[i - 1].foot), 'feet alternate');
-  assert.ok(run.every(s => s.contact >= 0.075 && s.contact <= 0.115), 'contacts 0.08-0.11 s');
+  // up to 0.125: the touchdown a frame earlier since the settle rule (2026-11-21)
+  assert.ok(run.every(s => s.contact >= 0.075 && s.contact <= 0.125), 'contacts 0.08-0.12 s');
   const m2 = load('1311');
   const t2 = sprintFromMotion({ motion: m2.motion, ts: m2.ts, fps: m2.fps }).steps.map(s => s.frames[0]);
   for (const f of [414, 443, 472, 672, 702, 730, 759, 786, 815, 843, 872]) assert.ok(t2.some(t => Math.abs(t - f) <= 3), `Miška stance near ${f}`);

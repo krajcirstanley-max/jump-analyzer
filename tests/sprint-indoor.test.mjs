@@ -12,7 +12,8 @@ const dir = new URL('./real/sprint18b/', import.meta.url);
 const load = id => JSON.parse(readFileSync(new URL(`${id}.dump.json`, dir)));
 // id: [foot, touchdown, toe-off (null where the foot left the picture)]
 const HAND = {
-  sp1795034127755: [['l', 455, 466], ['l', 662, 672]],
+  // 453: re-read 2026-11-21 (blind 452/453, then by me 453/454: the sole meets its shadow at 453); 455 was late
+  sp1795034127755: [['l', 453, 466], ['l', 662, 672]],
   sp1795034149961: [['l', 317, 331], ['l', 565, 577]],
   sp1795034174256: [['l', 594, 604], ['r', 987, 996]],
   sp1795034200508: [['r', 652, 663], ['r', 1053, null]],
@@ -22,7 +23,7 @@ const HAND = {
   // two more of the same evening (22:07); Miška's r 604-616 far away during a pan reads 612-617 and
   // is left out of the clean steps, so it is not held here
   sp1795036029184: [['l', 692, 704]],
-  sp1795036059832: [['l', 707, 715], ['r', 833, 842]],
+  sp1795036059832: [['l', 705, 715], ['r', 833, 842]],   // 705: the blind re-read of 2026-11-21 (was 707)
 };
 const have = Object.keys(HAND).every(id => existsSync(new URL(`${id}.dump.json`, dir)));
 

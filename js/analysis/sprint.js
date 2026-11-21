@@ -123,7 +123,7 @@ export function stepsOf(contacts, start) {
 // Bumped when the contact rule changes, so the phone knows which analyses to run again.
 // 3 (2026-11-18): the server keeps the phone's bob in the track's motion and fills a lost toe.
 // 4 (2026-11-18): 60 fps clips get their own thresholds (STANCE_60).
-export const SPRINT_ALGO = 4;
+export const SPRINT_ALGO = 5;
 const realToe = (motion, foot, a, b) => motion.slice(a, b + 1).some(m => m && m[foot] && !m[`${foot}f`]);
 export const STANCE = { T: 2.0, edge: 0.45, minLen: 5, wide: 3.2, xw: 1 };
 // 60 fps (2026-11-18, Stanley's runs of 4 July filmed at 60): the thresholds are speeds per 1/120 s
@@ -155,10 +155,28 @@ export function footStances(motion, foot, ts, fps, { T = STANCE.T, edge = STANCE
     // only when it is the stance and not a piece of it (a far foot's rule breaks into bits)
     let r = refineEdges(precise, motion, x, y);
     if (r && r.b - r.a < 0.7 * (motion[y].f + 1 - motion[x].f)) r = null;
-    const fa = r ? r.a : motion[x].f, fb = r ? r.b : motion[y].f + 1, half = 0.5 / fps;
+    const fb = r ? r.b : motion[y].f + 1, half = 0.5 / fps;
+    const fa = settleBack(motion, foot, r ? r.a : motion[x].f, fps, noise);
     out.push({ foot, a: fa, b: fb, floor: m[k], td: ts[fa] - ts[0] - half, to: (ts[fb] ?? ts[fb - 1] + 1 / fps) - ts[0] + half });
   }
   return out;
+}
+
+// The toe still settles for a frame or two after the shoe has landed (the foot rolls flat), so
+// the strict rule finds the touchdown late. Frames just before it whose toe moves under
+// SETTLE.k times the planted limit, at most SETTLE.back s, belong to the stance.
+export const SETTLE = { k: 3, back: 0.009 };
+function settleBack(motion, foot, fa, fps, noise = 1, o = SPRINT) {
+  const max = Math.round(SETTLE.back * fps);
+  if (!max || SETTLE.k <= 1) return fa;
+  const kk = 120 / fps, byF = new Map(); for (const m of motion) if (m) byF.set(m.f, m);
+  const ok = f => {
+    const m = byF.get(f); if (!m || !m.g || !m[foot]) return false;
+    const lim = SETTLE.k * Math.max(o.planted * noise, ((0.6 * noise) / m.h) * 100 * kk);
+    return Math.abs(((m[foot][1] - m.g[1]) / m.h) * 100 * kk) <= lim && Math.abs(((m[foot][0] - m.g[0]) / m.h) * 100 * kk) <= o.plantedX;
+  };
+  let a = fa; while (fa - (a - 1) <= max && ok(a - 1)) a--;
+  return a;
 }
 
 // The edges of a stance found by its trough: the hand-checked rule's contact (vertical speed under
