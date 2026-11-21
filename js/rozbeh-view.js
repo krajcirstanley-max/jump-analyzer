@@ -12,7 +12,7 @@ import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJu
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 6;   // 6 (2026-11-21): run-up toe-offs at the toe peak, split stances merged
+const RB_ALGO = 7;   // 7 (2026-11-21): 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -87,6 +87,75 @@ export function splitSteps(steps, ts, splits) {
   });
 }
 
+// The run-up in 5 m pieces (2026-11-21, Stanley: "či každým krokom zrýchľujem alebo nie, či sa niekde
+// nedrží rýchlosť"): the video's cone crossings, put on Freelap's clock where Freelap timed the 10 m
+// they split (21-11 and 11-1: the video only says how the 10 m divides). 21-26 m and any piece
+// without a Freelap leg keep the video's own time (about 1-2 % on the 1-11 m checked against Freelap).
+export function fiveMeters(legs, fiveM) {
+  const L = (legs ?? []).filter(Number.isFinite), f = splitsOf(L);
+  const out = (fiveM ?? []).filter(x => x.to - x.from === 5 && x.s > 0).map(x => ({ ...x, v: 5 / x.s, src: 'video' }));
+  for (const [lo, hi, F] of [[1, 11, f?.s1_11], [11, 21, f?.s21_11]]) {
+    const h = out.filter(x => x.from >= lo && x.to <= hi);
+    if (h.length !== 2 || !(F > 0)) continue;
+    const sum = h[0].s + h[1].s;
+    for (const x of h) { x.s = F * x.s / sum; x.v = 5 / x.s; x.src = 'freelap'; }
+  }
+  return out.sort((a, b) => b.from - a.from);   // far to near, the order he runs it
+}
+
+// Left against right foot over the run-up the video saw, the last three steps left out (they are
+// shaped for the take-off). Steps are named from the take-off foot back. In 13 of Stanley's 16
+// stored run-ups the step off the right foot was longer: 292 against 271 ms, the flight after it
+// 152 against 122 ms (2026-11-21).
+export function rhythmOf(steps, ts, who) {
+  const L = steps?.length ?? 0;
+  if (L < 6 || !ts?.length) return null;
+  const rows = steps.map((st, i) => ({ i, foot: footOf(i, L, who), step: i < L - 1 && !st.missing && !steps[i + 1].missing ? ts[i + 1] - ts[i] : null,
+    contact: st.missing ? null : st.contact, air: st.missing || i === L - 1 ? null : st.air, fromBoard: L - 1 - i }));
+  const side = f => { const r = rows.filter(x => x.foot === f && x.fromBoard > 3 && x.step != null); const av = k => { const v = r.map(x => x[k]).filter(Number.isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }; return { n: r.length, step: av('step'), contact: av('contact'), air: av('air') }; };
+  const R = side('r'), Lf = side('l');
+  return { rows, r: R, l: Lf, enough: R.n >= 2 && Lf.n >= 2 };
+}
+
+const rbCard = (title, body) => `<section class="card sp-card"><h2>${title}</h2>${body}</section>`;
+// Speed in 5 m pieces, far to near, with the change from one piece to the next.
+export function fiveCard(legs, fiveM) {
+  const parts = fiveMeters(legs, fiveM);
+  if (!parts.length) return rbCard('Rýchlosť po 5 m', '<p class="note">Appka potrebuje vo videu kužele každých 5 m: k 1, 11 a 21 m (Freelap) obyčajné kužele na 6, 16 a 26 m. Rýchlosť medzi dvoma kužeľmi zmeria z videa.</p>');
+  const top = Math.max(...parts.map(p => p.v)), low = Math.min(...parts.map(p => p.v));
+  const rows = parts.map((p, n) => {
+    const prev = parts[n - 1], d = prev ? (p.v / prev.v - 1) * 100 : null;
+    return `<div class="sp-row rb-row${p.v === top ? ' hl' : ''}"><span style="width:76px">${p.to}–${p.from} m</span>
+      <span class="sp-bar"><span class="c" style="width:${(14 + (top > low ? (p.v - low) / (top - low) : 1) * 66).toFixed(0)}px"></span></span>
+      <span class="sp-n" style="width:72px"><b>${num(p.v, 2)}</b> m/s</span><span class="sp-n" style="width:56px">${num(p.s, 2)} s</span>
+      <span class="sp-n" style="width:64px">${d == null ? '' : `<span class="chg ${d >= 0.5 ? 'up' : d <= -0.5 ? 'down' : ''}">${d >= 0 ? '+' : '−'}${num(Math.abs(d), 1)} %</span>`}</span></div>`;
+  }).join('');
+  const peak = parts.findIndex(p => p.v === top), after = parts.slice(peak + 1);
+  const say = after.length && after.at(-1).v < top * 0.99
+    ? `Najrýchlejší úsek ${parts[peak].to}–${parts[peak].from} m, potom ${num((1 - after.at(-1).v / top) * 100, 1)} % pomalšie do dosky.`
+    : peak === parts.length - 1 ? 'Zrýchľuješ až do posledného úseku pred doskou.' : 'Rýchlosť drží až do dosky.';
+  const src = parts.some(p => p.src === 'freelap') ? 'Úseky v 10 m Freelapu: čas z Freelapu, rozdelený podľa prechodu okolo kužeľa vo videu. Ostatné z videa (±1–2 %).' : 'Čas z prechodu okolo kužeľov vo videu (±1–2 %).';
+  return rbCard('Rýchlosť po 5 m', `${rows}<p class="note s">${say}</p><p class="note s">${src}</p>`);
+}
+// Every step the video saw: which foot, the step time, the contact and the flight; then right
+// against left over the run-up before the last three steps.
+export function rhythmCard(steps, ts, who, total = RUNUP_STEPS) {
+  const R = rhythmOf(steps, ts, who);
+  if (!R) return '';
+  const ms = x => (Number.isFinite(x) ? Math.round(x * 1000) : '–');
+  const rows = R.rows.map(r => `<div class="sp-row rb-row${r.fromBoard <= 3 ? ' dim' : ''}"><span class="sp-i">${total - r.fromBoard}</span><span class="sp-f">${FOOT[r.foot]}</span>
+    <span class="sp-n">${ms(r.step)}</span><span class="sp-n">${ms(r.contact)}</span><span class="sp-n">${r.fromBoard === 0 ? 'odraz' : ms(r.air)}</span></div>`).join('');
+  const sideTxt = (lb, x) => `${lb}: krok <b>${ms(x.step)}</b> ms · zem ${ms(x.contact)} · let ${ms(x.air)}`;
+  const diff = R.enough ? R.r.step - R.l.step : null;
+  const verdict = diff == null ? 'Na porovnanie treba aspoň 2 kroky z každej nohy pred poslednými tromi.'
+    : Math.abs(diff) < 0.008 ? 'Rytmus je vyrovnaný (rozdiel pod 1 snímku).'
+    : `Krok z ${diff > 0 ? 'pravej' : 'ľavej'} je dlhší o ${Math.round(Math.abs(diff) * 1000)} ms (${num(Math.abs(diff) / ((R.r.step + R.l.step) / 2) * 100, 0)} %)${Number.isFinite(R.r.air) && Number.isFinite(R.l.air) ? `, let po ${R.r.air > R.l.air ? 'pravej' : 'ľavej'} o ${Math.round(Math.abs(R.r.air - R.l.air) * 1000)} ms dlhší` : ''}.`;
+  return rbCard('Rytmus ľavá / pravá', `<div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-n">krok</span><span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}
+    ${R.enough ? `<p class="note s">${sideTxt('Pravá', R.r)}<br>${sideTxt('Ľavá', R.l)}</p>` : ''}<p class="note s">${verdict}</p>
+    <p class="note s">Kroky od odrazu z pravej dozadu; posledné 3 (sivé) sa do porovnania nerátajú. Časy v ms, každý dotyk ±1 snímka (±8 ms).</p>`);
+}
+
+
 // Both athletes take off from the right foot (Stanley 2026-11-19: "odraz je z pravej"); the pose
 // swaps left and right in a side view, so the feet are named from the take-off back, alternating.
 export const TAKEOFF_FOOT = { stanley: 'r', miska: 'r' };
@@ -99,7 +168,7 @@ export function rozbehNumbers(result, sex, height) {
   const m = Object.fromEntries((j.metrics ?? []).map(x => [x.key, x.status === 'hidden' ? null : x.value]));
   const g = j.flight?.ground && !j.flight.ground.error ? j.flight.ground : null;
   const sp = id => g?.steps?.find(s => s.id === id)?.speed ?? null;
-  const back = stepsBack(res.clean, res.first ?? 0, res.last ?? res.clean.length - 1, j.fps, { ...j.takeoff, foot: j.takeoffFoot }, j.pen);
+  const back = stepsBack(res.clean, res.first ?? 0, res.last ?? res.clean.length - 1, j.fps, { ...j.takeoff, foot: j.takeoffFoot }, j.pen, { backS: 3.4 });
   return {
     steps: back.map(r => ({ foot: r.foot, contact: r.contact, air: r.air, td: r.td, missing: !!r.missing })),
     ts: back.map(r => res.ts?.[r.td] ?? r.td / j.fps),
@@ -110,6 +179,8 @@ export function rozbehNumbers(result, sex, height) {
     // 1-6 and 6-11 m only from a cone seen at the 6 m mark (ground.js): without one the mark came
     // out 1.8 m off on IMG_4677 (2026-11-14), too loose to split anything
     videoSplits: g?.splits?.s1to6 != null && g?.splits?.s6to11 != null ? { s1to6: g.splits.s1to6, s6to11: g.splits.s6to11 } : null,
+    // 5 m (and 10 m) times between neighbouring cones as the video saw the hip pass them
+    fiveM: g?.splits?.fiveM?.length ? g.splits.fiveM : null,
     frames: { penTD: j.pen?.td ?? null, TD: j.takeoff?.td ?? null, TO: j.takeoff?.to ?? null },
   };
 }
@@ -318,6 +389,9 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       <p class="note s">Rozbeh ${L.total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${L.total} odraz, ${L.total - 1} predposledný. Zem a let ±0,01 s. Dĺžka kroku z rýchlosti Freelapu v úseku${L.sp ? '' : ' (bez Freelapu len z rýchlosti dráhy, ak ju appka zmerala)'}.</p>`);
   }
 
+  const fiveHtml = rec => fiveCard(runOf(rec)?.legs, rec.fiveM);
+  const rhythmHtml = rec => rhythmCard(rec.steps, rec.ts, rec.who, runOf(rec)?.steps ?? RUNUP_STEPS);
+
   // ---------- comment ----------
   // Claude's comment on the run-up (2026-11-19, Stanley: "koment od Clauda že čo je problém"): the
   // numbers go to the server's chat with the run-up rules (server/chat.py RUNUP_SYSTEM), the text is
@@ -382,7 +456,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       : rec.error ? `<section class="card"><p class="banner bad">${esc(rec.error)}</p><button class="btn" data-rb-retry="${esc(rec.id)}">Skúsiť znova</button></section>` : '';
     const n = runOf(rec)?.steps ?? RUNUP_STEPS;
     root.innerHTML = `<h2 class="ath-name">${esc(name)}${name ? ' · ' : ''}rozbeh${n ? ` ${n} kr.` : ''}</h2>${video}${state}
-      ${rec.pending || rec.error ? '' : commentHtml(rec) + freelapHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
+      ${rec.pending || rec.error ? '' : commentHtml(rec) + freelapHtml(rec) + fiveHtml(rec) + rhythmHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
       <section class="card"><button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
     mountVideo(rec);
     if (!rec.pending && !rec.error && rec.comment?.sig !== commentSig(rec) && !commenting.has(rec.id)) comment(rec);

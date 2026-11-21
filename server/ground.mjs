@@ -490,7 +490,7 @@ export function detectCones(rgba, W, H, { box = null, y0 = 0 } = {}) {
 // frames: openFrames() handle. track: smoothed keypoints. jump: analyzeJump() output (takeoff,
 // takeoffFoot, pen, landing, dir). boxes: the athlete's box per frame. Returns
 // { frames: { [i]: [sandFar, sandNear, lineFar, lineNear] }, ref, ... } or { error }.
-export async function measureGround({ frames, track, jump, boxes }) {
+export async function measureGround({ frames, track, jump, boxes, backS = 1.7 }) {
   const t0 = Date.now();
   const { W, H, N } = frames, T = jump.takeoff, s = jump.takeoffFoot, dir = jump.dir;
   // From before the 3rd-last step: the last three steps are measured on the ground.
@@ -500,7 +500,10 @@ export async function measureGround({ frames, track, jump, boxes }) {
   const fps = frames.fps || 120;
   // (2.6 s was tried for the 20.2 m cone: the tracking error on IMG_4677 rose from 1.3 to 2.2 px
   // and moved the jump by 9 cm, and IMG_4658 still gave no 11-21 m time.)
-  const from = Math.max(0, Math.min((jump.third?.td ?? (jump.pen?.td ?? T.td - 30) - 35) - 12, T.td - Math.round(1.7 * fps)));
+  // backS: Rozbeh asks for 3.4 s (2026-11-21, Stanley: "posledných 20 m každým krokom"), so the cones
+  // at 16, 21 and 26 m come into the tracked span; a run-up never lands, so the jump's metres that a
+  // longer span disturbed (below) are not at stake there.
+  const from = Math.max(0, Math.min((jump.third?.td ?? (jump.pen?.td ?? T.td - 30) - 35) - 12, T.td - Math.round(backS * fps)));
   const to = Math.min(N - 1, (jump.landing ?? T.to + 90) + 6);
   const want = []; for (let i = from; i <= to; i++) want.push(i);
   // threaded (server): only the contact and the frames after it are looked at here, the rest on the

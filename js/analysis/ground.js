@@ -39,10 +39,12 @@ function coneClusters(conesByFrame, H, boardM, zeroM = boardM) {
   for (const g of groups) {
     if (g.length < 3) continue;
     const x = median(g.map(o => o.x));
-    // a cone half-way, 5.2 m from the line (the 6 m mark, Berlin 2009's middle photocell)
-    if (Math.abs(x - (zeroM + 5.2)) <= 0.8) { if (!best[0.5] || g.length > best[0.5].obs.length) best[0.5] = { k: 0.5, x, obs: g }; continue; }
-    const k = Math.round((x - zeroM - 0.2) / 10);
-    if (k < 0 || k > 2 || Math.abs(x - (zeroM + 0.2 + 10 * k)) > 0.8 + 1.2 * k) continue;
+    // every 5 m from the 1 m cone: 1, 6, 11, 16, 21, 26 m (k 0 ... 2.5). The 6 m mark is Berlin 2009's
+    // middle photocell; 16 and 26 m are plain cones for 5 m splits (2026-11-21, Stanley: "či sa niekde
+    // nedrží rýchlosť"). The half-way marks keep the tight window, the Freelap ones widen with distance.
+    const k = Math.round((x - zeroM - 0.2) / 5) / 2;
+    const tol = Number.isInteger(k) ? 0.8 + 1.2 * k : k === 0.5 ? 0.8 : 0.8 + 0.6 * k;
+    if (k < 0 || k > 2.5 || Math.abs(x - (zeroM + 0.2 + 10 * k)) > tol) continue;
     if (!best[k] || g.length > best[k].obs.length) best[k] = { k, x, obs: g };
   }
   // From far away the board's 2 m ruler stretches with distance: on IMG_4658 (filmed across the
@@ -341,6 +343,27 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   // homography the mark landed 1.8 m away from where the far cone put it on IMG_4677, and the
   // halves came out 0.49 / 0.59 s, too loose to show as a measurement.
   const t6 = cones.some(c => c.k === 0.5) ? crossing(0.5) : NaN;
+  // 5 m splits up the run-up, from every pair of neighbouring cones the clip shows (a 5 m time of
+  // 0.35-1.0 s, a 10 m one 0.7-2.0 s to count); m = metres from the board at the cones' trigger
+  // points (the chip fires 0.8 m before a cone standing at 0.2 + 10 k m)
+  const tAt = { 0: t1, 0.5: t6, 1: t11, 2: t21 };
+  for (const k of [1.5, 2.5]) if (cones.some(c => c.k === k)) tAt[k] = crossing(k);
+  const ks = Object.keys(tAt).map(Number).filter(k => Number.isFinite(tAt[k])).sort((a, b) => a - b);
+  const fiveM = [];
+  for (let n = 0; n + 1 < ks.length; n++) {
+    const a = ks[n], b = ks[n + 1], dt = tAt[a] - tAt[b], m = 10 * (b - a);
+    if (m === 5 ? dt > 0.35 && dt < 1 : m === 10 ? dt > 0.7 && dt < 2 : false) fiveM.push({ from: 1 + 10 * a, to: 1 + 10 * b, s: +dt.toFixed(3), v: +(m / dt).toFixed(3) });
+  }
+  // A 5 m speed more than 7 % off the 10 m between the Freelap cones around it is a wrong cone or a
+  // wrong crossing, not running: 5164's "6 m cone" (seen at 7.6 m) gave 8.50 then 10.65 m/s for 9.45
+  // over the 10 m. Both halves of such a pair go.
+  for (const [a, b] of [[0, 1], [1, 2]]) {
+    if (!Number.isFinite(tAt[a]) || !Number.isFinite(tAt[b])) continue;
+    const v10 = 10 / (tAt[a] - tAt[b]), lo = 1 + 10 * a, hi = 1 + 10 * b;
+    const halves = fiveM.filter(f => f.from >= lo && f.to <= hi && f.to - f.from === 5);
+    if (halves.some(f => Math.abs(f.v / v10 - 1) > 0.07)) for (const f of halves) fiveM.splice(fiveM.indexOf(f), 1);
+  }
+  fiveM.sort((x, y) => x.from - y.from);
   // The 1-11 m time has to agree with the speed into the board: from 11 m to 1 m out the run is
   // at its top speed, so 10 m over the time sits within a few percent of the last step (IMG_4677:
   // 9.34 against 9.44 m/s, 1 %). On IMG_4658 (filmed from 40 m) the cone crossings gave 1.17 s,
@@ -351,9 +374,11 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const splits = {
     s1to11: fits(s1) ? s1 : null, s11to21: Number.isFinite(s2) && fits(s1) ? s2 : null,
     // the two 5 m halves (each 0.35-1.0 s to count)
-    s6to11: fits(s1) && t6 > t11 && t6 - t11 > 0.35 && t6 - t11 < 1 ? t6 - t11 : null,
-    s1to6: fits(s1) && t1 > t6 && t1 - t6 > 0.35 && t1 - t6 < 1 ? t1 - t6 : null,
+    s6to11: fits(s1) && fiveM.some(f => f.from === 6 && f.to === 11) ? t6 - t11 : null,
+    s1to6: fits(s1) && fiveM.some(f => f.from === 1 && f.to === 6) ? t1 - t6 : null,
     withheld: Number.isFinite(s1) && !fits(s1) ? +s1.toFixed(3) : null,
+    // only when the 1-11 m time itself passed the check above
+    fiveM: fits(s1) ? fiveM : [],
     source: cones.length >= 2 && coneScale ? 'cones' : 'board',
     cones: cones.map(c => ({ k: c.k, x: +c.x.toFixed(2), n: c.obs.length })), coneScale,
   };

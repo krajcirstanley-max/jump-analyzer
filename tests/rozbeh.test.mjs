@@ -59,7 +59,8 @@ test('real run-ups: the last 10-12 steps walked back from the take-off by rhythm
     const r = fromWire(JSON.parse(readFileSync(new URL(`IMG_${id}.json`, rb))).result);
     const a = r.who?.id === 'miska' ? ['female', 171] : ['male', 186];
     const n = rozbehNumbers(r, ...a);
-    assert.ok(n.steps.length >= 10 && n.steps.length <= 13, `${id}: ${n.steps.length} steps`);   // IMG_4656 showed 3 before
+    // 3.4 s back since 2026-11-21 (the 26 m cone): up to 16 steps; IMG_4656 showed 3 before the rhythm walk
+    assert.ok(n.steps.length >= 10 && n.steps.length <= 16, `${id}: ${n.steps.length} steps`);
     assert.ok(!n.steps.some(x => x.missing), `${id}: a step marked missing`);
     const tds = n.ts;
     // the last step into the board is short (IMG_4658: 0.13-0.17 s against about 0.24 s)
@@ -83,4 +84,29 @@ test('Freelap gives 21-11 and 11-1; 6 m only from a cone crossing in the video',
   assert.equal(v.from6, 'video');
   assert.equal(+(v.s11_6 + v.s6_1).toFixed(3), 1.09);   // the Freelap time stays whole
   assert.ok(v.s6_1 > v.s11_6);                          // the slower half where the video saw it
+});
+
+test('5 m pieces: the video splits each Freelap 10 m, 21-26 m stays on the video clock', async () => {
+  const { fiveMeters } = await import('../js/rozbeh-view.js');
+  const video = [{ from: 1, to: 6, s: 0.55 }, { from: 6, to: 11, s: 0.53 }, { from: 11, to: 16, s: 0.56 }, { from: 16, to: 21, s: 0.58 }, { from: 21, to: 26, s: 0.62 }];
+  const p = fiveMeters([1.16, 1.10], video);
+  assert.deepEqual(p.map(x => `${x.to}-${x.from}`), ['26-21', '21-16', '16-11', '11-6', '6-1']);
+  const near = p.filter(x => x.from < 11), mid = p.filter(x => x.from >= 11 && x.to <= 21);
+  assert.ok(Math.abs(near.reduce((a, x) => a + x.s, 0) - 1.10) < 1e-9 && Math.abs(mid.reduce((a, x) => a + x.s, 0) - 1.16) < 1e-9);
+  assert.equal(p[0].src, 'video'); assert.equal(p[0].s, 0.62);
+  assert.ok(Math.abs(near[1].s / near[0].s - 0.55 / 0.53) < 1e-9);   // the video's proportion kept
+  assert.deepEqual(fiveMeters(null, video).map(x => x.src), ['video', 'video', 'video', 'video', 'video']);
+});
+
+test('rhythm: right against left before the last three steps, feet named from the take-off', async () => {
+  const { rhythmOf } = await import('../js/rozbeh-view.js');
+  // eight steps: right-foot steps 0.29 s with 0.15 s flight, left 0.27 s with 0.12 s, then three short ones
+  const steps = [], ts = []; let t = 0;
+  const feet = ['l', 'r', 'l', 'r', 'l', 'r', 'l', 'r'];   // the last (take-off) is the right foot
+  feet.forEach((f, i) => { const last3 = i >= feet.length - 3; const st = last3 ? 0.24 : f === 'r' ? 0.29 : 0.27; steps.push({ contact: 0.13, air: last3 ? 0.11 : f === 'r' ? 0.15 : 0.12 }); ts.push(t); t += st; });
+  const R = rhythmOf(steps, ts, 'stanley');
+  assert.ok(R.enough);
+  assert.equal(R.rows.at(-1).foot, 'r');
+  assert.ok(Math.abs(R.r.step - 0.29) < 1e-9 && Math.abs(R.l.step - 0.27) < 1e-9);
+  assert.ok(Math.abs(R.r.air - 0.15) < 1e-9 && Math.abs(R.l.air - 0.12) < 1e-9);
 });

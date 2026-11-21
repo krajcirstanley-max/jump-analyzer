@@ -84,7 +84,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     const runGround = async jumpGuess => {
       onProgress?.({ stage: 'ground', done: 0, total: 1 });
       try {
-        const g = await measureGround({ frames, track: fromWire(result).smooth, jump: jumpGuess, boxes: res.boxes });
+        const g = await measureGround({ frames, track: fromWire(result).smooth, jump: jumpGuess, boxes: res.boxes, backS: mode === 'rozbeh' ? 3.4 : 1.7 });
         if (!g.error) result.ground = g;
         else result.groundError = g.error;
       } catch (e) {
