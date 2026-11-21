@@ -312,7 +312,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const named = refined ? refined.events : null;
   const detected = detectContacts(clean, result.first, result.last, fps);
   let contacts = withEvents(clean, detected, named, fps);
-  let ev = keyFrames(clean, contacts, fps, sex, { events: named, height });
+  let ev = keyFrames(clean, contacts, fps, sex, { events: named, height, runup: trustTakeoff });
   if (ev.error) return { ...ev, error: 'V zázname sa nenašiel odraz.' };
   // The penultimate touchdown comes out one frame late on 4 of 4 clips checked by eye on zoomed feet
   // (2026-11-15: 4594 389/388, 4676 521/520, 4677 675/674, 4390 454/453), from the server's names
@@ -382,7 +382,8 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // A run-through's arc is too short and low to read the vertical speed from (2026-11-19, two server
   // runs of Miška's IMG_1084: vy 0.59 and −0.19 m/s), so only the horizontal floor holds there.
   const popUp = result.events?.kind === 'runthrough';
-  const keepTakeoff = trustTakeoff && result.events?.TD != null;
+  // a run-up's own pick stands too (events.js runup rule): a run-through's pop-up has no arc to judge
+  const keepTakeoff = trustTakeoff;
   if (!keepTakeoff && !air.error && Number.isFinite(air.vyTO) && Number.isFinite(vxSeen) && ((!popUp && air.vyTO < 0.5) || (!(preGround && !result.ground) && vxSeen < 2.5))) {
     if (air.vyTO >= 0.5 && !result.ground) return { error: 'Skok sa nedá zmerať: v zábere chýba doska alebo čiary dráhy.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };
     return { error: 'V zázname sa nenašiel odraz.', noTakeoff: { vx: vxSeen, vy: air.vyTO } };

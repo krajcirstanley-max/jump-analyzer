@@ -28,6 +28,7 @@ function coneClusters(conesByFrame, H, boardM, zeroM = boardM) {
   for (const [k, list] of Object.entries(conesByFrame ?? {})) {
     if (!H[k]) continue;
     for (const c of list) {
+      if (c[3] > c[2] / 0.7 + 0.5) continue; // a flat marker disc (server ground.mjs), not a Freelap cone
       const p = applyH(H[k], c);
       if (p[1] > -1.2 && p[1] < RUNWAY_W + 1.2) obs.push({ i: +k, x: p[0] * boardM, img: [c[0], c[1]] });
     }

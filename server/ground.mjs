@@ -467,8 +467,13 @@ export async function trackGround(getRGBA, W, H, { ref, from, to, groundY, box, 
 // yellow and tall rather than wide; the base (bottom of the blob) is the point on the ground.
 // IMG_4677: rgb about (220, 198, 78), 13 x 18 px at 15 m. Orange marker discs (R-G about 70)
 // and the yellow-tan benches (thin, wide, G-B about 75) do not pass.
+// Flat marker discs ("klobúčik", 2026-11-21: Stanley's 5.2 m mark): pale lime-yellow, rgb about
+// (232, 240, 168), 24-26 x 9-10 px at 30 m, wider than tall. They come out as [x, base, h, w] with
+// w >= 1.6 h; the tall cones keep w < h / 0.7, so a reader can tell them apart (coneClusters takes
+// only the tall ones; the Rozbeh cone times take both, on the athlete's line).
 export function detectCones(rgba, W, H, { box = null, y0 = 0 } = {}) {
-  const yel = o => { const r = rgba[o], g = rgba[o + 1], b = rgba[o + 2]; return r > 185 && g > 165 && b < 125 && r - g < 45 && g - b > 85; };
+  const yel = o => { const r = rgba[o], g = rgba[o + 1], b = rgba[o + 2];
+    return (r > 185 && g > 165 && b < 125 && r - g < 45 && g - b > 85) || (r > 195 && g > 205 && g - b > 45 && Math.abs(r - g) < 30); };
   const seen = new Uint8Array(W * H), out = [];
   const athH = box ? box[3] - box[1] : H;
   for (let y = Math.max(0, Math.round(y0)); y < H; y++) for (let x = 0; x < W; x++) {
@@ -481,7 +486,9 @@ export function detectCones(rgba, W, H, { box = null, y0 = 0 } = {}) {
       for (const k of [j - 1, j + 1, j - W, j + W]) if (k >= 0 && k < W * H && !seen[k] && yel(k * 4)) { seen[k] = 1; st.push(k); }
     }
     const w = x1 - x0 + 1, h = yb - ya + 1;
-    if (n >= 20 && h >= 5 && h >= 0.7 * w && h <= 0.25 * athH && n >= 0.35 * w * h) out.push([(x0 + x1) / 2, yb + 0.5, h]);
+    if (n >= 20 && h >= 5 && h >= 0.7 * w && h <= 0.25 * athH && n >= 0.35 * w * h) out.push([(x0 + x1) / 2, yb + 0.5, h, w]);
+    // a disc: a filled flat ellipse, not a bench's thin edge (201 x 8, fill 0.31) or a lane tape
+    else if (n >= 30 && h >= 4 && w >= 1.6 * h && w <= 4 * h && w <= 0.5 * athH && n >= 0.6 * w * h) out.push([(x0 + x1) / 2, yb + 0.5, h, w]);
   }
   return out;
 }

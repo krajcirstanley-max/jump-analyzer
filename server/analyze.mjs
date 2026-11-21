@@ -156,7 +156,8 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
     // Without them the analysis falls back to the gravity fit. Already measured on the fast path
     // unless its first pass found no jump (a run-through before it was named one).
     if (!groundDone) {
-      const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true });
+      // a run-up keeps its own take-off rule (trustTakeoff: a run-through is the long flight, events.js)
+      const pre = analyzeJump(fromWire(result), sex, meta.ts, { height, pb, preGround: true, trustTakeoff: mode === 'rozbeh' });
       if (!pre.error) await runGround(pre);
     }
     onProgress?.({ stage: 'analysis', done: 0, total: 1 });

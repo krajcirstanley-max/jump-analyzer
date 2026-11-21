@@ -283,7 +283,23 @@ export function keyFrames(track, contacts, fps, sex = 'male', opts = {}) {
     for (let i = c.to + 1; i <= end; i++) if (comY(i) < top) top = comY(i);
     return (comY(c.td) - top) / torso(c.td);
   };
-  const ti = o.events ? contacts.findIndex(c => c.forced === 'TO') : contacts.findIndex((c, k) => rise(c, k) >= o.jumpRise);
+  // A run-up (Rozbeh) with no named take-off: a run-through barely rises, so the board is also the
+  // first contact followed by a flight 1.6 times the run-up's usual one (2026-11-21, eight run-ups
+  // filmed across the hall: the run-through IMG_5155 rose 0.01 torso and flew 25 frames against 14;
+  // the rise rule alone picked a step 3 s early there and a sand step on two others).
+  const flightAfter = k => { const n = contacts.slice(k + 1).find(d => d.td > contacts[k].to); return n ? n.td - contacts[k].to - 1 : NaN; };
+  const longFlight = k => {
+    if (!o.runup || k < 4) return false;
+    // against the last 8 flights: the run-up's rhythm changes from the start (IMG_4656: a 76-frame gap
+    // before the second step pulled the median of every flight up to 16, the board's 25 fell short)
+    const f = contacts.slice(Math.max(0, k - 8), k).map((_, j) => flightAfter(Math.max(0, k - 8) + j)).filter(Number.isFinite).sort((a, b) => a - b);
+    return f.length >= 4 && flightAfter(k) >= 1.6 * f[f.length >> 1];
+  };
+  // ... and only where the athlete is near full size: far up the run-up (torso 25-40 px against 64-78
+  // at the board, IMG_5155 and 5158) the pose's noise alone rose 0.76-0.86 torso after a step.
+  const big = Math.max(...contacts.map(c => torso(c.td)).filter(Number.isFinite));
+  const nearSize = c => !o.runup || !(big > 0) || torso(c.td) >= 0.7 * big;
+  const ti = o.events ? contacts.findIndex(c => c.forced === 'TO') : contacts.findIndex((c, k) => nearSize(c) && (rise(c, k) >= o.jumpRise || longFlight(k)));
   if (ti < 0) return { error: 'No takeoff found: the body never rises like a jump.', contacts };
   const takeoff = contacts[ti];
   const approach = contacts.slice(0, ti).filter(c => c.to < takeoff.td);

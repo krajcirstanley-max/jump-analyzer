@@ -8,11 +8,12 @@ import { detectContacts, approachToeOffs } from './analysis/events.js';
 import { NORMS } from './analysis/metrics.js';
 import { APPROVED_CUES } from './analysis/coach.js';
 import { pairRun } from './analysis/sprint.js';
+import { coneTimes } from './analysis/conetimes.js';
 import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJump } from './cloud.js';
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 7;   // 7 (2026-11-21): 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
+const RB_ALGO = 8;   // 8 (2026-11-21): cone marks read in the picture, the run-through take-off rule; 7: 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -103,6 +104,9 @@ export function fiveMeters(legs, fiveM) {
   return out.sort((a, b) => b.from - a.from);   // far to near, the order he runs it
 }
 
+// Checked blind on IMG_5151-5158 (2026-11-21, filmed across the hall, 113 steps): touchdowns 89 %
+// within a frame, toe-offs 72 % (92 % within two); which foot's step is longer agreed with the hand
+// reads on 7 of 8, the per-foot contact and flight were 10-20 ms off on some.
 // Left against right foot over the run-up the video saw, the last three steps left out (they are
 // shaped for the take-off). Steps are named from the take-off foot back. In 13 of Stanley's 16
 // stored run-ups the step off the right foot was longer: 292 against 271 ms, the flight after it
@@ -117,10 +121,36 @@ export function rhythmOf(steps, ts, who) {
   return { rows, r: R, l: Lf, enough: R.n >= 2 && Lf.n >= 2 };
 }
 
+// The 5 m pieces from the cone marks read in the picture (analysis/conetimes.js), on Freelap's clock:
+// the picture's times are stretched evenly by the phone's view (8 % on IMG_5155), so they only split
+// what Freelap timed. k = Freelap time over picture time between the two Freelap marks seen furthest
+// apart; a mark inside a Freelap leg splits it at k times its picture time from the leg's end.
+// Without Freelap there is no clock to put them on, so no pieces.
+export function fiveFromMarks(legs, marks) {
+  const L = (legs ?? []).filter(Number.isFinite);
+  if (L.length < 2 || !marks) return [];
+  const F = { 1: 0, 11: L.at(-1), 21: L.at(-1) + L.at(-2) };   // true time before the 1 m mark
+  const t = m => (Number.isFinite(marks[m]) ? marks[m] : NaN);
+  const have = [1, 11, 21].filter(m => Number.isFinite(t(m)));
+  if (have.length < 2) return [];
+  const a = have[0], b = have.at(-1), k = (F[b] - F[a]) / (t(a) - t(b));
+  if (!(k > 0.8 && k < 1.15)) return [];
+  const before1 = m => (Number.isFinite(t(m)) ? F[a] + k * (t(a) - t(m)) : NaN);   // true time of mark m before 1 m
+  const out = [];
+  for (const [lo, mid, hi] of [[1, 6, 11], [11, 16, 21]]) {
+    const leg = F[hi] - F[lo], tm = before1(mid);
+    if (Number.isFinite(tm) && tm - F[lo] > 0.3 * leg && tm - F[lo] < 0.7 * leg) {
+      out.push({ from: lo, to: mid, s: tm - F[lo], src: 'freelap' }, { from: mid, to: hi, s: F[hi] - tm, src: 'freelap' });
+    } else out.push({ from: lo, to: hi, s: leg, src: 'freelap' });
+  }
+  return out.map(x => ({ ...x, s: +x.s.toFixed(3), v: (x.to - x.from) / x.s })).sort((p, q) => q.from - p.from);
+}
+
 const rbCard = (title, body) => `<section class="card sp-card"><h2>${title}</h2>${body}</section>`;
 // Speed in 5 m pieces, far to near, with the change from one piece to the next.
-export function fiveCard(legs, fiveM) {
-  const parts = fiveMeters(legs, fiveM);
+export function fiveCard(legs, fiveM, marks = null) {
+  const parts = marks ? fiveFromMarks(legs, marks) : fiveMeters(legs, fiveM);
+  if (marks && !parts.length) return rbCard('Rýchlosť po 5 m', `<p class="note">${(legs ?? []).filter(Number.isFinite).length >= 2 ? 'Vo videu appka nevidela dosť kužeľov (treba pri doske a na 11 alebo 21 m).' : 'Úseky po 5 m appka rozdelí, keď k rozbehu priradí časy z Freelapu: kužele vo videu dávajú len podiel z ich času.'}</p>`);
   if (!parts.length) return rbCard('Rýchlosť po 5 m', '<p class="note">Appka potrebuje vo videu kužele každých 5 m: k 1, 11 a 21 m (Freelap) obyčajné kužele na 6, 16 a 26 m. Rýchlosť medzi dvoma kužeľmi zmeria z videa.</p>');
   const top = Math.max(...parts.map(p => p.v)), low = Math.min(...parts.map(p => p.v));
   const rows = parts.map((p, n) => {
@@ -131,10 +161,14 @@ export function fiveCard(legs, fiveM) {
       <span class="sp-n" style="width:64px">${d == null ? '' : `<span class="chg ${d >= 0.5 ? 'up' : d <= -0.5 ? 'down' : ''}">${d >= 0 ? '+' : '−'}${num(Math.abs(d), 1)} %</span>`}</span></div>`;
   }).join('');
   const peak = parts.findIndex(p => p.v === top), after = parts.slice(peak + 1);
+  // a change under 0.5 % between pieces is holding the speed, not gaining it (IMG_5155: 9.52 then
+  // 9.53 m/s read "zrýchľuješ až do posledného úseku"); the 5 m times are good to about 0.5 %
+  const held = (() => { let k = parts.length - 1; while (k > 0 && Math.abs(parts[k].v / parts[k - 1].v - 1) < 0.005) k--; return k; })();
   const say = after.length && after.at(-1).v < top * 0.99
     ? `Najrýchlejší úsek ${parts[peak].to}–${parts[peak].from} m, potom ${num((1 - after.at(-1).v / top) * 100, 1)} % pomalšie do dosky.`
+    : held < parts.length - 1 ? `Od ${parts[held].to} m rýchlosť drží až do dosky (zmena pod 0,5 %).`
     : peak === parts.length - 1 ? 'Zrýchľuješ až do posledného úseku pred doskou.' : 'Rýchlosť drží až do dosky.';
-  const src = parts.some(p => p.src === 'freelap') ? 'Úseky v 10 m Freelapu: čas z Freelapu, rozdelený podľa prechodu okolo kužeľa vo videu. Ostatné z videa (±1–2 %).' : 'Čas z prechodu okolo kužeľov vo videu (±1–2 %).';
+  const src = marks ? 'Čas z Freelapu, rozdelený na 5 m podľa toho, kedy ťa video vidí prejsť okolo klobúčika.' : parts.some(p => p.src === 'freelap') ? 'Úseky v 10 m Freelapu: čas z Freelapu, rozdelený podľa prechodu okolo kužeľa vo videu. Ostatné z videa (±1–2 %).' : 'Čas z prechodu okolo kužeľov vo videu (±1–2 %).';
   return rbCard('Rýchlosť po 5 m', `${rows}<p class="note s">${say}</p><p class="note s">${src}</p>`);
 }
 // Every step the video saw: which foot, the step time, the contact and the flight; then right
@@ -152,7 +186,7 @@ export function rhythmCard(steps, ts, who, total = RUNUP_STEPS) {
     : `Krok z ${diff > 0 ? 'pravej' : 'ľavej'} je dlhší o ${Math.round(Math.abs(diff) * 1000)} ms (${num(Math.abs(diff) / ((R.r.step + R.l.step) / 2) * 100, 0)} %)${Number.isFinite(R.r.air) && Number.isFinite(R.l.air) ? `, let po ${R.r.air > R.l.air ? 'pravej' : 'ľavej'} o ${Math.round(Math.abs(R.r.air - R.l.air) * 1000)} ms dlhší` : ''}.`;
   return rbCard('Rytmus ľavá / pravá', `<div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-n">krok</span><span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}
     ${R.enough ? `<p class="note s">${sideTxt('Pravá', R.r)}<br>${sideTxt('Ľavá', R.l)}</p>` : ''}<p class="note s">${verdict}</p>
-    <p class="note s">Kroky od odrazu z pravej dozadu; posledné 3 (sivé) sa do porovnania nerátajú. Časy v ms, každý dotyk ±1 snímka (±8 ms).</p>`);
+    <p class="note s">Kroky od odrazu z pravej dozadu; posledné 3 (sivé) sa do porovnania nerátajú. Časy v ms; dotyk ±1 snímka (±8 ms), odlepenie ±1–2 snímky, takže zem a let jedného kroku ±10–20 ms, krok z dotyku na dotyk presnejšie.</p>`);
 }
 
 
@@ -181,6 +215,9 @@ export function rozbehNumbers(result, sex, height) {
     videoSplits: g?.splits?.s1to6 != null && g?.splits?.s6to11 != null ? { s1to6: g.splits.s1to6, s6to11: g.splits.s6to11 } : null,
     // 5 m (and 10 m) times between neighbouring cones as the video saw the hip pass them
     fiveM: g?.splits?.fiveM?.length ? g.splits.fiveM : null,
+    // the cone marks read in the picture (2026-11-21: filmed across the hall the runway's metres
+    // can't place the cones), the 5 m card's source whenever any were passed
+    marks: (() => { const c = coneTimes(result.ground?.cones, res.smooth, res.ts ?? [], { td: j.takeoff?.td, sex }); return c.error ? null : c.marks; })(),
     frames: { penTD: j.pen?.td ?? null, TD: j.takeoff?.td ?? null, TO: j.takeoff?.to ?? null },
   };
 }
@@ -389,7 +426,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       <p class="note s">Rozbeh ${L.total} krokov${runOf(rec)?.steps ? ' (Freelap)' : ''}: ${L.total} odraz, ${L.total - 1} predposledný. Zem a let ±0,01 s. Dĺžka kroku z rýchlosti Freelapu v úseku${L.sp ? '' : ' (bez Freelapu len z rýchlosti dráhy, ak ju appka zmerala)'}.</p>`);
   }
 
-  const fiveHtml = rec => fiveCard(runOf(rec)?.legs, rec.fiveM);
+  const fiveHtml = rec => fiveCard(runOf(rec)?.legs, rec.fiveM, rec.marks ?? null);
   const rhythmHtml = rec => rhythmCard(rec.steps, rec.ts, rec.who, runOf(rec)?.steps ?? RUNUP_STEPS);
 
   // ---------- comment ----------
