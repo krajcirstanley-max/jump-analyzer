@@ -23,6 +23,8 @@ SNAPSHOT = False
 # the CUDA 13 build below). Since 2026-11-21 the cheap L4 comes first: H100 jobs (about $4.6/h with
 # CPU and memory) used up two Modal budgets on 2026-11-20. L40S is the fallback, same Ada family.
 GPU = ["L4", "L40S"]
+# My own test and debug runs (server/_local_*_app.py) use this cheapest card, never the live one.
+DEBUG_GPU = ["T4", "L4"]
 # Pinned: 2.1.280+ is needed for claude-opus-5-5, and the build checks it still has --safe-mode.
 CLAUDE_CODE = "2.1.314"
 
@@ -141,7 +143,8 @@ claude_secret = modal.Secret.from_name("jump-claude")
     memory=32768,
     volumes={CLIPS: clips},
     secrets=[vapid_secret, claude_secret],
-    scaledown_window=60,
+    # Idle GPU time is billed: 10 s still lets a gallery batch flow from one job into the next.
+    scaledown_window=10,
     timeout=450,
     retries=modal.Retries(max_retries=1, initial_delay=1.0, backoff_coefficient=1.0),
     # A batch from the gallery is 9-11 clips at once (2026-11-20: 11 jobs took 6.5 min on 2 containers,
@@ -238,7 +241,7 @@ def coach_job(job_id, owner):
                   claude_token=claude_token_for(owner, os.environ.get("JUMP_CLAUDE_TOKENS")))
 
 
-@app.function(image=recap_image, region="eu", cpu=8.0, memory=16384, volumes={CLIPS: clips, MUSIC: music}, timeout=900, scaledown_window=60)
+@app.function(image=recap_image, region="eu", cpu=8.0, memory=16384, volumes={CLIPS: clips, MUSIC: music}, timeout=900, scaledown_window=10)
 def render_recap(rid, owner):
     from recap_job import process_recap
 
