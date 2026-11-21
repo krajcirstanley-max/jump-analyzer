@@ -66,8 +66,10 @@ test('blind hand reads: every run-up step across the hall', { skip: !have }, () 
     }
   }
   const within = (a, f) => a.filter(x => Math.abs(x) <= f).length / a.length;
-  // 2026-11-21: TD 93/104 within a frame, TO 79/108 (99/108 within two; the close-up jumps' 91 % within
-  // one did not hold here, and a shift that fixed it here broke those)
-  assert.ok(within(E.td, 1) >= 0.85, `TD ${within(E.td, 1)}`);
-  assert.ok(within(E.to, 1) >= 0.68 && within(E.to, 2) >= 0.88, `TO ${within(E.to, 1)} / ${within(E.to, 2)}`);
+  // 2026-11-21, truth = first blind read, a second blind reader on every disputed or unreadable edge
+  // (agreeing within a frame, else the edge left out), the two board contacts by eye frame by frame.
+  // Pose edges alone: TD 86 %, TO 75 % within a frame. With the sprint pass's edges (withMotion):
+  // TD 95/109, TO 93/109 within a frame, 105 and 103 within two.
+  assert.ok(within(E.td, 1) >= 0.84 && within(E.td, 2) >= 0.93, `TD ${within(E.td, 1)} / ${within(E.td, 2)}`);
+  assert.ok(within(E.to, 1) >= 0.82 && within(E.to, 2) >= 0.92, `TO ${within(E.to, 1)} / ${within(E.to, 2)}`);
 });

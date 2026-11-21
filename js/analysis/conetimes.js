@@ -30,7 +30,11 @@ const median = a => { const s = a.filter(Number.isFinite).sort((x, y) => x - y);
 export function coneTimes(cones, track, ts, { td, sex = 'male', legs = null } = {}) {
   if (!cones || !Number.isInteger(td) || !ts?.length) return { error: 'no cones' };
   const tor = i => (track[i] && has(track[i], 'lsho', 'rsho', 'lhip', 'rhip') ? torsoLength(track[i]) : NaN);
-  const comX = i => (track[i] ? centreOfMass(track[i], sex)?.[0] ?? NaN : NaN);
+  // the hips, not the centre of mass: the Freelap chip sits on the belt, and with the forward lean far
+  // up the run the centre of mass leads the hips (2026-11-21, 32 crossings read blind at the hips: the
+  // board cone and the disc matched to the frame, the 10.2 and 20.2 m cones came 1-3 frames early off
+  // the centre of mass)
+  const comX = i => { const q = track[i]; if (!q) return NaN; return has(q, 'lhip', 'rhip') ? (P(q, 'lhip')[0] + P(q, 'rhip')[0]) / 2 : centreOfMass(q, sex)?.[0] ?? NaN; };
   // the athlete's ground: the lowest foot point over the frames around (a stride's worth)
   const footY = i => median([-6, -3, 0, 3, 6].map(d => { const q = track[i + d]; if (!q) return NaN; const y = ['lbigtoe', 'rbigtoe', 'lheel', 'rheel'].filter(n => has(q, n)).map(n => P(q, n)[1]); return y.length ? Math.max(...y) : NaN; }));
 
@@ -64,7 +68,7 @@ export function coneTimes(cones, track, ts, { td, sex = 'male', legs = null } = 
     const mt = tt.reduce((a, b) => a + b, 0) / tt.length, mv = vv.reduce((a, b) => a + b, 0) / vv.length;
     let num = 0, den = 0; for (let k = 0; k < tt.length; k++) { num += (tt[k] - mt) * (vv[k] - mv); den += (tt[k] - mt) ** 2; }
     const sl = num / den; if (!(Math.abs(sl) > 0)) continue;
-    crossings.push({ frame: at, t: mt - mv / sl, dy: +dy.toFixed(2), n: t.length });
+    crossings.push({ frame: at, t: mt - mv / sl, dy: +dy.toFixed(2), n: t.length, at: rows.filter(o => Math.abs(o.i - at) <= 10).map(o => [o.i, o.x, o.y]) });
   }
   if (!crossings.length) return { error: 'no cone passed' };
 

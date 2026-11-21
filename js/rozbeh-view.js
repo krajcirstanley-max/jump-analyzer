@@ -13,7 +13,7 @@ import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJu
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 8;   // 8 (2026-11-21): cone marks read in the picture, the run-through take-off rule; 7: 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
+const RB_ALGO = 9;   // 9 (2026-11-21): sprint-pass step edges, cone passings at the hips; 8: cone marks read in the picture, the run-through take-off rule; 7: 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -64,6 +64,20 @@ export function stepsBack(clean, first, last, fps, takeoff, pen, { backS = 2.6 }
     out.unshift({ td: c.td, to: c.to, foot: c.foot });
     if (n === 1) period = 0.7 * period + 0.3 * gap;
   }
+  return out.map((s, i) => ({ ...s, contact: s.to != null ? (s.to - s.td + 1) / fps : null, air: i < out.length - 1 && s.to != null ? (out[i + 1].td - s.to - 1) / fps : null }));
+}
+
+// The server's sprint-pass contacts (toe against track, result.motionSteps, 2026-11-21) replace the
+// pose's edges of the step they match (touchdown within 3 frames). Filmed across the hall, against two
+// blind readers on 108 steps: toe-offs within a frame 75 % from the pose, 85 % with these; touchdowns
+// 86 → 87 %, the pose's −0.4 frame toe-off bias gone.
+export function withMotion(steps, motion, fps) {
+  if (!motion?.length) return steps;
+  const out = steps.map(s => {
+    if (s.missing || s.to == null) return { ...s };
+    const m = motion.filter(q => Math.abs(q[0] - s.td) <= 3).sort((a, b) => Math.abs(a[0] - s.td) - Math.abs(b[0] - s.td))[0];
+    return m && m[1] > m[0] ? { ...s, td: m[0], to: m[1], motion: true } : { ...s };
+  });
   return out.map((s, i) => ({ ...s, contact: s.to != null ? (s.to - s.td + 1) / fps : null, air: i < out.length - 1 && s.to != null ? (out[i + 1].td - s.to - 1) / fps : null }));
 }
 
@@ -179,14 +193,16 @@ export function rhythmCard(steps, ts, who, total = RUNUP_STEPS) {
   const ms = x => (Number.isFinite(x) ? Math.round(x * 1000) : '–');
   const rows = R.rows.map(r => `<div class="sp-row rb-row${r.fromBoard <= 3 ? ' dim' : ''}"><span class="sp-i">${total - r.fromBoard}</span><span class="sp-f">${FOOT[r.foot]}</span>
     <span class="sp-n">${ms(r.step)}</span><span class="sp-n">${ms(r.contact)}</span><span class="sp-n">${r.fromBoard === 0 ? 'odraz' : ms(r.air)}</span></div>`).join('');
-  const sideTxt = (lb, x) => `${lb}: krok <b>${ms(x.step)}</b> ms · zem ${ms(x.contact)} · let ${ms(x.air)}`;
+  const sideTxt = (lb, x) => `${lb}: krok <b>${ms(x.step)}</b> ms`;
   const diff = R.enough ? R.r.step - R.l.step : null;
   const verdict = diff == null ? 'Na porovnanie treba aspoň 2 kroky z každej nohy pred poslednými tromi.'
     : Math.abs(diff) < 0.008 ? 'Rytmus je vyrovnaný (rozdiel pod 1 snímku).'
-    : `Krok z ${diff > 0 ? 'pravej' : 'ľavej'} je dlhší o ${Math.round(Math.abs(diff) * 1000)} ms (${num(Math.abs(diff) / ((R.r.step + R.l.step) / 2) * 100, 0)} %)${Number.isFinite(R.r.air) && Number.isFinite(R.l.air) ? `, let po ${R.r.air > R.l.air ? 'pravej' : 'ľavej'} o ${Math.round(Math.abs(R.r.air - R.l.air) * 1000)} ms dlhší` : ''}.`;
+    // only the step time (touchdown to touchdown): its side agreed with two blind readers on 7 of 8
+    // run-ups, the per-side flight did not (IMG_5158: the app's longer flight was on the other foot)
+    : `Krok z ${diff > 0 ? 'pravej' : 'ľavej'} je dlhší o ${Math.round(Math.abs(diff) * 1000)} ms (${num(Math.abs(diff) / ((R.r.step + R.l.step) / 2) * 100, 0)} %).`;
   return rbCard('Rytmus ľavá / pravá', `<div class="sp-row rb-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-n">krok</span><span class="sp-n">zem</span><span class="sp-n">let</span></div>${rows}
     ${R.enough ? `<p class="note s">${sideTxt('Pravá', R.r)}<br>${sideTxt('Ľavá', R.l)}</p>` : ''}<p class="note s">${verdict}</p>
-    <p class="note s">Kroky od odrazu z pravej dozadu; posledné 3 (sivé) sa do porovnania nerátajú. Časy v ms; dotyk ±1 snímka (±8 ms), odlepenie ±1–2 snímky, takže zem a let jedného kroku ±10–20 ms, krok z dotyku na dotyk presnejšie.</p>`);
+    <p class="note s">Kroky od odrazu z pravej dozadu; posledné 3 (sivé) sa do porovnania nerátajú. Časy v ms, každý dotyk a odlepenie ±1 snímka (±8 ms) pri 85–87 % krokov; zem a let jedného kroku preto ±10–20 ms, krok z dotyku na dotyk je presnejší a len z neho sa porovnávajú nohy.</p>`);
 }
 
 
@@ -202,7 +218,7 @@ export function rozbehNumbers(result, sex, height) {
   const m = Object.fromEntries((j.metrics ?? []).map(x => [x.key, x.status === 'hidden' ? null : x.value]));
   const g = j.flight?.ground && !j.flight.ground.error ? j.flight.ground : null;
   const sp = id => g?.steps?.find(s => s.id === id)?.speed ?? null;
-  const back = stepsBack(res.clean, res.first ?? 0, res.last ?? res.clean.length - 1, j.fps, { ...j.takeoff, foot: j.takeoffFoot }, j.pen, { backS: 3.4 });
+  const back = withMotion(stepsBack(res.clean, res.first ?? 0, res.last ?? res.clean.length - 1, j.fps, { ...j.takeoff, foot: j.takeoffFoot }, j.pen, { backS: 3.4 }), result.motionSteps, j.fps);
   return {
     steps: back.map(r => ({ foot: r.foot, contact: r.contact, air: r.air, td: r.td, missing: !!r.missing })),
     ts: back.map(r => res.ts?.[r.td] ?? r.td / j.fps),

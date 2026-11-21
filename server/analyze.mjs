@@ -16,10 +16,10 @@ import { writeCoaching } from './coach.mjs';
 import { cliClient } from './claude-cli.mjs';
 import { probe, openFrames, jpeg } from './frames.mjs';
 import { locateEvents, locateGuess, locateLanding, nameEvents, LOCATE_MODEL, LANDING_MODEL } from './locate.mjs';
-import { stepTakeoff } from './takeoff.mjs';
+import { stepTakeoff, pickTakeoff } from './takeoff.mjs';
 import { measureGround } from './ground.mjs';
 import { analyzeRsiClip } from './rsi.mjs';
-import { analyzeSprintClip } from './sprint.mjs';
+import { analyzeSprintClip, stepsOf } from './sprint.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MODELS_DIR = process.env.JUMP_MODELS_DIR || join(root, 'models');
@@ -93,6 +93,17 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
       }
       mark('ground');
     };
+    // Rozbeh (2026-11-21): the sprint pass's toe-against-track contacts as well, kept beside the pose's.
+    // Filmed across the hall the pose's toe-offs were 2-3 frames off on 34 of 109 (two blind readers
+    // agreeing); the sprint pass held 96 % within a frame on the sprints.
+    if (mode === 'rozbeh') {
+      try {
+        const sp = await stepsOf({ frames, meta, res, wire: result, timing: {} });
+        if (!sp.error && sp.steps?.length) { const pose = fromWire(result); result.motionSteps = pickTakeoff(sp.steps, pose.clean ?? pose.smooth, meta.ts, sex).S.map(s => [s.f0, s.f1]); }
+        else result.motionStepsError = sp.error ?? 'no steps';
+      } catch (e) { result.motionStepsError = String(e?.message || e).slice(0, 200); }
+      mark('motionSteps');
+    }
     if (client) {
       const guessed = locateGuess(fromWire(result), sex, meta.ts, { height, pb });
       // Skok (2026-11-20): the board contact from the sprint pass's foot contacts (server/takeoff.mjs),
@@ -146,6 +157,20 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
       }
       who = await whoP;
       mark('located');
+    } else if (mode === 'jump') {
+      // No Claude on this workspace (2026-11-21: the new Modal account had no token): the board still
+      // comes from the sprint pass's contacts, which need no Claude; the landing from the pose. Without
+      // this the pose's rise rule alone lost the take-off on 6 of 21 bench jumps (3 not found, 3 picked
+      // 3-4 s early).
+      const guessed = locateGuess(fromWire(result), sex, meta.ts, { height, pb });
+      const fast = await stepTakeoff({ frames, meta, res, wire: result, sex, onProgress })
+        .catch(e => ({ error: String(e?.message || e).slice(0, 300) }));
+      mark('steps');
+      const n = fast?.seen ? nameEvents({ ...fast.seen, sand: null, runThrough: false }, guessed, meta.fps) : null;
+      if (n?.events.TD != null) {
+        result.events = n.events;
+        result.locate = { fast: true, noClaude: true, runs: n.runs, edges: n.edges, windows: { T: fast.seen.T, L: null }, rejected: n.rejected, seen: { ...fast.seen, sand: null, runThrough: false }, steps: fast.steps, pick: fast.pick, timing: fast.timing };
+      } else result.locate = { noClaude: true, fastError: fast?.error ?? 'naming rejected', steps: fast?.steps };
     }
     if (athletes?.length > 1) {
       const a = athletes.find(x => x.id === who?.id);

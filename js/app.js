@@ -990,7 +990,7 @@ async function renderLists() {
 // ---------- Tréning and História ----------
 const KINDS = {
   skok: { hint: 'Kto skáče, appka zistí z videa sama. Natočené v appke ide 120 fps; Nahrať otvorí galériu a vezme video ako je natočené, aj viac naraz.' },
-  rozbeh: { hint: 'Celý rozbeh s odrazom, bez dopadu. Natoč zboku ako akceleráciu. Časy 21–11, 11–6 a 6–1 m prídu z Freelapu (typ Rozbeh), kroky a odraz z videa.' },
+  rozbeh: { hint: 'Celý rozbeh s odrazom, bez dopadu. Natoč zboku ako akceleráciu. Časy 21–11 a 11–1 m z Freelapu (typ Rozbeh), 11–6 a 6–1 m ich rozdelí klobúčik na 5,2 m vo videu; kroky a odraz z videa.' },
   sprint: { hint: 'Natočené v appke ide 120 fps a s Freelapom aj s časmi vo videu. Rozbor príde sám.' },
   rsi: { hint: 'Drop jump, odrazy, prekážky aj výskok z miesta. Natáčaj spredu, celé chodidlá v zábere. Natočené v appke sa uloží s časmi.' },
 };

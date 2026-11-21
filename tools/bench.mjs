@@ -17,7 +17,7 @@ const args = process.argv.slice(2), server = args.includes('--server');
 const only = args.filter(a => /^\d+$/.test(a));
 const ids = Object.keys(T.clips).filter(id => !only.length || only.includes(id));
 
-const BASE = 'https://dexis98--jump-analyzer-web.eu-west.modal.run';
+import { CLOUD_URL as BASE } from '../js/config.js';   // the live server, whichever workspace it is on
 async function analyse(id) {
   const tok = readFileSync(new URL('server/.app-tokens.txt', root), 'utf8').match(/stanley:\s*(\S+)/)?.[1];
   if (!tok) throw new Error('no app token');
@@ -25,7 +25,7 @@ async function analyse(id) {
   const roster = Object.entries(T.athletes).map(([k, v]) => ({ id: k, ...v, history: [] }));
   const q = new URLSearchParams({ sex: a.sex, name: a.name, height: a.height, mode: 'jump', athletes: JSON.stringify(roster) });
   const H = { Authorization: `Bearer ${tok}` };
-  const body = readFileSync(new URL(`IMG_${id}.MOV`, REAL));
+  const body = readFileSync(videoOf(id));
   const job = await (await fetch(`${BASE}/jobs?${q}`, { method: 'POST', body, headers: { ...H, 'Content-Type': 'application/octet-stream' } })).json();
   const jid = job.jobId ?? job.id;
   for (let t = 0; t < 120; t++) {
@@ -36,10 +36,11 @@ async function analyse(id) {
   return { state: 'error', error: 'timeout' };
 }
 
+function videoOf(id) { for (const p of [`IMG_${id}.MOV`, `lj20/IMG_${id}.mov`, `lj32/IMG_${id}.mov`]) { const u = new URL(p, REAL); if (existsSync(u)) return u; } return null; }
 if (server) {
   mkdirSync(HIST, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const queue = ids.filter(id => existsSync(new URL(`IMG_${id}.MOV`, REAL)));
+  const queue = ids.filter(id => videoOf(id));
   const worker = async () => {
     for (let id; (id = queue.shift());) {
       const j = await analyse(id).catch(e => ({ state: 'error', error: String(e.message) }));
