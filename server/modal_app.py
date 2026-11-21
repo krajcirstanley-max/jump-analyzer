@@ -20,8 +20,9 @@ SNAPSHOT = False
 
 # The one place the GPU is chosen. A list is tried in order: on 2026-11-18 no H100 was free in the
 # EU for over ten minutes and every job would have waited, so the A100 and L40S stand in (all run
-# the CUDA 13 build below).
-GPU = ["H100", "A100-80GB", "L40S"]
+# the CUDA 13 build below). Since 2026-11-21 the cheap L4 comes first: H100 jobs (about $4.6/h with
+# CPU and memory) used up two Modal budgets on 2026-11-20. L40S is the fallback, same Ada family.
+GPU = ["L4", "L40S"]
 # Pinned: 2.1.280+ is needed for claude-opus-5-5, and the build checks it still has --safe-mode.
 CLAUDE_CODE = "2.1.314"
 
