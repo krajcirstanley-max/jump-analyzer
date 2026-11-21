@@ -721,3 +721,6 @@ div.att-open { cursor: default; }
 .note.s { font-size: 12.5px; margin: 8px 0 0; }
 .rb-per { margin-top: 10px; } .rb-per .sp-row span:first-child { color: var(--muted); }
 .rb-coach { margin: 0 0 8px; font-size: 15px; line-height: 1.5; }
+.rb-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.rb-chip { padding: 6px 10px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); font-size: 14px; min-height: 36px; cursor: pointer; touch-action: manipulation; }
+.rb-chip.on { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); font-weight: 700; }

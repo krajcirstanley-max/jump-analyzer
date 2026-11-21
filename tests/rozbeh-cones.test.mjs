@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { fromWire } from '../js/cloud.js';
-import { rozbehNumbers, fiveFromMarks } from '../js/rozbeh-view.js';
+import { rozbehNumbers, fiveFromMarks, targetPlan, targetOptions, targetCard } from '../js/rozbeh-view.js';
 
 const R = new URL('./real/rb21/', import.meta.url);
 const WHO = { 5151: 'stanley', 5152: 'miska', 5153: 'stanley', 5154: 'miska', 5155: 'stanley', 5156: 'miska', 5157: 'stanley', 5158: 'miska' };
@@ -72,4 +72,32 @@ test('blind hand reads: every run-up step across the hall', { skip: !have }, () 
   // TD 95/109, TO 93/109 within a frame, 105 and 103 within two.
   assert.ok(within(E.td, 1) >= 0.84 && within(E.td, 2) >= 0.93, `TD ${within(E.td, 1)} / ${within(E.td, 2)}`);
   assert.ok(within(E.to, 1) >= 0.82 && within(E.to, 2) >= 0.92, `TO ${within(E.to, 1)} / ${within(E.to, 2)}`);
+});
+
+// The target card (2026-11-21): the athlete's own 21-11 / 11-6 / 6-1 shape scaled to the chosen 11-1 m
+// time, the last 10 m held where the run dips by 1 % or more, the 21-11 m gain split 70 % rate.
+test('target plan: options, shape kept, times add up, steps from the 21-11 m zone', () => {
+  assert.deepEqual(targetOptions(1.05), [1.03, 1, 0.98]);
+  assert.deepEqual(targetOptions(1.17), [1.15, 1.12, 1.09]);
+  const marks = { 1: 10, 6: 9.475, 11: 8.95, 21: 7.87 };            // 1.08 s / 1.05 s legs, an even split at 6 m
+  const ts = [], steps = []; for (let t = 7.6; t < 10.05; t += 0.24) { ts.push(t); steps.push({ contact: 0.12, air: 0.12, td: 0, missing: false }); }
+  const P = targetPlan([1.08, 1.05], marks, steps, ts, 0.98);
+  assert.ok(Math.abs(P.t21 - 1.08 * 0.98 / 1.05) < 1e-9);
+  assert.ok(Math.abs(P.tgt[0].v / P.now[0].v - 1.05 / 0.98) < 1e-9);
+  assert.ok(Math.abs(P.rate0 - 1 / 0.24) < 0.01 && P.rate1 > P.rate0 && P.len1 > P.len0);
+  assert.ok(Math.abs(P.rate1 * P.len1 - P.v1) < 1e-9);
+  assert.ok(P.ct1 < P.ct0);
+  assert.equal(targetPlan(null, marks, steps, ts, 0.98), null);
+  assert.match(targetCard([1.08, 1.05], null, steps, ts, 0.98), /kužeľ pri doske/);
+  assert.match(targetCard(null, marks, steps, ts, 0.98), /časy z Freelapu/);
+});
+
+test('target plan on the run-ups across the hall: every one with Freelap gets a curve and steps', { skip: !have }, () => {
+  for (const id of Object.keys(FL)) {
+    const n = nums(id), [far, near] = FL[id], P = targetPlan(FL[id], n.marks, n.steps, n.ts, targetOptions(near)[2]);
+    assert.ok(P, `${id} no plan`);
+    assert.ok(P.rate0 > 3.4 && P.rate0 < 4.8, `${id} rate ${P.rate0}`);
+    assert.ok(P.len0 > 1.9 && P.len0 < 2.5, `${id} step ${P.len0}`);
+    assert.ok(Math.abs(P.t21 / P.target - far / near) < 1e-9, `${id} shape`);
+  }
 });

@@ -175,16 +175,85 @@ export function fiveCard(legs, fiveM, marks = null) {
       <span class="sp-n" style="width:64px">${d == null ? '' : `<span class="chg ${d >= 0.5 ? 'up' : d <= -0.5 ? 'down' : ''}">${d >= 0 ? '+' : '−'}${num(Math.abs(d), 1)} %</span>`}</span></div>`;
   }).join('');
   const peak = parts.findIndex(p => p.v === top), after = parts.slice(peak + 1);
-  // a change under 0.5 % between pieces is holding the speed, not gaining it (IMG_5155: 9.52 then
-  // 9.53 m/s read "zrýchľuješ až do posledného úseku"); the 5 m times are good to about 0.5 %
-  const held = (() => { let k = parts.length - 1; while (k > 0 && Math.abs(parts[k].v / parts[k - 1].v - 1) < 0.005) k--; return k; })();
+  // a change under 1 % between pieces is holding the speed, not gaining or losing it (IMG_5155: 9.55
+  // then 9.50 m/s); the 5 m shares are good to about 0.5-1 % (far/near ratio 0-3 % off Freelap's)
+  const held = (() => { let k = parts.length - 1; while (k > 0 && Math.abs(parts[k].v / parts[k - 1].v - 1) < 0.01) k--; return k; })();
   const say = after.length && after.at(-1).v < top * 0.99
     ? `Najrýchlejší úsek ${parts[peak].to}–${parts[peak].from} m, potom ${num((1 - after.at(-1).v / top) * 100, 1)} % pomalšie do dosky.`
-    : held < parts.length - 1 ? `Od ${parts[held].to} m rýchlosť drží až do dosky (zmena pod 0,5 %).`
+    : held < parts.length - 1 ? `Od ${parts[held].to} m rýchlosť drží až do dosky (zmena pod 1 %).`
     : peak === parts.length - 1 ? 'Zrýchľuješ až do posledného úseku pred doskou.' : 'Rýchlosť drží až do dosky.';
   const src = marks ? 'Čas z Freelapu, rozdelený na 5 m podľa toho, kedy ťa video vidí prejsť okolo klobúčika.' : parts.some(p => p.src === 'freelap') ? 'Úseky v 10 m Freelapu: čas z Freelapu, rozdelený podľa prechodu okolo kužeľa vo videu. Ostatné z videa (±1–2 %).' : 'Čas z prechodu okolo kužeľov vo videu (±1–2 %).';
   return rbCard('Rýchlosť po 5 m', `${rows}<p class="note s">${say}</p><p class="note s">${src}</p>`);
 }
+// "Ako má vyzerať rýchlejší rozbeh" (Stanley 2026-11-21: "keď chcem bežať rýchlejšie ako to má
+// vyzerať… vidieť na krivke"). Research: vault 51 Coaching Library/51 (2026-11-21).
+// - Shape: better jumpers run the same curve, higher (Koyama, Muraki & Ae 2011, laser, 965 jumps):
+//   21-11 m about 3 % slower than 11-1 m. So the target keeps the athlete's own 21-11 / 11-6 / 6-1
+//   shape scaled to the chosen 11-1 time; a dip into the board is not kept (finalists hold the last
+//   10 m flat, Berlin 2009 Vloss ≈ 0).
+// - Steps: near top speed the extra speed comes mostly from step rate (Kivi 2001; Hunter 2004: same
+//   length, higher rate within a person), contact about 13 ms shorter per m/s. The card splits the
+//   21-11 m gain 70 % rate / 30 % length and says it is an estimate.
+// Options: the athlete's 11-1 m less 2, 4.5 and 7 %.
+export const TARGET_SHARE_RATE = 0.7;
+export function targetOptions(near) { return [...new Set([0.98, 0.955, 0.93].map(f => Math.round(near * f * 100) / 100))]; }
+export function targetPlan(legs, marks, steps, ts, target) {
+  const pieces = fiveFromMarks(legs, marks);
+  if (pieces.length !== 3 || !(target > 0.5)) return null;
+  const L = legs.filter(Number.isFinite), far = L.at(-2), near = L.at(-1);
+  const now = [21, 11, 6].map(a => pieces.find(p => p.to === a)).map(p => ({ a: p.to, b: p.from, v: p.v }));
+  const k = near / target, tgt = now.map(p => ({ ...p, v: p.v * k }));
+  const dip = now[2].v / now[1].v - 1;
+  // under 1 % is inside what the 5 m shares can tell (the far/near ratio sat 0-3 % off Freelap's)
+  if (dip < -0.01) tgt[1].v = tgt[2].v = 10 / target;
+  // the steps that fall in 21-11 m by the cone marks (video clock, as the steps)
+  let rate = null, contact = null;
+  if (steps?.length && ts?.length && Number.isFinite(marks?.[21]) && Number.isFinite(marks?.[11])) {
+    const dts = [], cts = [];
+    for (let i = 0; i < steps.length - 1; i++) {
+      if (steps[i].missing || steps[i + 1].missing) continue;
+      const mid = (ts[i] + ts[i + 1]) / 2;
+      if (mid > marks[21] && mid < marks[11]) { dts.push(ts[i + 1] - ts[i]); if (Number.isFinite(steps[i].contact)) cts.push(steps[i].contact); }
+    }
+    if (dts.length >= 3) rate = dts.length / dts.reduce((a, b) => a + b, 0);
+    if (cts.length >= 3) contact = cts.reduce((a, b) => a + b, 0) / cts.length;
+  }
+  const v0 = now[0].v, v1 = tgt[0].v, r = v1 / v0;
+  return { now, tgt, far, near, target, t21: far / k, dip, v0, v1,
+    rate0: rate, rate1: rate ? rate * r ** TARGET_SHARE_RATE : null, len0: rate ? v0 / rate : null, len1: rate ? v1 / (rate * r ** TARGET_SHARE_RATE) : null,
+    ct0: contact, ct1: contact != null ? contact - 0.013 * (v1 - v0) : null };
+}
+export function targetCard(legs, marks, steps, ts, target, recId = '') {
+  const L = (legs ?? []).filter(Number.isFinite);
+  if (L.length < 2) return rbCard('Cieľová rýchlosť', '<p class="note">Cieľ appka ukáže, keď má rozbeh časy z Freelapu (21–11 a 11–1 m).</p>');
+  const opts = targetOptions(L.at(-1)), sel = opts.includes(target) ? target : opts[1];
+  const P = targetPlan(L, marks, steps, ts, sel);
+  if (!P) return rbCard('Cieľová rýchlosť', '<p class="note">Na krivku treba vo videu kužeľ pri doske, klobúčik na 5,2 m a kužeľ na 10,2 alebo 20,2 m.</p>');
+  const W = 340, H = 190, x = m => 24 + (21 - m) / 20 * (W - 40);
+  const lo = Math.floor(Math.min(...P.now.map(p => p.v)) - 0.4), hi = Math.ceil(Math.max(...P.tgt.map(p => p.v)) + 0.2);
+  const y = v => 12 + (hi - v) / (hi - lo) * (H - 40);
+  const pts = arr => arr.map(p => [x((p.a + p.b) / 2), y(p.v)]);
+  const path = (arr, style) => { const q = pts(arr), s0 = [[x(21), y(arr[0].v * 0.985)], ...q, [x(1), y(arr[2].v)]]; let d = `M${s0[0]}`; for (let i = 1; i < s0.length; i++) { const [a, b] = [s0[i - 1], s0[i]], cx = (a[0] + b[0]) / 2; d += ` C${cx},${a[1]} ${cx},${b[1]} ${b[0]},${b[1]}`; } return `<path d="${d}" fill="none" ${style}/>`; };
+  const grid = []; for (let v = lo; v <= hi + 1e-9; v += 0.5) grid.push(`<line x1="24" x2="${W - 16}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="2" y="${y(v) + 4}" font-size="10" fill="var(--muted)">${num(v, 1)}</text>`);
+  const marksSvg = [21, 11, 6, 1].map(m => `<line x1="${x(m)}" x2="${x(m)}" y1="${y(hi)}" y2="${H - 26}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${x(m)}" y="${H - 12}" font-size="11" text-anchor="middle" fill="var(--muted)">${m} m</text>`).join('');
+  const dots = (arr, c) => pts(arr).map(([a, b], i) => `<circle cx="${a}" cy="${b}" r="3.5" fill="${c}"/><text x="${a}" y="${b - 8}" font-size="10.5" text-anchor="middle" fill="${c}" font-weight="700">${num(arr[i].v, 2)}</text>`).join('');
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Rýchlosť teraz a cieľ">${grid.join('')}${marksSvg}${path(P.now, 'stroke="var(--accent)" stroke-width="2.5"')}${path(P.tgt, 'stroke="var(--warn)" stroke-width="2.5" stroke-dasharray="6 4"')}${dots(P.now, 'var(--accent)')}${dots(P.tgt, 'var(--warn)')}</svg>`;
+  const row = (a, b, c, hl) => `<div class="sp-row rb-row${hl ? ' hl' : ''}"><span style="flex:1">${a}</span><span class="sp-n" style="width:70px">${b}</span><span class="sp-n" style="width:22px;color:var(--muted)">→</span><span class="sp-n" style="width:70px"><b>${c}</b></span></div>`;
+  const chips = opts.map(t => `<button class="rb-chip${t === sel ? ' on' : ''}" data-rb-target="${num(t, 2)}" data-rb-target-rec="${esc(recId)}">${num(t, 2)} s · ${num(10 / t, 1)} m/s</button>`).join('');
+  const d = P.dip * 100;
+  const hold = Math.abs(d) < 1 ? 'Tvar nechaj: od 21 m pridávaš a posledných 10 m držíš, presne ako finalisti.'
+    : d < 0 ? `Od 21 do 11 m pridávaš správne. Posledných 5 m o ${num(-d, 1)} % pomalšie, finalisti tam držia: cieľová krivka drží až do dosky.`
+    : 'Tvar nechaj: zrýchľuješ až do dosky.';
+  const stepRows = P.rate0 ? row('Krokov za sekundu (21–11 m)', num(P.rate0, 2), num(P.rate1, 2), 0) + row('Dĺžka kroku', `${num(P.len0, 2)} m`, `${num(P.len1, 2)} m`, 0) + (P.ct0 != null ? row('Na zemi', `${Math.round(P.ct0 * 1000)} ms`, `${Math.round(P.ct1 * 1000)} ms`, 0) : '') : '';
+  return rbCard('Cieľová rýchlosť', `<p class="note" style="margin-bottom:8px">Čas 11–1 m, ktorý chceš bežať:</p><div class="rb-chips">${chips}</div>
+    ${svg}
+    <p class="note s"><span style="color:var(--accent);font-weight:700">━ teraz</span> (${num(P.far, 2)} / ${num(P.near, 2)} s) &nbsp; <span style="color:var(--warn);font-weight:700">╍ cieľ</span> (${num(P.t21, 2)} / ${num(P.target, 2)} s). Rýchlosť v m/s v úsekoch 21–11, 11–6 a 6–1 m.</p>
+    <div style="margin-top:10px">${row('21–11 m', `${num(P.far, 2)} s`, `${num(P.t21, 2)} s`, 0)}${row('11–1 m', `${num(P.near, 2)} s`, `${num(P.target, 2)} s`, 1)}${stepRows}</div>
+    <p class="note s" style="margin-top:10px"><b>Ako to má vyzerať.</b> ${hold} Celá krivka ide o ${num(P.v1 - P.v0, 1)} m/s vyššie, takže rýchlosť musí byť postavená už medzi 21 a 11 m (${num(P.v1, 2)} m/s), nie dobehnutá pri doske. Navyše príde hlavne z rýchlejšieho kroku: kratšie na zemi, krok skoro rovnako dlhý.</p>
+    <p class="note s"><b>Povel:</b> „stlač zem pod seba“</p>
+    <p class="note s">Tvar krivky: Koyama 2011 (965 skokov, laser), 21–11 m asi o 3 % pomalšie ako 11–1 m u teba aj u 8 m skokanov. Krok: odhad z výskumu (Kivi 2001, Hunter 2004: pri vyššej rýchlosti hlavne frekvencia). Tvoj vlastný pomer appka zistí, keď zabehneš rýchlejšie.</p>`);
+}
+
 // Every step the video saw: which foot, the step time, the contact and the flight; then right
 // against left over the run-up before the last three steps.
 export function rhythmCard(steps, ts, who, total = RUNUP_STEPS) {
@@ -451,6 +520,9 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   }
 
   const fiveHtml = rec => fiveCard(runOf(rec)?.legs, rec.fiveM, rec.marks ?? null);
+  const TARGET_KEY = who => `jump.rbTarget.${who}`;
+  const targetOf = rec => { try { return parseFloat(localStorage.getItem(TARGET_KEY(rec.who))) || null; } catch { return null; } };
+  const targetHtml = rec => `<div data-rb-target-box>${targetCard(runOf(rec)?.legs, rec.marks ?? null, rec.steps, rec.ts, targetOf(rec), rec.id)}</div>`;
   const rhythmHtml = rec => rhythmCard(rec.steps, rec.ts, rec.who, runOf(rec)?.steps ?? RUNUP_STEPS);
 
   // ---------- comment ----------
@@ -517,7 +589,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
       : rec.error ? `<section class="card"><p class="banner bad">${esc(rec.error)}</p><button class="btn" data-rb-retry="${esc(rec.id)}">Skúsiť znova</button></section>` : '';
     const n = runOf(rec)?.steps ?? RUNUP_STEPS;
     root.innerHTML = `<h2 class="ath-name">${esc(name)}${name ? ' · ' : ''}rozbeh${n ? ` ${n} kr.` : ''}</h2>${video}${state}
-      ${rec.pending || rec.error ? '' : commentHtml(rec) + freelapHtml(rec) + fiveHtml(rec) + rhythmHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
+      ${rec.pending || rec.error ? '' : commentHtml(rec) + freelapHtml(rec) + fiveHtml(rec) + targetHtml(rec) + rhythmHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
       <section class="card"><button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
     mountVideo(rec);
     if (!rec.pending && !rec.error && rec.comment?.sig !== commentSig(rec) && !commenting.has(rec.id)) comment(rec);
@@ -539,6 +611,13 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
   }
   const parse = s => { const v = parseFloat(String(s ?? '').replace(',', '.')); return Number.isFinite(v) && v > 0.3 && v < 3 ? v : null; };
   root.addEventListener('click', e => {
+    // the target time: remembered per athlete, only the target card redrawn (the video keeps playing)
+    const tp = e.target.closest('[data-rb-target]');
+    if (tp) {
+      const rec = load().find(x => x.id === tp.dataset.rbTargetRec), t = parseFloat(tp.dataset.rbTarget.replace(',', '.'));
+      if (rec && t > 0) { try { localStorage.setItem(TARGET_KEY(rec.who), String(t)); } catch {} const box = root.querySelector('[data-rb-target-box]'); if (box) box.outerHTML = targetHtml(rec); }
+      return;
+    }
     const save = e.target.closest('[data-rb-save]');
     if (save) {
       const v = k => parse(root.querySelector(`[data-rb-leg="${k}"]`)?.value);
