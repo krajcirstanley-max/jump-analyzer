@@ -375,9 +375,23 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     const c = seq[n], nx = seq[n + 1];
     if (![c.td - 1, c.td, c.td + 1, nx.td - 1, nx.td, nx.td + 1].every(ok)) continue;
     const toes = []; for (let i = c.td + 1; i <= c.to - 1; i++) toes.push(...footX(i, [c.foot + 'bigtoe']));
-    const dt = ts[nx.td] - ts[c.td], v = (avgX(c.td) - avgX(nx.td)) / dt;
+    const dt = ts[nx.td] - ts[c.td];
+    // the slope of the centre of mass over every frame of the step (least squares), not the two
+    // end frames alone: those carry the tracking's frame-to-frame jitter twice
+    const pts = []; for (let i = c.td; i <= nx.td; i++) { const x = X(i); if (Number.isFinite(x) && ok(i)) pts.push([ts[i], x]); }
+    const v = pts.length >= 0.7 * (nx.td - c.td + 1) ? -slope(pts.map(p => p[0]), pts.map(p => p[1])) : (avgX(c.td) - avgX(nx.td)) / dt;
     if (!(dt > 0.12 && dt < 0.45) || !(v > 3 && v < 13)) continue;
     runSteps.push({ td: c.td, to: c.to, foot: c.foot, x: avgX(c.td), toeX: toes.length ? median(toes) * boardM : NaN, speed: v, stepMs: dt * 1000, contactMs: ((c.to - c.td + 1) / fps) * 1000 });
+  }
+  // The scale from the cones, not the board: the centre of mass crosses the 1 m and the 11 m cone at
+  // t1 and t11 (read in the image against the cone, above), so the runway's metres between those two
+  // moments must be 10. The board's 2 m ruler put every speed 4-8 % off (IMG_4677, 5164, 5169).
+  const Xt = t => { const fs = Object.keys(H).map(Number).filter(i => i <= T.td).sort((a, b) => a - b); for (let k = 1; k < fs.length; k++) { const a = fs[k - 1], b = fs[k]; if (ts[a] <= t && ts[b] >= t) { const xa = X(a), xb = X(b); return xa + (xb - xa) * (t - ts[a]) / (ts[b] - ts[a]); } } return NaN; };
+  const runScale = (ta, tb, m) => { const d = Xt(tb) - Xt(ta); return Number.isFinite(d) && d > 0 ? m / d : NaN; };
+  const k11 = runScale(t1, t11, 10), k21 = runScale(t11, t21, 10);
+  if (Number.isFinite(k11) && k11 > 0.8 && k11 < 1.25) for (const r of runSteps) {
+    const k = Number.isFinite(k21) && k21 > 0.8 && k21 < 1.25 && ts[r.td] < t11 ? k21 : k11;
+    r.speedRaw = r.speed; r.speed *= k; r.coneScale = k;
   }
   return {
     steps, runSteps, legMeasured, series, comXTO: X(T.to), toeTO, landX: Number.isFinite(jump) ? toeTO - jump : NaN,
