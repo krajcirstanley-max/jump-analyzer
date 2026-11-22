@@ -195,7 +195,9 @@ export function marksTimeline(marks) {
 // The player's overlay: draws the timeline at the frame shown, in the part of the canvas the frame
 // covers. hit (optional) receives the ring's box in canvas pixels for a tap.
 export function hudOverlay(timeline, player, size, hit = null) {
-  return (ctx, toCanvas, index) => {
+  // the player's toCanvas takes (x, y); drawAt and the burn take [x, y]
+  return (ctx, toCanvasXY, index) => {
+    const toCanvas = p => toCanvasXY(p[0], p[1]);
     const ts = player.ts; if (!ts?.length) return;
     const t = ts[index] - ts[0];
     const a = toCanvas([0, 0]), b = toCanvas([size.W, size.H]);

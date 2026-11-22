@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { warp, rozbehTimeline, jumpTimeline, sprintTimeline, marksTimeline } from '../js/hud.js';
+import { warp, rozbehTimeline, jumpTimeline, sprintTimeline, marksTimeline, hudOverlay } from '../js/hud.js';
 import { fromWire } from '../js/cloud.js';
 import { rozbehNumbers, fiveFromMarks } from '../js/rozbeh-view.js';
 
@@ -76,6 +76,18 @@ test('RSI marks as a timeline', () => {
   const tl = marksTimeline([{ from: 1, to: 2, hud: { top: 'Odraz', left: { cap: 'výška', v: '40', u: 'cm' }, right: null, ring: { v: '2,1', u: 'RSI', fill: 1 } } }]);
   assert.equal(tl(0.5).hud, null);
   assert.equal(tl(1.5).hud.ring.v, '2,1');
+});
+
+// The player calls an overlay with toCanvas(x, y); the panel was never drawn while hud.js passed [x, y]
+// (2026-11-22). A canvas stub records whether anything was filled inside the frame.
+test('hudOverlay draws with the player\'s toCanvas(x, y)', () => {
+  const calls = [];
+  const ctx = new Proxy({ canvas: { width: 400, height: 700 } }, { get: (o, k) => k in o ? o[k] : (...a) => { calls.push(k); return { width: 10 }; }, set: (o, k, v) => { o[k] = v; return true; } });
+  const tl = jumpTimeline({ toT: 0.5, landT: 1.2, tape: 6.85, est: 6.6, name: 'Stanley' });
+  const hit = { ring: null };
+  hudOverlay(tl, { ts: [0, 0.5, 1] }, { W: 720, H: 1280 }, hit)(ctx, (x, y) => [x * 0.5, y * 0.5], 2);
+  assert.ok(calls.includes('fillText'), 'nothing drawn');
+  assert.ok(hit.ring && hit.ring.w > 0, 'no ring box for the tap');
 });
 
 // On a real run-up (gitignored answer): the clock reads Freelap's split exactly at each mark.

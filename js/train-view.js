@@ -22,7 +22,7 @@ export function jumpSummary(r, athletes) {
     kind: 'skok', id: r.id, who: r.athlete, at: Date.parse(r.recordedAt || r.analysedAt),
     title: `${athletes[r.athlete]?.name ?? ''} · skok${r.runup ? ` z ${r.runup} krokov` : ''}`,
     sub: weak ? `najslabšie ${PHASE[weak.id] ?? weak.id} ${Math.round(weak.score)}` : '',
-    value: Number.isFinite(r.score) ? String(Math.round(r.score)) : '–', valueSub: Number.isFinite(est) ? `≈ ${num(est, 2)} m` : 'skóre',
+    value: Number.isFinite(r.score) ? String(Math.round(r.score)) : '–', valueSub: r.measured > 0 ? `${num(r.measured, 2)} m` : Number.isFinite(est) ? `≈ ${num(est, 2)} m` : 'skóre',   // the tape without ≈
   };
 }
 

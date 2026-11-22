@@ -6,3 +6,5 @@ models/*.onnx
 server/.app-tokens.txt
 www/
 server/knowledge.md
+build/
+ios/App/buildsim/

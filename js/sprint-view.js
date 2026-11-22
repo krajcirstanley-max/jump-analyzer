@@ -436,13 +436,14 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     const box = root.querySelector('[data-clip]');
     if (!rec?.hasClip || !box || !loadClip) return;
     if (makePlayer) {
-      if (live?.id === rec.id && live.root === box) return;
+      if (live?.id === rec.id && live.root === box) { syncHud(rec); return; }
       // The same run drawn again (its clip saved, its result in): the player already there moves
       // into the new screen and keeps playing. A new one each time restarted the video and decoded
       // the clip again while the analysis ran (2026-11-17: "prehrávanie seká").
       if (live?.id === rec.id && live.player && live.root && live.root !== box) {
         box.replaceWith(live.root);
         live.root.closest('section')?.querySelector('.sp-rate')?.classList.add('hidden');
+        syncHud(rec);
         return;
       }
       live?.player?.dispose?.(); live?.input?.dispose?.();
@@ -455,13 +456,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
         const made = await makePlayer(box, blob);
         if (live !== mine || !box.isConnected) { made.player?.dispose?.(); made.input?.dispose?.(); return; }
         Object.assign(mine, made);
-        // Freelap over an uploaded clip (filmed in the app it is already burned in: finishAt heard)
-        const { run, a } = view(rec);
-        if (run && rec.video?.finishAt == null && made.player?.overlays && made.player.src) {
-          const legs = cleanLegs(run).legs, zero = a?.kind === 'accel' ? rec.video?.start?.release ?? null : null;
-          made.player.overlays.push(hudOverlay(sprintTimeline({ legs, lap: run.lap, zero, name: name(run) }), made.player, { W: made.player.src.width, H: made.player.src.height }));
-          made.player.refresh?.();
-        }
+        syncHud(rec);
         box.closest('section')?.querySelector('.sp-rate')?.classList.add('hidden');   // the player has its own speeds
         return;
       } catch (e) { console.warn('Sprint clip: own player failed', e); box.classList.remove('player'); }
@@ -482,7 +477,18 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
 
   // the copy for Photos with Freelap burned in: only for a clip from the gallery (one filmed in the app
   // was written with it already)
-  const burnTl = rec => { const { run, a } = view(rec); return run && rec.video?.finishAt == null ? sprintTimeline({ legs: cleanLegs(run).legs, lap: run.lap, zero: a?.kind === 'accel' ? rec.video?.start?.release ?? null : null, name: name(run) }) : null; };
+  function burnTl(rec) { const { run, a } = view(rec); return run && rec.video?.finishAt == null ? sprintTimeline({ legs: cleanLegs(run).legs, lap: run.lap, zero: a?.kind === 'accel' ? rec.video?.start?.release ?? null : null, name: name(run) }) : null; }
+  // Freelap over an uploaded clip in the player (filmed in the app it is already burned in: finishAt
+  // heard), redone on every draw: times typed or corrected after the player was made (2026-11-22, a
+  // fly given 0.95 / 0.94 later showed no panel) replace the old panel.
+  function syncHud(rec) {
+    const p = live?.id === rec.id ? live.player : null;
+    if (!p?.overlays || !p.src) return;
+    if (live.hud) { const i = p.overlays.indexOf(live.hud); if (i >= 0) p.overlays.splice(i, 1); live.hud = null; }
+    const tl = burnTl(rec);
+    if (tl) { live.hud = hudOverlay(tl, p, { W: p.src.width, H: p.src.height }); p.overlays.push(live.hud); }
+    p.refresh?.();
+  }
   const delHtml = rec => `${rec.hasClip && !rec.pending && burnTl(rec) ? `<button class="btn" data-sp-burn="${esc(rec.id)}">Uložiť video s overlay do Fotiek</button>` : ''}<button class="btn danger" data-sp-del="${esc(rec.id)}">Zmazať beh</button>`;
   function remove(id) {
     const list = load(), r = list.find(x => x.id === id);

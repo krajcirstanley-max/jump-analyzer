@@ -15,7 +15,7 @@ import { analyzeInCloud, resumeCloudJob, cloudReady, pendingCloudJob, askAboutJu
 
 const KEY = 'jump.rozbeh';
 // Bumped when the reading changes: saved run-ups are read again from their stored answer on start.
-const RB_ALGO = 10;   // 10 (2026-11-22): overlay timing and cone places; 9 (2026-11-21): sprint-pass step edges, cone passings at the hips; 8: cone marks read in the picture, the run-through take-off rule; 7: 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
+const RB_ALGO = 11;   // 10 (2026-11-22): overlay timing and cone places; 9 (2026-11-21): sprint-pass step edges, cone passings at the hips; 8: cone marks read in the picture, the run-through take-off rule; 7: 5 m splits from the cones, steps back 3.4 s; 6: run-up toe-offs at the toe peak
 export const RUNUP_STEPS = 18;   // Stanley 2026-11-19: "rozbehy sú vždy 18 krokov"
 const MAX = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -86,21 +86,42 @@ export function withMotion(steps, motion, fps) {
 // Per Freelap split: the steps in it, their rate from the video, the step length from the split's
 // speed. The cones are passed by the chip on the hip; the 1 m cone about 1 m before the take-off
 // touchdown at the 6-1 m speed. Steps at a boundary can fall either side, so the counts are shown "≈".
-export function splitSteps(steps, ts, splits) {
+// The steps in one stretch of the run-up [a, b] (video clock): every step whose middle falls inside,
+// so the Freelap card and the target card read the same steps (2026-11-22: the two showed 4.32 and
+// 4.11 steps/s for the same 21-11 m on IMG_5155). The count is rate x time, not the touchdowns seen.
+export function zoneSteps(steps, ts, a, b) {
+  const dts = [], cts = [];
+  for (let i = 0; i < steps.length - 1; i++) {
+    if (steps[i].missing || steps[i + 1].missing) continue;
+    const t0 = ts[steps[i].td ?? i], t1 = ts[steps[i + 1].td ?? i + 1], mid = (t0 + t1) / 2;
+    if (mid > a && mid < b) { dts.push(t1 - t0); if (Number.isFinite(steps[i].contact)) cts.push(steps[i].contact); }
+  }
+  const rate = dts.length ? dts.length / dts.reduce((x, y) => x + y, 0) : null;
+  return { n: dts.length, rate, steps: rate ? Math.round(rate * (b - a)) : null, contact: cts.length ? cts.reduce((x, y) => x + y, 0) / cts.length : null };
+}
+
+// Steps per Freelap stretch. The stretches come from the cones read in the picture when there are
+// any (marks: the chip passing 21, 11, 6 and 1 m), else back from the take-off at Freelap's speed.
+export function splitSteps(steps, ts, splits, marks = null) {
   if (!splits || !steps?.length) return null;
-  const take = steps.at(-1), tTD = ts[take.td], v1 = splits.v6_1 ?? splits.v1_11;
-  if (!Number.isFinite(tTD) || !Number.isFinite(v1)) return null;
-  const t1 = tTD - 1 / v1;
-  const segs = splits.s11_6 != null
-    ? [['21–11 m', t1 - splits.s6_1 - splits.s11_6 - splits.s21_11, t1 - splits.s6_1 - splits.s11_6, splits.v21_11], ['11–6 m', t1 - splits.s6_1 - splits.s11_6, t1 - splits.s6_1, splits.v11_6], ['6–1 m', t1 - splits.s6_1, t1, splits.v6_1]]
-    : [['21–11 m', t1 - splits.s1_11 - (splits.s21_11 ?? NaN), t1 - splits.s1_11, splits.v21_11], ['11–1 m', t1 - splits.s1_11, t1, splits.v1_11]];
+  let segs;
+  const M = k => Number.isFinite(marks?.[k]) ? marks[k] : null;
+  if (M(21) != null && M(11) != null) {
+    segs = [['21–11 m', M(21), M(11), splits.v21_11]];
+    if (splits.s11_6 != null && M(6) != null && M(1) != null) segs.push(['11–6 m', M(11), M(6), splits.v11_6], ['6–1 m', M(6), M(1), splits.v6_1]);
+    else if (M(1) != null) segs.push(['11–1 m', M(11), M(1), splits.v1_11]);
+  } else {
+    const take = steps.at(-1), tTD = ts[take.td], v1 = splits.v6_1 ?? splits.v1_11;
+    if (!Number.isFinite(tTD) || !Number.isFinite(v1)) return null;
+    const t1 = tTD - 1 / v1;
+    segs = splits.s11_6 != null
+      ? [['21–11 m', t1 - splits.s6_1 - splits.s11_6 - splits.s21_11, t1 - splits.s6_1 - splits.s11_6, splits.v21_11], ['11–6 m', t1 - splits.s6_1 - splits.s11_6, t1 - splits.s6_1, splits.v11_6], ['6–1 m', t1 - splits.s6_1, t1, splits.v6_1]]
+      : [['21–11 m', t1 - splits.s1_11 - (splits.s21_11 ?? NaN), t1 - splits.s1_11, splits.v21_11], ['11–1 m', t1 - splits.s1_11, t1, splits.v1_11]];
+  }
   return segs.filter(([, a, b]) => Number.isFinite(a) && Number.isFinite(b)).map(([label, a, b, v]) => {
-    const inside = steps.filter(s => ts[s.td] >= a && ts[s.td] < b);
-    const periods = [];
-    for (let i = 0; i < steps.length - 1; i++) if (ts[steps[i].td] >= a && ts[steps[i].td] < b) periods.push(ts[steps[i + 1].td] - ts[steps[i].td]);
-    const rate = periods.length ? periods.length / periods.reduce((x, y) => x + y, 0) : null;
-    const seen = ts[steps[0].td] <= a + 0.05;   // the steps go back to the split's start
-    return { label, steps: inside.length, rate, length: rate && v ? v / rate : null, seen, contact: inside.filter(s => s.contact != null).reduce((x, s, _, l) => x + s.contact / l.length, 0) || null };
+    const z = zoneSteps(steps, ts, a, b);
+    const seen = ts[steps[0].td ?? 0] <= a + 0.05;   // the steps go back to the stretch's start
+    return { label, steps: z.steps, rate: z.rate, length: z.rate && v ? v / z.rate : null, seen, contact: z.contact };
   });
 }
 
@@ -221,14 +242,8 @@ export function targetPlan(legs, marks, steps, ts, target, shape = 'own') {
   // the steps that fall in 21-11 m by the cone marks (video clock, as the steps)
   let rate = null, contact = null;
   if (steps?.length && ts?.length && Number.isFinite(marks?.[21]) && Number.isFinite(marks?.[11])) {
-    const dts = [], cts = [];
-    for (let i = 0; i < steps.length - 1; i++) {
-      if (steps[i].missing || steps[i + 1].missing) continue;
-      const mid = (ts[i] + ts[i + 1]) / 2;
-      if (mid > marks[21] && mid < marks[11]) { dts.push(ts[i + 1] - ts[i]); if (Number.isFinite(steps[i].contact)) cts.push(steps[i].contact); }
-    }
-    if (dts.length >= 3) rate = dts.length / dts.reduce((a, b) => a + b, 0);
-    if (cts.length >= 3) contact = cts.reduce((a, b) => a + b, 0) / cts.length;
+    const z = zoneSteps(steps.map((x, i) => ({ ...x, td: i })), ts, marks[21], marks[11]);
+    if (z.n >= 3) { rate = z.rate; contact = z.contact; }
   }
   const v0 = now[0].v, v1 = tgt[0].v, r = v1 / v0;
   return { now, tgt, far, near, target, t21: 10 / tgt[0].v, dip, v0, v1, shape, ratio, ratioNow,
@@ -327,12 +342,20 @@ export function rozbehNumbers(result, sex, height) {
   const t0 = res.ts?.[0] ?? 0;
   const ct = coneTimes(result.ground?.cones, res.smooth, res.ts ?? [], { td: j.takeoff?.td, sex });
   const back = withMotion(stepsBack(res.clean, res.first ?? 0, res.last ?? res.clean.length - 1, j.fps, { ...j.takeoff, foot: j.takeoffFoot }, j.pen, { backS: 3.4 }), result.motionSteps, j.fps);
+  // One number per contact on the whole page (2026-11-22, IMG_5155 showed the board 0.100 in the card
+  // and 0.108 in the table, the pen 0.108 against 0.125): the board contact from boardContact (within
+  // 13 ms of the hand reads, the table's row was up to 29 ms short), the pen from the table's row
+  // (both about 12 ms off the hand reads on average, the pose's alone 46 ms short once, IMG_5157).
+  const takeC = boardContact(j, result.motionSteps, m.contactTO != null ? m.contactTO / 1000 : null);
+  const near = (r, td) => Number.isInteger(td) && !r.missing && Math.abs(r.td - td) <= 3;
+  const steps = back.map(r => ({ foot: r.foot, contact: near(r, j.takeoff?.td) && takeC != null ? takeC : r.contact, air: r.air, td: r.td, missing: !!r.missing }));
+  const penRow = steps.find(r => near(r, j.pen?.td));
   return {
-    steps: back.map(r => ({ foot: r.foot, contact: r.contact, air: r.air, td: r.td, missing: !!r.missing })),
+    steps,
     ts: back.map(r => res.ts?.[r.td] ?? r.td / j.fps),
     stepCount: j.stepCount?.count ?? null, stepSeen: !!j.stepCount?.seen,
-    pen: { contact: m.contactPen != null ? m.contactPen / 1000 : null, knee: m.penKnee },
-    take: { contact: boardContact(j, result.motionSteps, m.contactTO != null ? m.contactTO / 1000 : null), kneeTD: m.kneeTD, kneeTO: m.kneeTO, angle: m.takeoffAngle },
+    pen: { contact: penRow?.contact ?? (m.contactPen != null ? m.contactPen / 1000 : null), knee: m.penKnee },
+    take: { contact: takeC, kneeTD: m.kneeTD, kneeTO: m.kneeTO, angle: m.takeoffAngle },
     speeds: g ? { third: sp('third'), pen: sp('pen'), take: sp('take') } : null,
     // 1-6 and 6-11 m only from a cone seen at the 6 m mark (ground.js): without one the mark came
     // out 1.8 m off on IMG_4677 (2026-11-14), too loose to split anything
@@ -501,8 +524,8 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const what = Number.isFinite(s.keep) ? (s.keep >= 0
       ? `Do dosky si zrýchlil o ${num(Math.abs(s.s11_6 != null ? s.v6_1 - s.v11_6 : s.v1_11 - s.v21_11), 2)} m/s.`
       : `Na konci si spomalil o ${num(Math.abs(s.s11_6 != null ? s.v6_1 - s.v11_6 : s.v1_11 - s.v21_11), 2)} m/s. Cieľ: rýchlosť udržať až do dosky.`) : '';
-    const per = rec.ts?.length ? splitSteps(rec.steps.map((x, i) => ({ ...x, td: i })), rec.ts, s) : null;
-    const perHtml = per?.length ? `<div class="rb-per">${per.map(p => `<div class="sp-row rb-row"><span style="width:64px">${p.label}</span><span class="sp-n" style="width:auto;flex:1;text-align:left">${p.seen ? `≈ ${p.steps} ${p.steps === 1 ? 'krok' : p.steps < 5 ? 'kroky' : 'krokov'}` : 'začiatok mimo videa'}</span><span class="sp-n" style="width:64px">${p.rate ? `${num(p.rate, 2)} kr/s` : '–'}</span><span class="sp-n" style="width:64px">${p.length ? `${num(p.length, 2)} m` : '–'}</span></div>`).join('')}<p class="note s">Frekvencia z videa, dĺžka kroku z rýchlosti Freelapu a frekvencie.</p></div>` : '';
+    const per = rec.ts?.length ? splitSteps(rec.steps.map((x, i) => ({ ...x, td: i })), rec.ts, s, rec.marks) : null;
+    const perHtml = per?.length ? `<div class="rb-per">${per.map(p => `<div class="sp-row rb-row"><span style="width:64px">${p.label}</span><span class="sp-n" style="width:auto;flex:1;text-align:left">${p.seen && p.steps ? `≈ ${p.steps} ${p.steps === 1 ? 'krok' : p.steps < 5 ? 'kroky' : 'krokov'}` : p.seen ? '–' : 'začiatok mimo videa'}</span><span class="sp-n" style="width:64px">${p.rate ? `${num(p.rate, 2)} kr/s` : '–'}</span><span class="sp-n" style="width:64px">${p.length ? `${num(p.length, 2)} m` : '–'}</span></div>`).join('')}<p class="note s">Frekvencia z videa, dĺžka kroku z rýchlosti Freelapu a frekvencie.</p></div>` : '';
     return card(`Freelap · posledných 21 m${run.typed ? ' (zadané ručne)' : ''}`, `<div class="${s.s11_6 != null ? 'sp-g3' : 'sp-g2'}">${cells}</div>
       ${s.s11_6 != null ? `<div class="rb-sum"><span><span class="sp-lb">1–11 m</span> <b>${num(s.s1_11, 2)} s</b> <span class="sp-lb">· ${num(s.v1_11, 2)} m/s</span></span>${keep}</div>` : `<div class="rb-sum"><span></span>${keep}</div>`}
       ${s.from6 ? '<p class="note s">11–6 a 6–1: čas 11–1 z Freelapu rozdelený podľa prechodu cez kužeľ na 6 m vo videu.</p>' : ''}${what ? `<p class="note s">${what}</p>` : ''}${perHtml}${form}`);
