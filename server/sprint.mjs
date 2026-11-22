@@ -10,7 +10,7 @@ import { identifyAthlete } from './identify.mjs';
 import { runPipeline } from '../js/pose/pipeline.js';
 import { toWire, fromWire } from '../js/cloud.js';
 import { JI } from '../js/pose/models.js';
-import { sprintFromMotion, sprintLooks } from '../js/analysis/sprint.js';
+import { sprintFromMotion, sprintLooks, withCamera } from '../js/analysis/sprint.js';
 import { probe, openFrames } from './frames.mjs';
 
 // ---------- Pixels ----------
@@ -259,6 +259,39 @@ export function smoothGround(out, { shake = false } = {}) {
   return out;
 }
 
+// The camera's own motion from frame to frame, measured on the whole picture outside the runner
+// (camflow.py, 2026-11-22). Straight at the phone, the strips beside the feet see one flat red
+// track and their match jumped 10-18 px a frame while the phone panned a steady 8: 16 of 17
+// Freelap stretches of that day lost most of their steps. -> Map f -> [dx, dy], or null if the
+// pass could not run (then the strips stand, as before).
+export async function cameraMotion({ fd, W, H, track, from, to }) {
+  if (process.platform !== 'linux' || fd == null) return null;
+  const { spawn } = await import('node:child_process');
+  const boxes = {};
+  for (let f = from; f < to; f++) {
+    const kp = track[f], box = kp && athleteBox(kp);
+    if (!box) continue;
+    const toes = ['l', 'r'].map(s => pt(kp, `${s}bigtoe`)).filter(Boolean);
+    boxes[f] = [box.x0, box.y0, box.x1, box.y1, toes.length ? Math.max(...toes.map(p => p[1])) : box.y1].map(v => +v.toFixed(1));
+  }
+  const one = (a, b) => new Promise((res, rej) => {
+    const p = spawn(process.env.JUMP_PYTHON || 'python3', [new URL('./camflow.py', import.meta.url).pathname], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let o = '', e = '';
+    p.stdout.on('data', d => { o += d; });
+    p.stderr.on('data', d => { e = (e + d).slice(-600); });
+    p.on('error', rej);
+    p.on('close', code => (code ? rej(new Error(`camflow exited ${code}: ${e.trim()}`)) : res(JSON.parse(o))));
+    p.stdin.end(JSON.stringify({ path: `/proc/${process.pid}/fd/${fd}`, W, H, from: a, to: b, boxes }));
+  });
+  // one process took 9-19 s of a 400-680 frame clip (2026-11-22, beside a 3 s toe pass): the frames
+  // are independent pairs, so the range is split over processes
+  const n = to - from, parts = Math.max(1, Math.min(8, Math.ceil(n / 60))), step = Math.ceil(n / parts);
+  const outs = await Promise.all(Array.from({ length: parts }, (_, k) => one(from + k * step, Math.min(to, from + (k + 1) * step))));
+  const cam = new Map();
+  for (const out of outs) for (const [f, all, band] of out) cam.set(f, band ?? all);
+  return cam;
+}
+
 // When the clip was filmed: the iPhone's own creation date (local time with offset), else the
 // container's UTC time. The phone pairs it with the Freelap run heard at that moment.
 export function recordedAt(clip) {
@@ -328,15 +361,23 @@ export async function analyzeSprintClip(engine, { clip, athletes = null, who: kn
         .then(w => { timing.identify = Math.round(performance.now() - tId); return { id: athletes.find(x => x.id === w.id)?.id ?? null, said: w.said ?? null, ms: w.ms, error: w.error }; })
       : Promise.resolve(null);
     const tM = performance.now();
-    let motion = null;
+    let motion = null, camP = Promise.resolve(null);
     if (frames.fd) {
       await frames.get(res.last);   // the file holds every frame the parts will read
       timing.cpus = os.cpus().length;
-      motion = await measureMotionParallel({ fd: await frames.fd(), W: meta.W, H: meta.H, track, from: res.first, to: res.last }).catch(e => { console.error('parallel motion failed, one pass instead:', e); timing.motionError = String(e?.message || e).slice(0, 300); return null; });
+      const fd = await frames.fd(), tC = performance.now();
+      // the camera's motion runs beside the toe pass, not after it
+      camP = cameraMotion({ fd, W: meta.W, H: meta.H, track, from: res.first, to: res.last })
+        .then(c => { timing.camera = Math.round(performance.now() - tC); return c; })
+        .catch(e => { timing.cameraError = String(e?.message || e).slice(0, 300); return null; });
+      motion = await measureMotionParallel({ fd, W: meta.W, H: meta.H, track, from: res.first, to: res.last }).catch(e => { console.error('parallel motion failed, one pass instead:', e); timing.motionError = String(e?.message || e).slice(0, 300); return null; });
       timing.parallel = !!motion;
     }
     try { motion ??= await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); }
     finally { await it.return?.(); }
+    const cam = await camP;
+    timing.cameraFrames = cam?.size ?? 0;
+    motion = Object.assign(withCamera(motion, cam), { stats: motion.stats });
     timing.motion = Math.round(performance.now() - tM);
     timing.motionParts = motion?.stats;
     const who = await whoP;

@@ -7,12 +7,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { sprintFromMotion } from '../js/analysis/sprint.js';
+import { sprintFromMotion, withCamera } from '../js/analysis/sprint.js';
 
 const R = new URL('./real/', import.meta.url);
 const HAND = JSON.parse(readFileSync(new URL('./sprint-blind.json', import.meta.url)));
 const file = c => [`sprint18b/${c}.dump.json`, `sprint60/${c}.dump.json`, `sprint18/sp1794744${c.slice(2)}.json`].map(p => new URL(p, R)).find(existsSync);
 const have = Object.keys(HAND).every(c => file(c));
+// Since 2026-11-22 the server holds the toes against the camera's motion (camflow.py), not the strips
+// beside the feet; tests/real/camflow has that pass for each clip, made with the server's OpenCV.
+const cam = c => (f => (existsSync(f) ? JSON.parse(readFileSync(f)) : null))(new URL(`camflow/${c}.json`, R));
 const parse = v => (v === '?' ? null : v[0] === '<' || v[0] === '>' ? { out: v[0], f: +v.slice(1) } : (p => ({ lo: Math.min(...p), hi: Math.max(...p) }))(v.split('/').map(Number)));
 const off = (app, h) => (h.out ? null : app < h.lo ? app - h.lo : app > h.hi ? app - h.hi : 0);
 const mid = h => (h ? (h.out ? h.f : (h.lo + h.hi) / 2) : null);
@@ -21,7 +24,7 @@ test('blind hand reads: touchdowns and toe-offs of every step', { skip: !have },
   const tally = { 120: { td: [], to: [] }, 60: { td: [], to: [] } };
   for (const [clip, list] of Object.entries(HAND)) {
     let d = JSON.parse(readFileSync(file(clip))); if (d.dump) d = d.dump;
-    const fps = d.fps ?? d.meta.fps, r = sprintFromMotion({ motion: d.motion, ts: d.ts, fps });
+    const fps = d.fps ?? d.meta.fps, r = sprintFromMotion({ motion: withCamera(d.motion, cam(clip)), ts: d.ts, fps });
     const T = tally[fps < 90 ? 60 : 120];
     for (const [foot, tdS, toS] of list) {
       const td = parse(tdS), to = parse(toS), c = mid(td) ?? mid(to) - 5;
@@ -32,6 +35,8 @@ test('blind hand reads: touchdowns and toe-offs of every step', { skip: !have },
     }
   }
   const rate = a => a.filter(x => Math.abs(x) <= 1).length / a.length, mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  // 2026-11-22 against the camera's motion: 120 fps TD 96.1 %, TO 95.9 %; 60 fps TD 99.0 %, TO 96.2 %;
+  // 4 hand stances not found (8 with the strips).
   // 2026-11-21 with the settle and toe-off rules, every step found (shown or not): 120 fps TD 96 %
   // within a frame, TO 96 %; 60 fps TD 90 %, TO 96 %; no bias either way. A second pose run of the
   // same clips (T4) gave 95 / 95 / 88 / 94. The floors leave room for that run-to-run wobble.

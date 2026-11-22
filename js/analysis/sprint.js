@@ -131,7 +131,8 @@ export function stepsOf(contacts, start) {
 // Bumped when the contact rule changes, so the phone knows which analyses to run again.
 // 3 (2026-11-18): the server keeps the phone's bob in the track's motion and fills a lost toe.
 // 4 (2026-11-18): 60 fps clips get their own thresholds (STANCE_60).
-export const SPRINT_ALGO = 6;
+// 7 (2026-11-22): the track's motion is the camera's, measured on the whole picture (server/camflow.py).
+export const SPRINT_ALGO = 7;
 const realToe = (motion, foot, a, b) => motion.slice(a, b + 1).some(m => m && m[foot] && !m[`${foot}f`]);
 export const STANCE = { T: 2.0, edge: 0.45, minLen: 5, wide: 3.2, xw: 1 };
 // 60 fps (2026-11-18, Stanley's runs of 4 July filmed at 60): the thresholds are speeds per 1/120 s
@@ -164,7 +165,7 @@ export function footStances(motion, foot, ts, fps, { T = STANCE.T, edge = STANCE
     let r = refineEdges(precise, motion, x, y);
     if (r && r.b - r.a < 0.7 * (motion[y].f + 1 - motion[x].f)) r = null;
     const half = 0.5 / fps;
-    const fa = settleBack(motion, foot, r ? r.a : motion[x].f, fps, noise);
+    const fa = glitchBack(motion, foot, settleBack(motion, foot, r ? r.a : motion[x].f, fps, noise), fps);
     const fb = toeOff(motion, foot, fa, r ? r.b : motion[y].f + 1, fps);
     out.push({ foot, a: fa, b: fb, floor: m[k], td: ts[fa] - ts[0] - half, to: (ts[fb] ?? ts[fb - 1] + 1 / fps) - ts[0] + half });
   }
@@ -186,6 +187,35 @@ function settleBack(motion, foot, fa, fps, noise = 1, o = SPRINT) {
   };
   let a = fa; while (fa - (a - 1) <= max && ok(a - 1)) a--;
   return a;
+}
+
+// Straight at the camera the legs cross at touchdown and the pose loses the landing toe for a few
+// frames or puts it on the other foot (2026-11-22, 13:40 run: the left toe sat on the right foot at
+// 287-289, the stance read from 290, the hand 286; twice in that run, and the 10 m split there).
+// Those frames, right before a stance, belong to it when the toe was already slowing into them:
+// the touchdown goes back to the first of them. Unreliable: the match under GLITCH.score, a motion
+// no foot makes (over GLITCH.jump %h a frame at 120 fps: a foot swinging at twice a 10 m/s runner's
+// speed moves 9 %h), or the toe within GLITCH.merge %h of the other toe (needs the toe's place: the
+// server's full motion).
+export const GLITCH = { score: 0.65, jump: 12, merge: 3, max: 5, before: 2 };
+function glitchBack(motion, foot, fa, fps) {
+  const other = foot === 'l' ? 'r' : 'l', byF = new Map(); for (const m of motion) if (m) byF.set(m.f, m);
+  const max = Math.max(1, Math.round((GLITCH.max * fps) / 120));
+  const bad = f => {
+    const m = byF.get(f), t = m?.[foot];
+    if (!m || !t || !m.h) return false;
+    if ((t[2] ?? 1) < GLITCH.score) return true;
+    if (m.g && (Math.hypot(t[0] - m.g[0], t[1] - m.g[1]) / m.h) * 100 * (120 / fps) > GLITCH.jump) return true;
+    const o = m[other];
+    return t.length >= 5 && o?.length >= 5 && (Math.hypot(t[3] - o[3], t[4] - o[4]) / m.h) * 100 < GLITCH.merge;
+  };
+  let a = fa; while (fa - (a - 1) <= max && bad(a - 1)) a--;
+  if (a === fa) return fa;
+  // the frame before the glitch: the toe slowing down against the track, not swinging through
+  const m = byF.get(a - 1), t = m?.[foot];
+  if (!m || !t || !m.g || !m.h || (t[2] ?? 1) < GLITCH.score) return fa;
+  const v = (Math.hypot(t[0] - m.g[0], t[1] - m.g[1]) / m.h) * 100 * (120 / fps);
+  return v <= GLITCH.before * STANCE.T ? a : fa;
 }
 
 // The toe-off, from two misreads of the toe's patch (2026-11-21, every toe-off of 17 runs read
@@ -254,6 +284,18 @@ function fillGaps(contacts, motion, ts, fps, wide = STANCE.wide, lo = null) {
     add.push(...seq.slice(1, -1));
   }
   return [...list, ...add].sort((x, y) => x.td - y.td);
+}
+
+// The camera's motion (server/camflow.py: corners all over the picture outside the runner, Map or
+// list f -> [dx, dy]) as the track's motion the toes are held against (2026-11-22). The toes'
+// own motion is unchanged; frames the camera pass missed keep the strips' value.
+export function withCamera(motion, cam) {
+  const get = cam instanceof Map ? f => cam.get(f) : (m => f => m.get(f))(new Map((cam ?? []).map(([f, all, band]) => [f, band ?? all])));
+  if (!cam || (cam instanceof Map ? !cam.size : !cam.length)) return motion;
+  return motion.map(m => {
+    const g = m && get(m.f);
+    return g ? { ...m, gStrip: m.g, g: [...g], gRaw: [...g], gCam: 1 } : m;
+  });
 }
 
 export function sprintFromMotion({ motion, ts, fps, o = SPRINT }) {

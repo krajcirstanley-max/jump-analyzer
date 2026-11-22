@@ -22,7 +22,9 @@ SNAPSHOT = False
 # EU for over ten minutes and every job would have waited, so the A100 and L40S stand in (all run
 # the CUDA 13 build below). Since 2026-11-21 the cheap L4 comes first: H100 jobs (about $4.6/h with
 # CPU and memory) used up two Modal budgets on 2026-11-20. L40S is the fallback, same Ada family.
-GPU = ["L4", "L40S"]
+# 2026-11-22: neither L4 nor L40S was free in the EU for over ten minutes and a job sat queued; T4
+# (19 sprint clips that day, the same 12-13 s a job as the L4) and A10G stand in after them.
+GPU = ["L4", "T4", "A10G", "L40S"]
 # My own test and debug runs (server/_local_*_app.py) use this cheapest card, never the live one.
 DEBUG_GPU = ["T4", "L4"]
 # Pinned: 2.1.280+ is needed for claude-opus-5-5, and the build checks it still has --safe-mode.
@@ -50,7 +52,7 @@ gpu_image = (
         f"curl -fsSL {FFMPEG_URL} | tar xJ --strip-components=2 -C /usr/local/bin --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'",
         f"curl -fsSL {NODE_URL} | tar xJ --strip-components=1 -C /usr/local",
     )
-    .pip_install(*CUDA_WHEELS, "pywebpush==2.5.0")
+    .pip_install(*CUDA_WHEELS, "pywebpush==2.5.0", "numpy==2.5.5", "opencv-python-headless==5.1.0.95")
     .env({
         "LD_LIBRARY_PATH": ":".join([ORT_BIN, f"{SITE}/cu13/lib", f"{SITE}/cudnn/lib"]),
         "PYTHONPATH": "/app/server",
