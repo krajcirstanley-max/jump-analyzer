@@ -306,13 +306,18 @@ export function recordedAt(clip) {
 // The sprint's foot contacts for a clip already posed (2026-11-20): the long jump finds its board
 // contact among them instead of asking Claude to read every frame, the way the sprint counts its
 // steps. Same toe-against-track rule, same parallel pass. timing gets motion / motionParts.
-export async function stepsOf({ frames, meta, res, wire, timing = {} }) {
+// camera: the toes held against the camera's motion as in a sprint job. Not used for the rozbeh: on the
+// eight Ostrava run-ups (2026-11-22) the board contact came out up to 50 ms off and touchdowns within
+// a frame fell from 95 to 81 %, so the rozbeh keeps the strips it was checked with.
+export async function stepsOf({ frames, meta, res, wire, timing = {}, camera = false }) {
   const pose = fromWire(wire).clean, track = fillToes(pose);
   const tM = performance.now();
-  let motion = null;
+  let motion = null, camP = Promise.resolve(null);
   if (frames.fd) {
     await frames.get(res.last);
-    motion = await measureMotionParallel({ fd: await frames.fd(), W: meta.W, H: meta.H, track, from: res.first, to: res.last })
+    const fd = await frames.fd();
+    if (camera) camP = cameraMotion({ fd, W: meta.W, H: meta.H, track, from: res.first, to: res.last }).catch(e => { timing.cameraError = String(e?.message || e).slice(0, 300); return null; });
+    motion = await measureMotionParallel({ fd, W: meta.W, H: meta.H, track, from: res.first, to: res.last })
       .catch(e => { timing.motionError = String(e?.message || e).slice(0, 300); return null; });
   }
   if (!motion) {
@@ -325,6 +330,8 @@ export async function stepsOf({ frames, meta, res, wire, timing = {} }) {
     try { motion = await measureMotion({ getRGBA, W: meta.W, H: meta.H, track, from: res.first, to: res.last }); }
     finally { await it.return?.(); }
   }
+  const cam = await camP;
+  if (cam) { timing.cameraFrames = cam.size; motion = Object.assign(withCamera(motion, cam), { stats: motion.stats }); }
   timing.motion = Math.round(performance.now() - tM);
   timing.motionParts = motion?.stats;
   return sprintFromMotion({ motion, ts: meta.ts, fps: meta.fps });

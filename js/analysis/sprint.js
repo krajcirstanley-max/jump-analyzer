@@ -209,6 +209,9 @@ function glitchBack(motion, foot, fa, fps) {
     const o = m[other];
     return t.length >= 5 && o?.length >= 5 && (Math.hypot(t[3] - o[3], t[4] - o[4]) / m.h) * 100 < GLITCH.merge;
   };
+  // only where the toes are held against the camera (sprint jobs): the rozbeh and the jump's board
+  // contact keep the rule they were checked with
+  if (!byF.get(fa)?.gCam) return fa;
   let a = fa; while (fa - (a - 1) <= max && bad(a - 1)) a--;
   if (a === fa) return fa;
   // the frame before the glitch: the toe slowing down against the track, not swinging through

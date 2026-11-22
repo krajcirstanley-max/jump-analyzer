@@ -11,7 +11,8 @@ const JOBS_MAX = 20;
 export const MAX_UPLOAD = 300 * 1024 * 1024;
 
 const POLL_MS = 1500;
-const UPLOAD_TRIES = 3;
+// 5 (2026-11-22): on the hall's network a 49 MB drop jump broke off twice after 50-60 s and was lost
+export const UPLOAD_TRIES = 5;
 const RETRY_MS = 1500;           // first backoff after a failed upload; doubles
 const POLL_FAIL_LIMIT_MS = 5 * 60_000; // keep polling through a bad network this long
 // a batch of jumps queues on the server (2026-11-19: ten at once, the last ones waited over 10 min)
@@ -126,7 +127,7 @@ async function upload(file, query, { signal, onProgress }) {
       return await post(url, file, { signal, onProgress: report });
     } catch (e) {
       if (e.name === 'AbortError' || !e.transient || attempt >= UPLOAD_TRIES) throw e;
-      await sleep(RETRY_MS * 2 ** (attempt - 1), signal);
+      await sleep(Math.min(6000, RETRY_MS * 2 ** (attempt - 1)), signal);
     }
   }
 }

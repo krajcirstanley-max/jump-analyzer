@@ -1256,9 +1256,9 @@ enum ViewCopy {
 
 // MARK: - Where the jump is
 
-/// The biggest motion in the clip, from the luma at 1/15 of the size: each frame against the one
-/// two before, after the best shift of up to 3 samples (the hand's shake), smoothed over 0.1 s.
-/// Checked on 8 RSI clips (2026-11-18): the peak is the rebound's flight or its landing.
+/// The biggest motion of one place in the clip, from the luma at 1/15 of the size: each frame
+/// against the one two before, after the best shift of up to 3 samples (the hand's shake), smoothed
+/// over 0.1 s. Checked on 8 RSI clips (2026-11-18) and 6 long ones (2026-11-22, see below).
 enum JumpWindow {
     struct W { let from: Double; let to: Double; let dur: Double; let cut: Bool }
     static func find(_ src: URL) -> W? {
@@ -1291,24 +1291,57 @@ enum JumpWindow {
         }
         let n = frames.count
         guard n > 10, gw > 10, gh > 10 else { return nil }
+        // 2026-11-22: the whole picture's change picked the phone settling in the hand at 0.6-0.7 s
+        // over the jump at 4 s (two of Miška's drop jumps, the server got 1.7 s of her standing on
+        // the bench). The score is now the motion of one place: after the best shift, the busiest
+        // box of 6 x 6 samples against the frame's median sample. A body falling off a box or
+        // leaving the floor is one such place; a shaking phone changes every edge a little.
+        // On 6 long clips (3 that day, a CMJ, drop jumps of 14 and 18 Nov) the window holds the jump.
+        let B = 6, iw = gw - 8, ih = gh - 8
         var m = [Float](repeating: 0, count: n)
+        var d = [Float](repeating: 0, count: iw * ih), integ = [Float](repeating: 0, count: (iw + 1) * (ih + 1))
         for i in 2..<n {
-            let a = frames[i - 2], b = frames[i]; var best = Float.greatestFiniteMagnitude
+            let a = frames[i - 2], b = frames[i]; var best = Float.greatestFiniteMagnitude, bdx = 0, bdy = 0
             for dy in -3...3 { for dx in -3...3 {
-                var s: Float = 0, c: Float = 0
-                for y in 4..<(gh - 4) { for x in 4..<(gw - 4) { s += abs(a[y * gw + x] - b[(y + dy) * gw + x + dx]); c += 1 } }
-                best = min(best, s / c)
+                var s: Float = 0
+                for y in 4..<(gh - 4) { for x in 4..<(gw - 4) { s += abs(a[y * gw + x] - b[(y + dy) * gw + x + dx]) } }
+                if s < best { best = s; bdx = dx; bdy = dy }
             } }
-            m[i] = best
+            for y in 0..<ih { for x in 0..<iw { d[y * iw + x] = abs(a[(y + 4) * gw + x + 4] - b[(y + 4 + bdy) * gw + x + 4 + bdx]) } }
+            for y in 0..<ih {
+                var row: Float = 0
+                for x in 0..<iw { row += d[y * iw + x]; integ[(y + 1) * (iw + 1) + x + 1] = integ[y * (iw + 1) + x + 1] + row }
+            }
+            var box: Float = 0
+            for y in 0...(ih - B) { for x in 0...(iw - B) {
+                let s = integ[(y + B) * (iw + 1) + x + B] - integ[y * (iw + 1) + x + B] - integ[(y + B) * (iw + 1) + x] + integ[y * (iw + 1) + x]
+                box = max(box, s)
+            } }
+            let med = d.sorted()[d.count / 2]
+            m[i] = box / Float(B * B) - med
         }
-        var pk = 0, top: Float = -1
+        var pk = 0, top: Float = -1, sm = [Float](repeating: 0, count: n)
         for i in 0..<n {
             var s: Float = 0, c: Float = 0
             for k in max(0, i - 6)...min(n - 1, i + 6) { s += m[k]; c += 1 }
-            if s / c > top { top = s / c; pk = i }
+            sm[i] = s / c
+            if sm[i] > top { top = sm[i]; pk = i }
         }
-        let t = times[pk] - (times.first ?? 0)
-        let from = max(0, t - 1.8), to = min(dur, t + 1.0)
-        return W(from: from, to: to, dur: dur, cut: to - from < 0.8 * dur)
+        // A series (repeated hops, hurdle hops) keeps moving for seconds: the window grows from the
+        // peak while the motion stays over half the peak, gaps under 0.5 s allowed (2026-11-22: a 12 s
+        // hop series and a 10 s hurdle clip had been cut to 3 s). The phone settling in the hand
+        // before a drop jump is a separate burst, more than 0.5 s of quiet before the jump.
+        var lo = pk, hi = pk, last = pk
+        var i = pk
+        while i > 0 { i -= 1; if sm[i] >= 0.5 * top { lo = i; last = i } else if times[last] - times[i] > 0.5 { break } }
+        i = pk; last = pk
+        while i < n - 1 { i += 1; if sm[i] >= 0.5 * top { hi = i; last = i } else if times[i] - times[last] > 0.5 { break } }
+        let t0 = times.first ?? 0, t = times[pk] - t0
+        // the peak can be the drop, the rebound or the landing: room for the rest on both sides
+        let from = max(0, min(t - 2.0, times[lo] - t0 - 1.0)), to = min(dur, max(t + 1.2, times[hi] - t0 + 1.0))
+        // over 2.5 s of motion is a series, not one jump: sent whole (a hop series filmed passing the
+        // camera has its first and last hops small and quiet at the ends)
+        let series = times[hi] - times[lo] > 2.5
+        return W(from: from, to: to, dur: dur, cut: !series && to - from < 0.8 * dur)
     }
 }

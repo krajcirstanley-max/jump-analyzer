@@ -309,12 +309,12 @@ test('upload retries network failures and 5xx, then succeeds', async () => {
   assert.equal(FakeXHR.opened.length, 3);
 });
 
-test('upload gives up after three tries with a Slovak message', async () => {
+test('upload gives up after UPLOAD_TRIES tries with a Slovak message', async () => {
   reset();
-  FakeXHR.plan = [{ net: true }, { net: true }, { net: true }];
+  FakeXHR.plan = Array.from({ length: cloud.UPLOAD_TRIES }, () => ({ net: true }));
   fakeFetch([{ state: 'done', result: wire }]);
   await assert.rejects(cloud.analyzeInCloud(FILE, {}), /pripojenie/);
-  assert.equal(FakeXHR.opened.length, 3);
+  assert.equal(FakeXHR.opened.length, cloud.UPLOAD_TRIES);
 });
 
 test('auth and size errors do not retry', async () => {
