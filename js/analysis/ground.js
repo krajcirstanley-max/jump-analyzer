@@ -7,7 +7,7 @@
 // Measured on three handheld clips (2026-11-10): leg length from this scale was within 1 % of
 // 0.491 x height for Stanley (0.99-1.01) and 1.01-1.08 for Miška. The gravity fit on the same
 // clips was 6-28 % off, which is why this replaces it whenever the runway is found.
-import { P, has, dist, centreOfMass } from './kinematics.js';
+import { P, has, dist, centreOfMass, heightAboveFoot } from './kinematics.js';
 import { homography, applyH, invertH } from './homography.js';
 
 export const RUNWAY_W = 1.22;
@@ -230,15 +230,11 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   // The last three contacts on the ground: where the toe was planted, how long each contact and
   // step took, and how high the centre of mass rode. Heights are on the body's scale (the stance
   // leg, thigh + shank, as measured against the board above) from the foot's lowest point in the
-  // same frame, so neither the camera's pan nor its tilt enters.
+  // same frame, so neither the camera's pan nor its tilt enters. The leg enters by its angles
+  // (heightAboveFoot), not its image length.
   const fps = (ts.length - 1) / (ts[ts.length - 1] - ts[0]);
   const legMeasured = legUnits * boardM;
-  const heightAt = (i, c) => {
-    const k = track[i], m = k && centreOfMass(k, sex);
-    if (!m || !has(k, c.foot + 'hip', c.foot + 'knee', c.foot + 'ank', c.foot + 'bigtoe', c.foot + 'heel')) return NaN;
-    const legPx = dist(P(k, c.foot + 'hip'), P(k, c.foot + 'knee')) + dist(P(k, c.foot + 'knee'), P(k, c.foot + 'ank'));
-    return ((Math.max(P(k, c.foot + 'bigtoe')[1], P(k, c.foot + 'heel')[1]) - m[1]) / legPx) * legMeasured;
-  };
+  const heightAt = (i, c) => heightAboveFoot(track[i], c.foot, legMeasured, sex);
   const steady = (c, i) => median([i - 1, i, i + 1].filter(j => j >= c.td && j <= c.to).map(j => heightAt(j, c)));
   const contacts = [['third', ev.third], ['pen', ev.pen], ['take', { ...T, foot: s }]].filter(([, c]) => c && c.foot);
   const steps = contacts.map(([id, c], n) => {

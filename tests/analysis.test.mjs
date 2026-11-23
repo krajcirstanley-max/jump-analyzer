@@ -62,8 +62,9 @@ function jumper({ panRight = 9, tilt = 0, penDrop = 0 } = {}) {
       const [fx, fh] = foot(s);
       const hx = hipX, hh = hipH;
       let kx = (hx + fx) / 2 + 0.08, kh = (hh + fh) / 2 + 0.05;
-      if (penDrop && stance && stance[0] === s) { // a rigid 0.45 + 0.45 m leg, so lowering bends the knee
-        const ax = fx, ah = fh + 0.08, d = Math.hypot(hx - ax, hh - ah), off = Math.sqrt(Math.max(0, 0.45 ** 2 - (d / 2) ** 2));
+      if (penDrop && stance && stance[0] === s) { // a rigid 0.47 + 0.47 m leg, so lowering bends the knee
+        // (long enough to reach the foot planted 0.35 m ahead: heights come from real segment lengths)
+        const ax = fx, ah = fh + 0.08, d = Math.hypot(hx - ax, hh - ah), off = Math.sqrt(Math.max(0, 0.47 ** 2 - (d / 2) ** 2));
         kx = (hx + ax) / 2 + off * (hh - ah) / d; kh = (hh + ah) / 2 + off * (ax - hx) / d;
       }
       set(s + 'hip', hx + (s === 'l' ? 0.01 : -0.01), hh);
@@ -213,7 +214,8 @@ test('hip drop, last-stride speed and peak height on a jumper with known truth',
     const contacts = detectContacts(frames, 0, N - 1, FPS);
     const ev = keyFrames(frames, contacts, FPS);
     assert.ok(!ev.error, ev.error);
-    return { f: flightAnalysis(frames, ev, ts, 'male', contacts[0].dir), ev, frames };
+    // height for a 0.94 m leg (thigh + shank = 0.491 x height), the synthetic body's own
+    return { f: flightAnalysis(frames, ev, ts, 'male', contacts[0].dir, 0.94 / 0.491 * 100), ev, frames };
   };
   const { f, ev } = flightOf(0.06);
   assert.ok(f.scaleOk);

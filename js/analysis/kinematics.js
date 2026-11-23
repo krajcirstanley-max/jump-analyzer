@@ -78,6 +78,24 @@ export function centreOfMass(kp, sex = 'male') {
   return [parts.reduce((a, [w, p]) => a + w * p[0], 0) / m, parts.reduce((a, [w, p]) => a + w * p[1], 0) / m];
 }
 
+// Centre of mass above the stance foot's lowest point, in metres. The shank and thigh enter as
+// their real lengths (Winter: 0.246 and 0.245 x height, here as shares of the leg) times the
+// cosine of each segment's angle from vertical in the image, so the leg's image length doesn't
+// set the scale. That length read 10 % short on the board of IMG_5166 (2026-11-23) and moved the
+// height ~10 cm; with angles the run-up touchdowns of 17 clips scatter 1.2-2.5 cm, not 1.4-5.4.
+// Only the short ankle-to-foot and hip-to-centre gaps use the image scale.
+export function heightAboveFoot(kp, foot, legM, sex = 'male') {
+  const f = foot, m = kp && centreOfMass(kp, sex);
+  if (!m || !has(kp, f + 'hip', f + 'knee', f + 'ank', f + 'bigtoe', f + 'heel')) return NaN;
+  const h = P(kp, f + 'hip'), k = P(kp, f + 'knee'), a = P(kp, f + 'ank');
+  const shank = dist(a, k), thigh = dist(k, h);
+  if (!(shank > 0) || !(thigh > 0)) return NaN;
+  const perPx = legM / (shank + thigh);
+  const low = Math.max(P(kp, f + 'bigtoe')[1], P(kp, f + 'heel')[1]);
+  return legM * (0.246 / 0.491) * ((a[1] - k[1]) / shank) + legM * (0.245 / 0.491) * ((k[1] - h[1]) / thigh)
+    + (low - a[1] + h[1] - m[1]) * perPx;
+}
+
 // The foot's lowest point in the image (heel or toe, whichever is lower).
 export function footLow(kp, s) {
   const pts = [s + 'heel', s + 'bigtoe', s + 'ank'].filter(n => has(kp, n)).map(n => P(kp, n));

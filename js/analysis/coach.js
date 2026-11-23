@@ -132,7 +132,7 @@ const FAULTS = [
     title: 'Plytší predposledný krok',
     take: 'plytší predposledný krok ťa vynesie vyššie do odrazu',
     body: m => `Boky klesnú o ${val(m)}, cieľ je ${norm(m)}.`,
-    why: 'Ťažisko má klesnúť asi o 9 cm. Viac už len brzdí a rozbeh sa míňa.',
+    why: 'Finalisti klesnú do predposledného len o pár centimetrov a rýchlosť z rozbehu si donesú až do dosky.',
   },
   {
     // 2026-11-16 (Stanley: „poďme všetko"): „dlhý – krátky" instead of „predposledný naplocho". The

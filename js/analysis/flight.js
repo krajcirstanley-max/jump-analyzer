@@ -4,7 +4,7 @@
 //     centre of mass measured relative to it moves exactly as it does in the world.
 //  2. In flight the centre of mass falls at exactly g = 9.81 m/s², so fitting a
 //     parabola to its height gives the scale (pixels per metre) and a quality check.
-import { P, has, mid, dist, centreOfMass, torsoLength } from './kinematics.js';
+import { P, has, mid, dist, centreOfMass, torsoLength, heightAboveFoot } from './kinematics.js';
 
 const G = 9.81;
 const range = (a, b) => { const out = []; for (let i = a; i <= b; i++) out.push(i); return out; };
@@ -150,34 +150,27 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
   }
 
   // Centre-of-mass lowering. Pixels can't be compared across frames with a moving phone, so each
-  // height is the centre of mass above the foot on the ground in that same frame, turned into cm
-  // with that stance leg's own image length and the athlete's real leg length (thigh + shank
-  // = 0.491 x height, Winter). No flight scale needed: it works when metres are withheld.
+  // height is the centre of mass above the foot on the ground in that same frame, from the leg's
+  // angles and the athlete's real leg length (thigh + shank = 0.491 x height, Winter). No flight
+  // scale needed: it works when metres are withheld.
   const legM = (0.491 * (height ?? (sex === 'female' ? 168 : 180))) / 100;
-  const legPx = c => median(range(c.td + 2, c.to - 2).map(i => {
-    const k = track[i];
-    return k && has(k, c.foot + 'hip', c.foot + 'knee', c.foot + 'ank') ? dist(P(k, c.foot + 'hip'), P(k, c.foot + 'knee')) + dist(P(k, c.foot + 'knee'), P(k, c.foot + 'ank')) : NaN;
-  }).filter(Number.isFinite));
-  const above = (i, c, leg) => {
-    const k = track[i], m = com(i);
-    if (!m || !(leg > 0) || !has(k, c.foot + 'bigtoe', c.foot + 'heel')) return NaN;
-    return ((Math.max(P(k, c.foot + 'bigtoe')[1], P(k, c.foot + 'heel')[1]) - m[1]) / leg) * legM * 100;
-  };
+  const above = (i, c) => heightAboveFoot(track[i], c.foot, legM, sex) * 100;
   // A few frames around i, inside the contact only: before touchdown the foot is not the ground.
-  const steady = (c, i, leg) => median([i - 1, i, i + 1, i + 2].filter(j => j >= c.td && j <= c.to).map(j => above(j, c, leg)).filter(Number.isFinite));
+  const steady = (c, i) => median([i - 1, i, i + 1, i + 2].filter(j => j >= c.td && j <= c.to).map(j => above(j, c)).filter(Number.isFinite));
   // Into the penultimate: 3rd-last touchdown minus penultimate touchdown, Shimizu & Ae's interval
   // and instants. No published source reads mid-stance (research 2026-11-10), so neither do we.
   let hipDrop = NaN, hipDropFrame = null;
   if (ev.pen && ev.third) {
-    hipDrop = steady(ev.third, ev.third.td, legPx(ev.third)) - steady(ev.pen, ev.pen.td, legPx(ev.pen));
+    hipDrop = steady(ev.third, ev.third.td) - steady(ev.pen, ev.pen.td);
     hipDropFrame = ev.pen.td;
   }
   // Into the board, World Athletics' interval: penultimate toe-off to the lowest point on the board.
   let comDropBoard = NaN, comDropBoardFrame = null;
   if (ev.pen) {
-    const start = above(ev.pen.to, ev.pen, legPx(ev.pen)), legT = legPx(T);
+    // the last two frames of the toe-off, not one: a single frame's toe point moved it by cm
+    const start = median([ev.pen.to - 1, ev.pen.to].map(i => above(i, ev.pen)).filter(Number.isFinite));
     let low = Infinity;
-    for (let i = T.td; i <= T.to; i++) { const h = above(i, T, legT); if (h < low) { low = h; comDropBoardFrame = i; } }
+    for (let i = T.td; i <= T.to; i++) { const h = above(i, T); if (h < low) { low = h; comDropBoardFrame = i; } }
     if (Number.isFinite(start) && Number.isFinite(low)) comDropBoard = start - low;
   }
 
