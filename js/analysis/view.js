@@ -29,15 +29,24 @@ function metricRow(m, on) {
   if (!shown(m)) {
     return `<div class="met st-hidden" data-key="${esc(m.key)}"><div class="met-top"><span>${esc(m.label)}</span></div><p class="met-why">${esc(hiddenReason(m))}</p></div>`;
   }
-  const off = m.target != null && m.status !== 'ok';
-  const pre = m.estimate ? '≈ ' : '';
+  const off = m.target != null && m.status !== 'ok' && !m.range;
+  const pre = m.estimate && !m.range ? '≈ ' : '';
   const go = m.frame != null ? ` data-frame="${m.frame}"` : '';
   return `<div class="met st-${m.status}${on ? ' on' : ''}" data-key="${esc(m.key)}"${go}>
-    <div class="met-top"><span>${esc(m.label)}</span><b>${pre}${value(m, m.value)}${off ? ` <i>→ ${value(m, m.target)}</i>` : ''}</b></div>
+    <div class="met-top"><span>${esc(m.label)}</span><b>${pre}${m.range ? withUnit(m, `${num(m.range[0], 0)}–${num(m.range[1], 0)}`) : value(m, m.value)}${off ? ` <i>→ ${value(m, m.target)}</i>` : ''}</b></div>
     ${bandHtml(m)}
     <div class="met-n">Norma finalistov ${rangeText(m)}</div>
+    ${poseHtml(m)}
     ${partsHtml(m)}
   </div>`;
+}
+
+// Where a lowering is read (2026-11-23, Stanley: „správnu pózu … a píš to tam presne“): the two poses,
+// each a button to that frame, and what the range means.
+function poseHtml(m) {
+  if (m.key !== 'hipDrop' || !m.frames) return '';
+  const [a, b] = m.frames;
+  return `<div class="met-pose">Meria sa v póze, keď je ťažisko presne nad členkom stojnej nohy: <button class="pose-go" data-frame="${a}">3. posledný krok ▸</button> → <button class="pose-go" data-frame="${b}">predposledný ▸</button>. Rozsah: nižšie číslo bez zmeny chodidla (päta hore / celé chodidlo), vyššie s ňou.</div>`;
 }
 
 // Where a lowering comes from (2026-11-23, Stanley: „tie cm“): each part's share in cm, biggest first.

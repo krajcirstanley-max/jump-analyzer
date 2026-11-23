@@ -25,8 +25,7 @@ test('two jumps: whole jump first, phases with values, same-measure improvement,
   const p = s.plan;
   assert.equal(p.count, 2); assert.equal(p.intro, 2); assert.equal(p.best, 1); assert.equal(p.split, 1.09);
   assert.deepEqual(p.phases.slice(0, 3), ['pen:0,125 s', 'plant:63°', 'toeoff:0,125 s']);
-  // lowering into the penultimate on Panoutsakopoulos 2010's interval since 2026-11-23 (band 5-10 cm)
-  assert.deepEqual(p.improved, { key: 'hipDrop', from: '11 cm', to: '6 cm', a: 1, b: 2 });
+  assert.deepEqual(p.improved, { key: 'inclTD', from: '23°', to: '25°', a: 1, b: 2 });
   assert.deepEqual(p.bestOf, ['pen:1', 'plant:2', 'toeoff:1']);
   assert.equal(p.together, null, 'no "spolu" without a confirmed full run-up');
   assert.equal(p.next.value, '1,10 s');

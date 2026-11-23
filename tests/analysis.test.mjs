@@ -330,7 +330,7 @@ test('IMG_2674 (landing visible): key frames, plausible numbers, full result sha
     if (x.status === 'hidden') { assert.equal(x.score, null); continue; }
     assert.ok(x.score >= 0 && x.score <= 100, x.key);
     assert.ok(x.target >= x.norm[0] && x.target <= x.norm[1], x.key);
-    if (x.status === 'ok') assert.equal(x.target, x.value, x.key);
+    if (x.status === 'ok' && !x.range) assert.equal(x.target, x.value, x.key);   // a range is ok when it overlaps
   }
 });
 

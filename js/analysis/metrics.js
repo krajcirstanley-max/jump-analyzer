@@ -23,7 +23,8 @@ export const NORMS = {
   // 2006 European Cup, 8 men, 7.00-8.05 m, 3D-DLT, Table 5): centre of mass 3rd-last toe-off to
   // penultimate touchdown -0.07 ± 0.02 m (-0.05 to -0.10); penultimate support +0.01; penultimate
   // toe-off to board touchdown -0.03 ± 0.02; ~9 cm in all, 'as also reported in the 2007 World
-  // Championship'. No women's figure: the men's band is used for both.
+  // Championship'. No women's figure: the men's band is used for both. The app reads the supports at
+  // the pose with the centre of mass over the ankle (flight.js), ~1-2 cm off the study's instants.
   hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [5, 10], f: [5, 10] },
   // WA's interval: penultimate toe-off to the lowest centre of mass on the board. WA17 men 1-6,
   // WA18 men 2-8 (mean 3); WA17 women 1-6, WA18 women 1-9 (mean 3-4).
@@ -217,12 +218,19 @@ export function scaleReason(f) {
 // A lowering split into where it comes from (cm, positive = lower): shank, thigh, foot, trunk.
 // A lowering that starts at a toe-off the video can't read (see flight.js) is hidden, with why.
 const unsure = (r, flag, step) => (r && flag && r.status !== 'hidden' ? { ...r, status: 'hidden', reason: `výška ťažiska pri odlepení ${step} kroku sa na tomto videu nedá prečítať spoľahlivo (začiatok a koniec kontaktu sa líšia o viac ako 6 cm)` } : r);
+// A value known only as a range (lowering: with or without the foot's change): judged by overlap with
+// the norm, out of it only when the whole range is.
+const ranged = (r, range, frames) => {
+  if (!r || !range || r.status === 'hidden') return r;
+  const [lo, hi] = r.norm, status = range[1] < lo ? 'low' : range[0] > hi ? 'high' : 'ok';
+  return { ...r, range, frames, status };
+};
 const withParts = (r, parts) => (r && parts && Object.values(parts).every(Number.isFinite) ? { ...r, parts } : r);
 
 // Measurements from flightAnalysis(); withheld when the gravity scale check fails, except the
 // rise and vertical speed, which need only the apex in view.
 export function flightMetrics(f, ev, sex = 'male') {
-  if (!f || f.error) return [];
+  if (!f) return [];
   const g = sex === 'female' ? 'f' : 'm';
   const row = (key, value, frame) => {
     if (value == null || !Number.isFinite(value)) return null;
@@ -264,7 +272,7 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('speedKeep', f.speedKeep, ev.pen?.td ?? null),
     row('speedTO', f.vxTO, ev.takeoff.to),
     row('speedLoss', f.speedLoss, ev.takeoff.to),
-    unsure(withParts(row('hipDrop', f.hipDrop, f.hipDropFrame), f.hipDropParts), f.hipDropUnsure, '3. posledného'),
+    ranged(withParts(row('hipDrop', f.hipDrop, f.hipDropFrame), f.hipDropParts), f.hipDropRange, f.hipDropFrames),
     unsure(withParts(row('comDropBoard', f.comDropBoard, f.comDropBoardFrame), f.comDropBoardParts), f.comDropBoardUnsure, 'predposledného'),
     row('speedLossTO', f.speedLossTO, ev.takeoff.to),
     row('peakHeight', f.peakHeight, ev.apex),

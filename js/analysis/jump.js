@@ -21,10 +21,12 @@ const viewYawAt = (track, i) => (track[i] ? viewYaw(track[i]) : NaN);
 // value → target, per-metric score; hidden metrics have neither.
 function finish(m) {
   const hidden = m.status === 'hidden', [lo, hi] = m.norm;
+  // a value known only as a range is judged by its end nearest the norm (in it when they overlap)
+  const v = m.range ? (m.status === 'high' ? m.range[0] : m.status === 'low' ? m.range[1] : Math.min(hi, Math.max(lo, m.value))) : m.value;
   return {
     ...m, reason: m.reason ?? null, estimate: m.estimate ?? false,
-    score: hidden ? null : scoreMetric(m),
-    target: hidden ? null : Math.min(hi, Math.max(lo, m.value)),
+    score: hidden ? null : scoreMetric({ ...m, value: v }),
+    target: hidden ? null : Math.min(hi, Math.max(lo, v)),
   };
 }
 
