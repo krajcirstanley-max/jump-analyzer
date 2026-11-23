@@ -44,9 +44,12 @@ function metricRow(m, on) {
 // Where a lowering is read (2026-11-23, Stanley: „správnu pózu … a píš to tam presne“): the two poses,
 // each a button to that frame, and what the range means.
 function poseHtml(m) {
-  if (m.key !== 'hipDrop' || !m.frames) return '';
-  const [a, b] = m.frames;
-  return `<div class="met-pose">Meria sa v póze, keď je ťažisko presne nad členkom stojnej nohy: <button class="pose-go" data-frame="${a}">3. posledný krok ▸</button> → <button class="pose-go" data-frame="${b}">predposledný ▸</button>. Rozsah: nižšie číslo bez zmeny chodidla (päta hore / celé chodidlo), vyššie s ňou.</div>`;
+  if (!m.frames || !['hipDrop', 'comDropBoard'].includes(m.key)) return '';
+  const [a, b] = m.frames, go = (f, t) => `<button class="pose-go" data-frame="${f}">${t} ▸</button>`;
+  const where = m.key === 'hipDrop'
+    ? `v póze, keď je ťažisko presne nad členkom stojnej nohy: ${go(a, '3. posledný krok')} → ${go(b, 'predposledný')}`
+    : `od dotyku predposledného kroku po dotyk na doske: ${go(a, 'predposledný')} → ${go(b, 'doska')}`;
+  return `<div class="met-pose">Výška ťažiska nad zemou z celého tela (aj chodidla), ako v 3D štúdiách, ${where}.</div>`;
 }
 
 // Where a lowering comes from (2026-11-23, Stanley: „tie cm“): each part's share in cm, biggest first.

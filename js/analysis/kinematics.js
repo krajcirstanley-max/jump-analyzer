@@ -90,12 +90,18 @@ export function heightParts(kp, foot, legM, sex = 'male') {
   const h = P(kp, f + 'hip'), k = P(kp, f + 'knee'), a = P(kp, f + 'ank');
   const shank = dist(a, k), thigh = dist(k, h);
   if (!(shank > 0) || !(thigh > 0)) return null;
-  const perPx = legM / (shank + thigh);
-  const low = Math.max(P(kp, f + 'bigtoe')[1], P(kp, f + 'heel')[1]);
+  const perPx = legM / (shank + thigh), H = legM / 0.491;
+  // The foot by its angle too (2026-11-23): heel above toe rolls the foot over the toes' joints, toe
+  // above heel over the heel. Ankle height flat in a shoe 0.039 x height + 2 cm, ankle to the toes'
+  // joints 0.07 x height, to the heel 0.038 x height (Winter/Drillis proportions). A foot steeper than
+  // 45° in the image is a misread shoe.
+  const he = P(kp, f + 'heel'), to = P(kp, f + 'bigtoe');
+  const tilt = Math.atan2(to[1] - he[1], Math.abs(to[0] - he[0]));   // > 0: heel up
+  if (Math.abs(tilt) > Math.PI / 4) return null;
   return {
     shank: legM * (0.246 / 0.491) * ((a[1] - k[1]) / shank),
     thigh: legM * (0.245 / 0.491) * ((k[1] - h[1]) / thigh),
-    foot: (low - a[1]) * perPx, // ankle above the foot's lowest point: high on the forefoot, low on the heel
+    foot: 0.039 * H + 0.02 + (tilt >= 0 ? 0.07 : 0.038) * H * Math.sin(Math.abs(tilt)), // ankle above the ground
     top: (h[1] - m[1]) * perPx, // centre of mass above the stance hip: trunk and arms
   };
 }

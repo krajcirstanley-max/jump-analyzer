@@ -26,9 +26,10 @@ export const NORMS = {
   // Championship'. No women's figure: the men's band is used for both. The app reads the supports at
   // the pose with the centre of mass over the ankle (flight.js), ~1-2 cm off the study's instants.
   hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [5, 10], f: [5, 10] },
-  // WA's interval: penultimate toe-off to the lowest centre of mass on the board. WA17 men 1-6,
-  // WA18 men 2-8 (mean 3); WA17 women 1-6, WA18 women 1-9 (mean 3-4).
-  comDropBoard: { label: 'Zníženie ťažiska do dosky', unit: 'cm', m: [1, 8], f: [1, 9] },
+  // Penultimate touchdown to board touchdown, Panoutsakopoulos et al. 2010 Table 5 (penultimate support
+  // + its last flight), per athlete -1 to +4 cm, mean 1.6. Replaced WA's penultimate toe-off to the lowest
+  // point on the board (1-8) on 2026-11-23: a toe-off can't be read on a phone. No women's figure.
+  comDropBoard: { label: 'Zníženie ťažiska do dosky', unit: 'cm', m: [-1, 4], f: [-1, 4] },
   // Take-off speed against the mean speed from the penultimate touchdown to the board touchdown, %.
   // That is Berlin 2009's "loss at take-off" (men 12-22 %, women 13-19 %), not WA's touchdown-to-
   // take-off loss; the earlier WA-derived band (-17 to -3) was the wrong reference (2026-11-10).
@@ -216,15 +217,8 @@ export function scaleReason(f) {
 }
 
 // A lowering split into where it comes from (cm, positive = lower): shank, thigh, foot, trunk.
-// A lowering that starts at a toe-off the video can't read (see flight.js) is hidden, with why.
-const unsure = (r, flag, step) => (r && flag && r.status !== 'hidden' ? { ...r, status: 'hidden', reason: `výška ťažiska pri odlepení ${step} kroku sa na tomto videu nedá prečítať spoľahlivo (začiatok a koniec kontaktu sa líšia o viac ako 6 cm)` } : r);
-// A value known only as a range (lowering: with or without the foot's change): judged by overlap with
-// the norm, out of it only when the whole range is.
-const ranged = (r, range, frames) => {
-  if (!r || !range || r.status === 'hidden') return r;
-  const [lo, hi] = r.norm, status = range[1] < lo ? 'low' : range[0] > hi ? 'high' : 'ok';
-  return { ...r, range, frames, status };
-};
+// The two frames a lowering is read between, for the buttons under its row.
+const framed = (r, frames) => (r && frames && r.status !== 'hidden' ? { ...r, frames } : r);
 const withParts = (r, parts) => (r && parts && Object.values(parts).every(Number.isFinite) ? { ...r, parts } : r);
 
 // Measurements from flightAnalysis(); withheld when the gravity scale check fails, except the
@@ -272,8 +266,8 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('speedKeep', f.speedKeep, ev.pen?.td ?? null),
     row('speedTO', f.vxTO, ev.takeoff.to),
     row('speedLoss', f.speedLoss, ev.takeoff.to),
-    ranged(withParts(row('hipDrop', f.hipDrop, f.hipDropFrame), f.hipDropParts), f.hipDropRange, f.hipDropFrames),
-    unsure(withParts(row('comDropBoard', f.comDropBoard, f.comDropBoardFrame), f.comDropBoardParts), f.comDropBoardUnsure, 'predposledného'),
+    framed(withParts(row('hipDrop', f.hipDrop, f.hipDropFrame), f.hipDropParts), f.hipDropFrames),
+    framed(withParts(row('comDropBoard', f.comDropBoard, f.comDropBoardFrame), f.comDropBoardParts), f.comDropBoardFrames),
     row('speedLossTO', f.speedLossTO, ev.takeoff.to),
     row('peakHeight', f.peakHeight, ev.apex),
     row('landingReach', f.landingReach, ev.landing),

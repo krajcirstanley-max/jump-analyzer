@@ -196,58 +196,40 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
 export function lowering(track, ev, sex = 'male', height = null) {
   const T = ev.takeoff;
   const com = i => (track[i] ? centreOfMass(track[i], sex) : null);
-  // Centre-of-mass lowering. Pixels can't be compared across frames with a moving phone, so each
-  // height is the centre of mass above the foot on the ground in that same frame, from the leg's
-  // angles and the athlete's real leg length (thigh + shank = 0.491 x height, Winter). No flight
-  // scale needed: it works when metres are withheld.
+  // What the 3D studies measure (Panoutsakopoulos et al. 2010, NSA 25:1, Table 5): the whole body's
+  // centre of mass above the runway, from a segment model with the feet in it, at touchdowns and
+  // toe-offs. Here every segment is its real length (Winter, from the athlete's height) times the
+  // cosine of its angle in the image, the foot too (kinematics.js heightParts), so the shoe's blurred
+  // points set only an angle, not a distance, and no image scale enters but the short hip-to-centre gap.
+  // Toe-offs are not used: the same support read 7-12 cm higher or lower at toe-off than at its
+  // middle, the sign set by the camera (2026-11-23, 22 clips). Touchdowns and the middle hold.
   const legM = (0.491 * (height ?? (sex === 'female' ? 168 : 180))) / 100;
   const above = (i, c) => heightAboveFoot(track[i], c.foot, legM, sex) * 100;
-  // A few frames around i, inside the contact only: before touchdown the foot is not the ground.
-  const steady = (c, i) => median([i - 1, i, i + 1, i + 2].filter(j => j >= c.td && j <= c.to).map(j => above(j, c)).filter(Number.isFinite));
-  // the frame whose height is that median, for the breakdown into shank, thigh, foot and trunk
+  // the frame among js whose height is their median, for the value and its breakdown alike
   const medFrame = (c, js) => { const v = js.filter(j => j >= c.td && j <= c.to).map(j => [j, above(j, c)]).filter(([, h]) => Number.isFinite(h)).sort((x, y) => x[1] - y[1]); return v.length ? v[v.length >> 1][0] : null; };
   const partsAt = (c, j) => (j == null ? null : heightParts(track[j], c.foot, legM, sex));
-  // Into the penultimate (2026-11-23, Stanley: "nájdi lepší spôsob ... a správnu pózu"). Each support is
-  // read at one pose: the centre of mass straight over the stance ankle. There the shank and thigh are
-  // near vertical, so the angle method barely feels a few degrees of pose error (L x sin of a small
-  // angle), and the foot is down. On 22 clips the run-up supports read 0.8-2.4 cm apart at that pose.
-  // What stays unsure is the foot: ankle height over the shoe's lowest point (heel up on the 3rd-last,
-  // flat on the penultimate reads 5-9 cm apart, partly real, partly the shoe's blurred points). So the
-  // lowering is a range: without the foot's change (leg and trunk only) to with it.
-  // Reference: Panoutsakopoulos et al. 2010 measured 3rd-last toe-off to penultimate touchdown; a toe-off
-  // can't be read on a phone (see `shaky` below), the vertical pose can.
+  const drop = (a, ja, b, jb) => {
+    const fa = medFrame(a, ja), fb = medFrame(b, jb), parts = dropParts(partsAt(a, fa), partsAt(b, fb));
+    return parts && Object.values(parts).every(Number.isFinite) ? { value: Object.values(parts).reduce((x, y) => x + y, 0), parts, frames: [fa, fb] } : null;
+  };
+  // Into the penultimate: each support at the pose with the centre of mass straight over the stance
+  // ankle (leg near vertical: a few degrees of pose error barely move the height). The study's 3rd-last
+  // toe-off sits a few cm above that pose and its penultimate touchdown a few cm above the next one, so
+  // the two offsets about cancel; band 5-10 cm (its 8 men). 22 clips: run-up supports 0.3-2.9 cm apart.
   const vertical = c => { let best = null; for (let i = c.td; i <= c.to; i++) { const kp = track[i], m = com(i); if (!m || !has(kp, c.foot + 'ank')) continue; const dx = Math.abs(m[0] - P(kp, c.foot + 'ank')[0]); if (!best || dx < best[1]) best = [i, dx]; } return best ? best[0] : null; };
-  const w3 = i => [i - 1, i, i + 1];
-  let hipDrop = NaN, hipDropFrame = null, hipDropParts = null, hipDropRange = null, hipDropFrames = null;
+  const w3 = i => [i - 1, i, i + 1], tdW = c => [c.td, c.td + 1, c.td + 2];
+  let hipDrop = NaN, hipDropFrame = null, hipDropParts = null, hipDropFrames = null;
   if (ev.pen && ev.third) {
     const v3 = vertical(ev.third), vp = vertical(ev.pen);
-    if (v3 != null && vp != null) {
-      const parts = dropParts(partsAt(ev.third, medFrame(ev.third, w3(v3))), partsAt(ev.pen, medFrame(ev.pen, w3(vp))));
-      if (parts && Object.values(parts).every(Number.isFinite)) {
-        const leg = parts.shank + parts.thigh + parts.top, all = leg + parts.foot;
-        hipDropRange = [Math.min(leg, all), Math.max(leg, all)];
-        hipDrop = (leg + all) / 2;
-        hipDropParts = parts; hipDropFrame = vp; hipDropFrames = [v3, vp];
-      }
-    }
+    const d = v3 != null && vp != null ? drop(ev.third, w3(v3), ev.pen, w3(vp)) : null;
+    if (d) ({ value: hipDrop, parts: hipDropParts, frames: hipDropFrames } = d), hipDropFrame = vp;
   }
-  // a support whose touchdown and toe-off heights differ by more than 6 cm (3D data: ~1 cm) has a
-  // toe-off the video can't read
-  const w4 = i => [i - 1, i, i + 1, i + 2], toW = c => [c.to - 1, c.to];
-  const atW = (c, js) => median(js.filter(j => j >= c.td && j <= c.to).map(j => above(j, c)).filter(Number.isFinite));
-  const shaky = c => Math.abs(atW(c, w4(c.td)) - atW(c, toW(c))) > 6;
-  // Into the board, World Athletics' interval: penultimate toe-off to the lowest point on the board.
-  let comDropBoard = NaN, comDropBoardFrame = null, comDropBoardParts = null, comDropBoardUnsure = false;
+  // Into the board: penultimate touchdown to board touchdown, two touchdowns (both heel-first, both
+  // read well). Study: penultimate support + its last flight, per athlete -1 to +4 cm (mean 1.6).
+  let comDropBoard = NaN, comDropBoardFrame = null, comDropBoardParts = null, comDropBoardFrames = null;
   if (ev.pen) {
-    const start = atW(ev.pen, toW(ev.pen));
-    let low = Infinity;
-    for (let i = T.td; i <= T.to; i++) { const h = above(i, T); if (h < low) { low = h; comDropBoardFrame = i; } }
-    if (Number.isFinite(start) && Number.isFinite(low)) {
-      comDropBoard = start - low;
-      comDropBoardParts = dropParts(partsAt(ev.pen, medFrame(ev.pen, toW(ev.pen))), partsAt(T, comDropBoardFrame));
-      comDropBoardUnsure = shaky(ev.pen);
-    }
+    const d = drop(ev.pen, tdW(ev.pen), T, tdW(T));
+    if (d) ({ value: comDropBoard, parts: comDropBoardParts, frames: comDropBoardFrames } = d), comDropBoardFrame = T.td;
   }
-
-  return { hipDrop, hipDropFrame, hipDropParts, hipDropRange, hipDropFrames, comDropBoard, comDropBoardFrame, comDropBoardParts, comDropBoardUnsure };
+  return { hipDrop, hipDropFrame, hipDropParts, hipDropFrames, comDropBoard, comDropBoardFrame, comDropBoardParts, comDropBoardFrames };
 }
