@@ -6,7 +6,7 @@ import { Player } from './player.js';
 import { skeletonOverlay } from './pose/overlay.js';
 import { analyzeJump, cleanEdges } from './analysis/jump.js';
 import { expectedDistance } from './analysis/runup.js';
-import { coaching } from './analysis/coach.js';
+import { coaching, coachFits } from './analysis/coach.js';
 import { jointLabels, idealOverlay, flightOverlay } from './analysis/labels.js';
 import { centreOfMass } from './analysis/kinematics.js';
 import { idealsFor } from './analysis/ideal.js';
@@ -29,7 +29,7 @@ import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.32.1';
+const APP_VERSION = '0.32.2';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -878,7 +878,7 @@ const redrawRunup = () => {
 };
 
 // The confirmed run-up differs from the one the numbers were judged at: judge them again (the
-// speed-dependent norms move with it). The coaching text stays as it was written.
+// speed-dependent norms move with it). The coaching text stays as it was written while it still fits.
 // Only a time the athlete typed is Freelap truth; confirming the video's own 1-11 m time adds nothing.
 const typedSplit = j => (j?.split != null && !(Math.abs(j.split - (j.speed?.split1to11 ?? -1)) < 0.006) ? j.split : null);
 // force: run again although the run-up is the same (a new tape distance rescales the metres).
@@ -887,7 +887,9 @@ async function rejudge(id, v, force = false) {
   const a = resultAthlete, who = ATHLETES[a];
   const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null, split: typedSplit(jump), edges: jump.edges ?? null });
   if (next.error || id !== resultId) return;
-  jump = Object.assign(next, { coach: jump.coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v, edges: jump.edges ?? null });
+  // the written coaching stays unless today's numbers contradict it; then the template speaks
+  const coach = coachFits(jump.coach, next.metrics) || jump.coach == null ? jump.coach : coaching(next.metrics, who.sex, { name: who.name });
+  jump = Object.assign(next, { coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v, edges: jump.edges ?? null });
   if (player) { setOverlays(); player.refresh(); }
   await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump });
   if (id === resultId) present(jump.feel ?? null);

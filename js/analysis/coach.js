@@ -9,7 +9,7 @@ import { scoreMetric } from './metrics.js';
 
 // Phases and the measurements that score them (weights: how much each phase counts).
 export const PHASES = [
-  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'comDropBoard', 'stepChange', 'speedKeep'] },
+  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'stepChange', 'speedKeep'] },
   { id: 'plant', label: 'Plant', weight: 0.35, keys: ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin', 'kneeVel', 'touchdownDist', 'speedLossTO'] },
   { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'freeDrop', 'trunkTO', 'trunkRotBoard', 'toHeight'] },
   { id: 'flight', label: 'Let', weight: 0.05, keys: ['trunkStability'] },
@@ -291,6 +291,20 @@ function offending(fault, by) {
     if (miss > margin) hits.push(m);
   }
   return hits;
+}
+
+// A saved coaching text still fits today's numbers: every fix it names is measured, shown and still
+// out of its norm. Norms and metrics change (2026-11-23: lowering into the penultimate went from a
+// 2-6 cm band to 5-10, the extra knee bend was dropped), and a stored text then argues with the
+// numbers on the same screen ("kleslo o 8,4 cm, cieľ je 2-6 cm" above a 5-10 cm bar).
+export function coachFits(coach, metrics = []) {
+  if (!coach || !Array.isArray(coach.fixes)) return false;
+  const by = Object.fromEntries(metrics.filter(m => m && m.key).map(m => [m.key, m]));
+  return coach.fixes.every(f => {
+    if (f.metricKey == null) return true;
+    const m = by[f.metricKey];
+    return !!m && m.status !== 'hidden' && m.status !== 'ok';
+  });
 }
 
 export function coaching(metrics = [], sex = 'male', { name, all = false } = {}) {

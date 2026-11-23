@@ -275,3 +275,12 @@ test('lowering into the penultimate never gives a cue', () => {
     assert.ok(!c.fixes.some(f => f.metricKey === 'hipDrop'), c.fixes.map(f => f.title).join(' / '));
   }
 });
+
+// 2026-11-23: a stored text said "kleslo o 8,4 cm, cieľ je 2-6 cm" above a 5-10 cm bar.
+test('a saved coaching text that today\'s numbers contradict is not kept', async () => {
+  const { coachFits } = await import('../js/analysis/coach.js');
+  const coach = { fixes: [{ metricKey: 'hipDrop' }, { metricKey: null }] };
+  assert.equal(coachFits(coach, [metric('hipDrop', 8.4, [5, 10], { unit: 'cm' })]), false, 'now in the norm');
+  assert.equal(coachFits(coach, []), false, 'no longer measured');
+  assert.equal(coachFits(coach, [metric('hipDrop', 12, [5, 10], { unit: 'cm' })]), true, 'still out of it');
+});
