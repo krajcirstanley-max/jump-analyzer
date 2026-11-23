@@ -9,7 +9,7 @@ import { scoreMetric } from './metrics.js';
 
 // Phases and the measurements that score them (weights: how much each phase counts).
 export const PHASES = [
-  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'hipDrop', 'comDropBoard', 'penKnee', 'stepChange', 'speedKeep'] },
+  { id: 'pen', label: 'Predposledný', weight: 0.2, keys: ['contactPen', 'flightToBoard', 'comDropBoard', 'stepChange', 'speedKeep'] },
   { id: 'plant', label: 'Plant', weight: 0.35, keys: ['contactTO', 'kneeTD', 'legTD', 'inclTD', 'kneeMin', 'kneeVel', 'touchdownDist', 'speedLossTO'] },
   { id: 'toeoff', label: 'Odraz', weight: 0.25, keys: ['kneeTO', 'hipTO', 'takeoffAngle', 'kneeDrive', 'freeDrop', 'trunkTO', 'trunkRotBoard', 'toHeight'] },
   { id: 'flight', label: 'Let', weight: 0.05, keys: ['trunkStability'] },
@@ -125,43 +125,9 @@ const FAULTS = [
     body: m => `Kontakt na predposlednom ${val(m)}, finalisti majú ${norm(m)}.`,
     why: 'Predposledný pripraví odraz, ale s dlhým kontaktom je z neho brzda. Treba ho prebehnúť, telo klesá len o pár centimetrov.',
   },
-  {
-    id: 'hipDropHigh', tier: 'approach', phase: 'pen', cue: 'drž vysoké boky do dosky',
-    img: 'Pred doskou podbehneš natiahnutú šnúru len o šírku dlane, nie prikrčený.',
-    keys: [['hipDrop', 'high', 1.5]],
-    title: 'Plytší predposledný krok',
-    take: 'plytší predposledný krok ťa vynesie vyššie do odrazu',
-    body: m => `Boky klesnú o ${val(m)}, cieľ je ${norm(m)}.`,
-    why: 'Finalisti klesnú do predposledného len o pár centimetrov a rýchlosť z rozbehu si donesú až do dosky.',
-  },
-  {
-    // 2026-11-16 (Stanley: „poďme všetko"): „dlhý – krátky" instead of „predposledný naplocho". The
-    // longer penultimate step lowers the hips by itself; the old cue spoke of the foot.
-    id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
-    img: 'Rytmus tá-dam: predposledný krok dlhší a nižší, posledný krátky a rýchly.',
-    keys: [['hipDrop', 'low', 1.5]],
-    // when the hips do come down, only on the last step into the board, hipDropLate speaks instead
-    unless: [['comDropBoard', ['ok', 'high']]],
-    title: 'Trochu znížiť boky pred doskou',
-    take: 'malé zníženie bokov pred doskou ti dá z čoho ísť hore',
-    body: m => `Boky klesnú len o ${val(m)}, cieľ je ${norm(m)}.`,
-    why: 'Bez malého zníženia niet z čoho ísť hore a rýchlosť ostane vodorovná.',
-  },
-  {
-    // 2026-11-23 (Miška, 22 Nov evening): into the penultimate 0-2 cm, but 5-10 cm from the
-    // penultimate toe-off to the board. Her penultimate knee bent no more than the step before
-    // (penKnee -7 to +8°), so the drop comes late, on the board. Telling her to lower at all was
-    // wrong; the point is where. Stanley has the opposite pattern, 6-14 cm into the penultimate and a
-    // flat last step: the right shape, but deeper than the band (hipDropHigh).
-    id: 'hipDropLate', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
-    img: 'Rytmus tá-dam: predposledný krok dlhší a nižší, posledný krátky a rýchly.',
-    keys: [['hipDrop', 'low', 1.5]],
-    requires: [['comDropBoard', ['ok', 'high']]],
-    title: 'Znížiť sa už v predposlednom kroku',
-    take: 'keď sa znížiš už v predposlednom kroku, z dosky pôjdeš rovno hore',
-    body: m => `Boky klesnú hlavne na poslednom kroku do dosky. Do predposledného ${val(m)}, cieľ je ${norm(m)}.`,
-    why: 'Keď boky klesnú v predposlednom, posledný krok je plochý a rýchly a z dosky ideš hore.',
-  },
+  // 2026-11-23 (Stanley: „vymaž to a choď podľa finalistov a iných štúdií“): no cue on lowering into
+  // the penultimate. Its only source was Shimizu & Ae 2016 (6 university men) and its biggest part on a
+  // phone is the shoe's heel and toe points. Lowering is read only into the board, on WA finalists.
   {
     id: 'flightToBoard', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
     img: 'Posledné dva kroky znejú ta-dam: dlhé „ta“, krátke rýchle „dam“.',

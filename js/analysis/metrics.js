@@ -23,6 +23,7 @@ export const NORMS = {
   // (cm on the athlete's leg; with the runway found, the leg as measured against the board).
   // Shimizu & Ae (ISBS, 6 university men, PB 7.06): 3 cm lower at penultimate touchdown, 6 ± 2 at
   // board touchdown. Published lowering is 1-9 cm against a ~3 cm measurement error (Lees 1993).
+  // NOT SHOWN since 2026-11-23 (no finalist source); kept for old saved jumps and the what-if card.
   hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [2, 6], f: [2, 6] },
   // WA's interval: penultimate toe-off to the lowest centre of mass on the board. WA17 men 1-6,
   // WA18 men 2-8 (mean 3); WA17 women 1-6, WA18 women 1-9 (mean 3-4).
@@ -49,6 +50,7 @@ export const NORMS = {
   // penultimate than in the step before. An angle, so no scale and no perspective. It agreed
   // in direction with hipDrop on all five clips (+5/+8° Stanley, 0/+1/-7° Miška). PROVISIONAL
   // band, engineering judgement: no published elite value for the difference.
+  // NOT SHOWN since 2026-11-23 (no finalist or study band).
   penKnee: { label: 'Ohyb kolena v predposlednom navyše', unit: '°', m: [3, 15], f: [3, 15] },
   // WA17 men 165.5-179.9, WA18 160.1-172.2; women WA17 155.8-177.5, WA18 160.0-174.5. NEM sub-elite
   // 167 ± 4.5 / 165.5 ± 4.6.
@@ -260,7 +262,7 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('speedKeep', f.speedKeep, ev.pen?.td ?? null),
     row('speedTO', f.vxTO, ev.takeoff.to),
     row('speedLoss', f.speedLoss, ev.takeoff.to),
-    withParts(row('hipDrop', f.hipDrop, f.hipDropFrame), f.hipDropParts),
+    // lowering into the penultimate (hipDrop) not shown since 2026-11-23: one study of 6 university men
     withParts(row('comDropBoard', f.comDropBoard, f.comDropBoardFrame), f.comDropBoardParts),
     row('speedLossTO', f.speedLossTO, ev.takeoff.to),
     row('peakHeight', f.peakHeight, ev.apex),
@@ -309,10 +311,8 @@ export function measure(track, ev, fps, sex = 'male', dir = 1, raw = track) {
   if (pen) {
     add('contactPen', ms(pen.to - pen.td + 1), null, false);
     add('flightToBoard', ms(T.td - pen.to - 1), null, false);
-    if (ev.third) {
-      const a = deepestKnee(raw, ev.third), b = deepestKnee(raw, pen);
-      if (a && b) add('penKnee', a.angle - b.angle, b.frame, true);
-    }
+    // penKnee (extra knee bend in the penultimate) is not shown since 2026-11-23: its band had no
+    // finalist or study behind it. Only metrics with a published norm are graded.
   }
   const td = track[T.td], to = track[T.to], mk = kf('maxFlex');
   if (td && has(td, s + 'hip', s + 'knee', s + 'ank')) {

@@ -313,7 +313,7 @@ test('IMG_2674 (landing visible): key frames, plausible numbers, full result sha
   assert.ok(m.speedLast.value > 7 && m.speedLast.value < 10.5, `last ${m.speedLast.value}`);
   assert.ok(m.speedTO.value > 6 && m.speedTO.value < m.speedLast.value, `TO ${m.speedTO.value}`);
   assert.ok(m.peakHeight.value > 25 && m.peakHeight.value < 70, `peak ${m.peakHeight.value}`);
-  assert.ok(m.hipDrop.value > -5 && m.hipDrop.value < 15, `drop ${m.hipDrop.value}`);
+  assert.equal(m.hipDrop, undefined, 'lowering into the penultimate is not shown (2026-11-23)');
   assert.ok(m.kneeDrive.value > 50 && m.kneeDrive.value < 100, `drive ${m.kneeDrive.value}`);
   assert.ok(Math.abs(m.trunkStability.value) < 40, `trunk ${m.trunkStability.value}`);
   assert.equal(j.speed.last.key, 'speedLast');
@@ -335,7 +335,7 @@ test('IMG_4390 (landing hidden, 0.27 s of flight): metres stay hidden, angles do
   const j = real('IMG_4390', 'female'), m = by(j);
   assert.deepEqual(frames(j), { td3: 421, penTD: 453, penTO: 469, TD: 483, maxFlex: 490, TO: 497, apex: 530 });
   for (const k of ['peakHeight', 'speedLast', 'speedTO', 'speedLoss']) assert.equal(m[k].status, 'hidden', k);
-  for (const k of ['hipDrop', 'comDropBoard']) assert.notEqual(m[k]?.status ?? 'missing', 'hidden', k);
+  assert.notEqual(m.comDropBoard?.status ?? 'missing', 'hidden');
   assert.notEqual(m.kneeDrive.status, 'hidden');
   assert.notEqual(m.trunkStability.status, 'hidden');
   assert.equal(j.speed.sure, 'nízka');

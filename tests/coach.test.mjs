@@ -267,16 +267,11 @@ test('missing SDK falls back rather than throwing', silent(async () => {
   assert.equal((await writeCoaching({ ...args, apiKey: 'x', timeoutMs: 2000 })).source, 'template');
 }));
 
-// 2026-11-23: Miška's hips barely dropped into the penultimate but dropped 6-10 cm into the board.
-// "Lower your hips" was wrong for her; the late drop gets "lower already in the penultimate".
-test('low hips into the penultimate: late drop onto the board is told apart from no drop at all', () => {
-  const pen = metric('hipDrop', -0.5, [2, 6], { unit: 'cm' });
-  const late = coaching([pen, metric('comDropBoard', 7, [1, 9], { unit: 'cm' })], 'female');
-  assert.ok(late.fixes.some(f => f.title === 'Znížiť sa už v predposlednom kroku'), late.fixes.map(f => f.title).join(' / '));
-  assert.ok(!late.fixes.some(f => f.title === 'Trochu znížiť boky pred doskou'));
-  const none = coaching([pen, metric('comDropBoard', 0, [1, 9], { unit: 'cm' })], 'female');
-  assert.ok(none.fixes.some(f => f.title === 'Trochu znížiť boky pred doskou'));
-  assert.ok(!none.fixes.some(f => f.title === 'Znížiť sa už v predposlednom kroku'));
-  const unseen = coaching([pen], 'female');
-  assert.ok(unseen.fixes.some(f => f.title === 'Trochu znížiť boky pred doskou'));
+// 2026-11-23: no cue on lowering into the penultimate any more (one study of 6 jumpers, the shoe's
+// points on a phone); Stanley: go by the finalists and other studies.
+test('lowering into the penultimate never gives a cue', () => {
+  for (const v of [-0.5, 10]) {
+    const c = coaching([metric('hipDrop', v, [2, 6], { unit: 'cm' }), metric('comDropBoard', 4, [1, 8], { unit: 'cm' })], 'male', { all: true });
+    assert.ok(!c.fixes.some(f => f.metricKey === 'hipDrop'), c.fixes.map(f => f.title).join(' / '));
+  }
 });

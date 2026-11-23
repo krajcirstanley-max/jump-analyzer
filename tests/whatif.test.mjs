@@ -33,12 +33,8 @@ test('speed: the transfer share of the approach gain reaches take-off (Béres 20
   assert.ok(Math.abs(x.freelap.now - 10 / 8.83) < 1e-9 && Math.abs(x.freelap.target - 10 / x.target) < 1e-9);
 });
 
-test('deep sit: the take-off CoM rises by the extra drop (capped by the height norm); no speed was lost in this jump', () => {
-  const x = whatIf(jump(), 'male', { height: 186 }).items.find(i => i.id === 'hipDropHigh');
-  const com = x.effects.find(e => e.label.startsWith('Ťažisko'));
-  assert.ok(com.cm[0] > 0.05 && com.cm[0] < 0.09, `${com.cm[0]}`);
-  const sp = x.effects.find(e => e.label.startsWith('Rýchlosť'));
-  assert.deepEqual(sp.cm, [0, 0]);
+test('no deep-sit card: lowering into the penultimate gives no cue since 2026-11-23', () => {
+  assert.equal(whatIf(jump(), 'male', { height: 186 }).items.find(i => i.id === 'hipDropHigh'), undefined);
 });
 
 test('ranked by cost, one pick, cues only, never summed across changes', () => {
