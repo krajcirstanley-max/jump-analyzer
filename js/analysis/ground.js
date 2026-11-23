@@ -7,7 +7,7 @@
 // Measured on three handheld clips (2026-11-10): leg length from this scale was within 1 % of
 // 0.491 x height for Stanley (0.99-1.01) and 1.01-1.08 for Miška. The gravity fit on the same
 // clips was 6-28 % off, which is why this replaces it whenever the runway is found.
-import { P, has, dist, centreOfMass, heightAboveFoot } from './kinematics.js';
+import { P, has, dist, centreOfMass, heightAboveFoot, heightParts } from './kinematics.js';
 import { homography, applyH, invertH } from './homography.js';
 
 export const RUNWAY_W = 1.22;
@@ -236,6 +236,8 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
   const legMeasured = legUnits * boardM;
   const heightAt = (i, c) => heightAboveFoot(track[i], c.foot, legMeasured, sex);
   const steady = (c, i) => median([i - 1, i, i + 1].filter(j => j >= c.td && j <= c.to).map(j => heightAt(j, c)));
+  // the frame whose height is that median, so a lowering can be split into shank, thigh, foot and trunk
+  const partsAt = (c, i) => { const v = [i - 1, i, i + 1].filter(j => j >= c.td && j <= c.to).map(j => [j, heightAt(j, c)]).filter(([, h]) => Number.isFinite(h)).sort((x, y) => x[1] - y[1]); return v.length ? heightParts(track[v[v.length >> 1][0]], c.foot, legMeasured, sex) : null; };
   const contacts = [['third', ev.third], ['pen', ev.pen], ['take', { ...T, foot: s }]].filter(([, c]) => c && c.foot);
   const steps = contacts.map(([id, c], n) => {
     const toes = []; for (let i = c.td + 1; i <= c.to - 1; i++) toes.push(...footX(i, [c.foot + 'bigtoe']));
@@ -249,7 +251,8 @@ export function groundAnalysis(ground, track, ev, ts, sex = 'male', height = nul
     const toeOff = median([c.to - 1, c.to].flatMap(i => footX(i, [c.foot + 'bigtoe']))) * boardM;
     const st = { id, foot: c.foot, td: c.td, to: c.to, contactMs: ((c.to - c.td + 1) / fps) * 1000, toeX: median(toes) * boardM,
       tdDist: X(c.td) - heelTD, toDist: toeOff - X(c.to),
-      com: { td: steady(c, c.td), mid: mid != null ? steady(c, mid) : NaN, low: low?.[1] ?? NaN, lowFrame: low?.[0] ?? null, to: steady(c, c.to) } };
+      com: { td: steady(c, c.td), mid: mid != null ? steady(c, mid) : NaN, low: low?.[1] ?? NaN, lowFrame: low?.[0] ?? null, to: steady(c, c.to),
+        parts: { td: partsAt(c, c.td), to: partsAt(c, c.to), low: low ? heightParts(track[low[0]], c.foot, legMeasured, sex) : null } } };
     if (next) {
       st.flightMs = ((next.td - c.to - 1) / fps) * 1000;
       st.stepMs = (ts[next.td] - ts[c.td]) * 1000;

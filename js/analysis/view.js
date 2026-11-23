@@ -36,7 +36,17 @@ function metricRow(m, on) {
     <div class="met-top"><span>${esc(m.label)}</span><b>${pre}${value(m, m.value)}${off ? ` <i>→ ${value(m, m.target)}</i>` : ''}</b></div>
     ${bandHtml(m)}
     <div class="met-n">Norma finalistov ${rangeText(m)}</div>
+    ${partsHtml(m)}
   </div>`;
+}
+
+// Where a lowering comes from (2026-11-23, Stanley: „tie cm“): each part's share in cm, biggest first.
+const PART_LABEL = { thigh: 'stehno', shank: 'predkolenie', foot: 'chodidlo', top: 'trup a ruky' };
+function partsHtml(m) {
+  if (!m.parts) return '';
+  const bits = Object.entries(m.parts).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .map(([k, v]) => `${PART_LABEL[k]} <b>${num(Math.round(v * 10) / 10 || 0, 1)}</b>`);
+  return `<div class="met-parts">Z toho (cm): ${bits.join(' · ')}</div>`;
 }
 
 // The finalists' range as a band and the athlete as a dot on it (design approved by Stanley,

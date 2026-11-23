@@ -7,7 +7,7 @@ import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
 import { refineTouchdowns, refineClaudeEdges } from './refine.js';
-import { sharpen, has, P, torsoLength, centreOfMass } from './kinematics.js';
+import { sharpen, has, P, torsoLength, centreOfMass, dropParts } from './kinematics.js';
 import { techniqueScore, coaching, PHASES } from './coach.js';
 
 const KF_LABELS = {
@@ -183,8 +183,8 @@ function lowerings(g, f) {
   const by = Object.fromEntries((g.steps ?? []).map(s => [s.id, s]));
   const out = {};
   const pen = by.pen, third = by.third, take = by.take;
-  if (third && pen && Number.isFinite(third.com.td - pen.com.td)) { out.hipDrop = (third.com.td - pen.com.td) * 100; out.hipDropFrame = pen.td; }
-  if (pen && take && Number.isFinite(pen.com.to - take.com.low)) { out.comDropBoard = (pen.com.to - take.com.low) * 100; out.comDropBoardFrame = take.com.lowFrame; }
+  if (third && pen && Number.isFinite(third.com.td - pen.com.td)) { out.hipDrop = (third.com.td - pen.com.td) * 100; out.hipDropFrame = pen.td; out.hipDropParts = dropParts(third.com.parts?.td, pen.com.parts?.td); }
+  if (pen && take && Number.isFinite(pen.com.to - take.com.low)) { out.comDropBoard = (pen.com.to - take.com.low) * 100; out.comDropBoardFrame = take.com.lowFrame; out.comDropBoardParts = dropParts(pen.com.parts?.to, take.com.parts?.low); }
   return out;
 }
 

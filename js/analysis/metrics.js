@@ -212,6 +212,9 @@ export function scaleReason(f) {
   return `z letu je vidno len ${(f?.fitSeconds ?? 0).toFixed(2).replace('.', ',')} s, na mierku v metroch to nestačí`;
 }
 
+// A lowering split into where it comes from (cm, positive = lower): shank, thigh, foot, trunk.
+const withParts = (r, parts) => (r && parts && Object.values(parts).every(Number.isFinite) ? { ...r, parts } : r);
+
 // Measurements from flightAnalysis(); withheld when the gravity scale check fails, except the
 // rise and vertical speed, which need only the apex in view.
 export function flightMetrics(f, ev, sex = 'male') {
@@ -257,8 +260,8 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('speedKeep', f.speedKeep, ev.pen?.td ?? null),
     row('speedTO', f.vxTO, ev.takeoff.to),
     row('speedLoss', f.speedLoss, ev.takeoff.to),
-    row('hipDrop', f.hipDrop, f.hipDropFrame),
-    row('comDropBoard', f.comDropBoard, f.comDropBoardFrame),
+    withParts(row('hipDrop', f.hipDrop, f.hipDropFrame), f.hipDropParts),
+    withParts(row('comDropBoard', f.comDropBoard, f.comDropBoardFrame), f.comDropBoardParts),
     row('speedLossTO', f.speedLossTO, ev.takeoff.to),
     row('peakHeight', f.peakHeight, ev.apex),
     row('landingReach', f.landingReach, ev.landing),

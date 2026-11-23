@@ -4,7 +4,7 @@
 //     centre of mass measured relative to it moves exactly as it does in the world.
 //  2. In flight the centre of mass falls at exactly g = 9.81 m/s², so fitting a
 //     parabola to its height gives the scale (pixels per metre) and a quality check.
-import { P, has, mid, dist, centreOfMass, torsoLength, heightAboveFoot } from './kinematics.js';
+import { P, has, mid, dist, centreOfMass, torsoLength, heightAboveFoot, heightParts, dropParts } from './kinematics.js';
 
 const G = 9.81;
 const range = (a, b) => { const out = []; for (let i = a; i <= b; i++) out.push(i); return out; };
@@ -157,21 +157,29 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
   const above = (i, c) => heightAboveFoot(track[i], c.foot, legM, sex) * 100;
   // A few frames around i, inside the contact only: before touchdown the foot is not the ground.
   const steady = (c, i) => median([i - 1, i, i + 1, i + 2].filter(j => j >= c.td && j <= c.to).map(j => above(j, c)).filter(Number.isFinite));
+  // the frame whose height is that median, for the breakdown into shank, thigh, foot and trunk
+  const medFrame = (c, js) => { const v = js.filter(j => j >= c.td && j <= c.to).map(j => [j, above(j, c)]).filter(([, h]) => Number.isFinite(h)).sort((x, y) => x[1] - y[1]); return v.length ? v[v.length >> 1][0] : null; };
+  const partsAt = (c, j) => (j == null ? null : heightParts(track[j], c.foot, legM, sex));
   // Into the penultimate: 3rd-last touchdown minus penultimate touchdown, Shimizu & Ae's interval
   // and instants. No published source reads mid-stance (research 2026-11-10), so neither do we.
-  let hipDrop = NaN, hipDropFrame = null;
+  let hipDrop = NaN, hipDropFrame = null, hipDropParts = null;
   if (ev.pen && ev.third) {
     hipDrop = steady(ev.third, ev.third.td) - steady(ev.pen, ev.pen.td);
     hipDropFrame = ev.pen.td;
+    const w = i => [i - 1, i, i + 1, i + 2];
+    hipDropParts = dropParts(partsAt(ev.third, medFrame(ev.third, w(ev.third.td))), partsAt(ev.pen, medFrame(ev.pen, w(ev.pen.td))));
   }
   // Into the board, World Athletics' interval: penultimate toe-off to the lowest point on the board.
-  let comDropBoard = NaN, comDropBoardFrame = null;
+  let comDropBoard = NaN, comDropBoardFrame = null, comDropBoardParts = null;
   if (ev.pen) {
     // the last two frames of the toe-off, not one: a single frame's toe point moved it by cm
     const start = median([ev.pen.to - 1, ev.pen.to].map(i => above(i, ev.pen)).filter(Number.isFinite));
     let low = Infinity;
     for (let i = T.td; i <= T.to; i++) { const h = above(i, T); if (h < low) { low = h; comDropBoardFrame = i; } }
-    if (Number.isFinite(start) && Number.isFinite(low)) comDropBoard = start - low;
+    if (Number.isFinite(start) && Number.isFinite(low)) {
+      comDropBoard = start - low;
+      comDropBoardParts = dropParts(partsAt(ev.pen, medFrame(ev.pen, [ev.pen.to - 1, ev.pen.to])), partsAt(T, comDropBoardFrame));
+    }
   }
 
   // Speed lost on the board, as a percentage: stance speeds in image units over the body's local
@@ -203,7 +211,7 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
     apexRise: (fit.b * fit.b) / (4 * fit.a * pxPerM), // height of the fitted arc itself
     takeoffDist, flightDistance,
     speedLast, speedLoss: vxTO - speedLast,
-    hipDrop, hipDropFrame, comDropBoard, comDropBoardFrame, speedLossTO,
+    hipDrop, hipDropFrame, hipDropParts, comDropBoard, comDropBoardFrame, comDropBoardParts, speedLossTO,
     peakHeight: ((fit.b * fit.b) / (4 * fit.a * pxPerM)) * 100,
     zoomTD: zoom(T.td), zoomPen: ev.pen ? zoom(ev.pen.td) : NaN,
     landingReach: reach,

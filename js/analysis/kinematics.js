@@ -84,16 +84,30 @@ export function centreOfMass(kp, sex = 'male') {
 // set the scale. That length read 10 % short on the board of IMG_5166 (2026-11-23) and moved the
 // height ~10 cm; with angles the run-up touchdowns of 17 clips scatter 1.2-2.5 cm, not 1.4-5.4.
 // Only the short ankle-to-foot and hip-to-centre gaps use the image scale.
-export function heightAboveFoot(kp, foot, legM, sex = 'male') {
+export function heightParts(kp, foot, legM, sex = 'male') {
   const f = foot, m = kp && centreOfMass(kp, sex);
-  if (!m || !has(kp, f + 'hip', f + 'knee', f + 'ank', f + 'bigtoe', f + 'heel')) return NaN;
+  if (!m || !has(kp, f + 'hip', f + 'knee', f + 'ank', f + 'bigtoe', f + 'heel')) return null;
   const h = P(kp, f + 'hip'), k = P(kp, f + 'knee'), a = P(kp, f + 'ank');
   const shank = dist(a, k), thigh = dist(k, h);
-  if (!(shank > 0) || !(thigh > 0)) return NaN;
+  if (!(shank > 0) || !(thigh > 0)) return null;
   const perPx = legM / (shank + thigh);
   const low = Math.max(P(kp, f + 'bigtoe')[1], P(kp, f + 'heel')[1]);
-  return legM * (0.246 / 0.491) * ((a[1] - k[1]) / shank) + legM * (0.245 / 0.491) * ((k[1] - h[1]) / thigh)
-    + (low - a[1] + h[1] - m[1]) * perPx;
+  return {
+    shank: legM * (0.246 / 0.491) * ((a[1] - k[1]) / shank),
+    thigh: legM * (0.245 / 0.491) * ((k[1] - h[1]) / thigh),
+    foot: (low - a[1]) * perPx, // ankle above the foot's lowest point: high on the forefoot, low on the heel
+    top: (h[1] - m[1]) * perPx, // centre of mass above the stance hip: trunk and arms
+  };
+}
+export function heightAboveFoot(kp, foot, legM, sex = 'male') {
+  const p = heightParts(kp, foot, legM, sex);
+  return p ? p.shank + p.thigh + p.foot + p.top : NaN;
+}
+
+// Where a lowering between two instants comes from, in cm (positive = that part lower at b).
+export function dropParts(a, b) {
+  if (!a || !b) return null;
+  return Object.fromEntries(['shank', 'thigh', 'foot', 'top'].map(k => [k, (a[k] - b[k]) * 100]));
 }
 
 // The foot's lowest point in the image (heel or toe, whichever is lower).

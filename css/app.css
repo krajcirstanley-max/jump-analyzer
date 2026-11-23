@@ -727,3 +727,6 @@ div.att-open { cursor: default; }
 .rb-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .rb-chip { padding: 6px 10px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); font-size: 14px; min-height: 36px; cursor: pointer; touch-action: manipulation; }
 .rb-chip.on { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); font-weight: 700; }
+
+.met-parts { font-size: 13px; color: var(--muted, #6b6f76); margin-top: 4px; }
+.met-parts b { color: inherit; font-weight: 600; }
