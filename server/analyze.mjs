@@ -72,7 +72,7 @@ export async function analyzeClip(engine, { clip, sex = 'male', name = '', heigh
   try {
     // a run-up is posed like a jump: posing the far, small athlete (tried 2026-11-19) counted 2 of 18
     // steps on two of five run-ups and made the take-off pick worse
-    const res = await runPipeline(frames, engine, { onProgress });
+    const res = await runPipeline(frames, engine, { onProgress, dropWide: true, rejoinAfterS: 0.6 });
     mark('pose');
     if (res.error) return { error: NO_PERSON, ms: t };
 

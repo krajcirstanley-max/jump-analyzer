@@ -74,3 +74,22 @@ test('search window stays inside the frame and is not tiny', () => {
   assert.ok(r[0] >= 0 && r[1] >= 0 && r[0] + r[2] <= W && r[3] >= 160);
   assert.ok(iou([0, 0, 10, 10], [5, 0, 15, 10]) > 0.3);
 });
+
+test('personBox leaves out the top-half "person" of the pillar hall, keeps a jumper beside the phone', async () => {
+  const { personBox } = await import('../js/pose/tracker.js');
+  const W = 1080, H = 1920;
+  assert.equal(personBox([2.8, 5.2, 873.8, 981.2], W, H), false);    // IMG_5244: duct + lights from the top edge
+  assert.equal(personBox([-3, 10, 967, 973], W, H), false);          // IMG_5247
+  assert.equal(personBox([284, 526, 1094, 1058], W, H), true);       // a jumper in the air, 0.75 wide
+  assert.equal(personBox([653, 905, 834, 1417], W, H), true);
+});
+
+test('rejoinTracks with back = false joins the landing after the pick, not the start before it', async () => {
+  const { rejoinTracks } = await import('../js/pose/tracker.js');
+  const t = (f0, f1, x, h) => ({ points: [f0, f1].map(frame => ({ frame, box: [x, 500, x + h / 3, 500 + h] })) });
+  const before = t(0, 80, 500, 200), pick = t(100, 300, 520, 300), after = t(330, 400, 540, 320);
+  const tracks = [before, pick, after];
+  rejoinTracks(pick, tracks, 60, { back: false });
+  assert.deepEqual([pick.points[0].frame, pick.points.at(-1).frame], [100, 400]);
+  assert.ok(tracks.includes(before));
+});

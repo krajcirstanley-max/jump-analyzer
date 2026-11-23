@@ -4,7 +4,7 @@
 //
 // frames: { N, W, H, fps, get(i) -> rgba, sequential(from, to, step) -> async iterable of { i, rgba } }
 // engine: PoseEngine with 'detector', fast and accurate models loaded.
-import { linkTracks, pickAthlete, rejoinTracks, predictBox, searchRoi, bestMatch, interpolateBoxes, boxFromKeypoints, boxH, iou } from './tracker.js';
+import { linkTracks, pickAthlete, rejoinTracks, personBox, predictBox, searchRoi, bestMatch, interpolateBoxes, boxFromKeypoints, boxH, iou } from './tracker.js';
 import { meanScore } from './engine.js';
 import { MODELS, boxToCenterScale, poseInput } from './models.js';
 import { cleanTrack } from './clean.js';
@@ -28,15 +28,20 @@ export async function runPipeline(frames, engine, opts = {}) {
   // Pass 1: find people every Nth frame, link them into tracks, pick the jumper.
   const samples = [];
   for await (const { i, rgba } of frames.sequential(0, N - 1, o.sampleStep)) {
-    samples.push({ frame: i, boxes: await engine.detect(rgba, W, H) });
+    const boxes = await engine.detect(rgba, W, H);
+    samples.push({ frame: i, boxes: o.dropWide ? boxes.filter(b => personBox(b, W, H)) : boxes });
     progress('Finding the jumper', i, N);
   }
   const tracks = linkTracks(samples);
   const athlete = pickAthlete(tracks, W, H);
   if (!athlete) return { error: 'No person found in this clip.' };
+  // opts.dropWide: leave out the detections no athlete makes (personBox); jumps and run-ups ask for it.
   // opts.rejoinS: tracks that pick up within that many seconds where the athlete was lost are
   // the athlete (rejoinTracks). Only the RSI analysis asks for it; jumps and sprints are unchanged.
   if (o.rejoinS) rejoinTracks(athlete, tracks, o.rejoinS * (frames.fps || 30));
+  // opts.rejoinAfterS: the same, only for tracks after the pick (a jump: the athlete's track broke
+  // in the air or in the sand and the landing was lost, Miška 22 Nov 5231/5232)
+  else if (o.rejoinAfterS) rejoinTracks(athlete, tracks, o.rejoinAfterS * (frames.fps || 30), { back: false });
   const points = athlete.points.map(p => ({ frame: p.frame, box: p.box }));
 
   // Extend the track both ways by searching around the predicted position. This

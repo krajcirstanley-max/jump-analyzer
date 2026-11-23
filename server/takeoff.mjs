@@ -2,12 +2,12 @@
 // frame around the board to say which contact is the take-off (11-15 s a clip, a wrong answer about
 // one run-up in five); the toe-against-track contacts already hold the take-off within a frame on
 // every jump checked, so the take-off is picked from them by rule:
-//  - near the camera: the athlete's torso at least 0.7 of its largest size in the clip (the far
+//  - near the camera: the athlete's torso at least 0.6 of its largest size in the clip (the far
 //    steps are small and their centre of mass jitters, IMG_4954's first step rose "2.8")
 //  - the body thrown up right after the toe-off: the centre of mass rises at least 1.7 torso
 //    lengths a second over the next 6 frames. Checked on 21 jumps (bench, outdoor 19 Nov, box
 //    take-offs): every take-off 2.0-6.9, every other near step under 1.3 (most under 0.6)
-//  - not crouched: hips over the ankles at least 0.75 of the run's median (getting up in the sand)
+//  - not crouched: hips over the ankles at least 0.6 of the run's median (getting up in the sand)
 //  - the first such step: after a run-through the athlete runs out of the pit and those steps rise
 //    too (run-up IMG_4653: 1580 at 9.0 after the board's 3.3)
 // The contacts then go through locate's nameEvents in place of Claude's ground frames, so the
@@ -18,7 +18,13 @@ import { stepsOf } from './sprint.mjs';
 
 // RISE_MIN 1.7 (2026-11-21): a server run of Miška's run-through 5167 gave a step before the board 1.33
 // and took it; every take-off picked on 79 stored runs rose 2.0 or more.
-export const RISE_MIN = 1.7, NEAR_MIN = 0.7, CROUCH = 0.75;
+// NEAR_MIN 0.7 -> 0.6, CROUCH 0.75 -> 0.6 (2026-11-22, 21 jumps filmed from behind the runway): the
+// athlete is biggest a few steps before the board and recedes into the pit, so the take-off torso was
+// 0.69-0.97 of the largest (5239 missed at 0.69) and its hips-over-ankles 0.72 on 5229 (missed); both
+// then went to Claude's frame reading, which merged 5239's last three contacts into one on a rerun.
+// Margins over 122 stored answers: the largest high-rise step before a take-off was 0.49 of the torso,
+// getting up in the sand 0.30-0.33; the new values change only those two picks, both to the take-off.
+export const RISE_MIN = 1.7, NEAR_MIN = 0.6, CROUCH = 0.6;
 
 // steps: [{ td, to }] in seconds (sprintFromMotion). Returns { S, i }: every step with its frames
 // and measures, and the take-off's index (-1 if none).

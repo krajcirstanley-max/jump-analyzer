@@ -51,6 +51,14 @@ export function linkTracks(samples, maxCost = 1.2, maxGapSamples = 3) {
   return tracks;
 }
 
+// A detection that can't be the athlete (2026-11-22, the hall with the yellow pillars): the detector
+// took the whole top half of the picture (the duct, the lights, a pillar) for a person, 0.8-1.0 of the
+// frame wide from the top edge down to the middle, on 4 of Miška's 11 jumps. It was the biggest
+// "person" there, the pick took it, and the track ended before the board ("no take-off found").
+// Measured on those 21 jumps: the 266 dropped boxes were 0.81-1.0 wide and began at the top edge;
+// the jumpers' boxes were up to 0.75 wide (in the air beside the phone) and never touched the top.
+export const personBox = (b, W, H) => !(boxW(b) > 0.85 * W || (b[1] <= 0.02 * H && boxW(b) > 0.6 * W));
+
 // The jumper: the person who is big in frame, near the centre, and moving.
 // Panning keeps the athlete central; spectators are small, off-centre or static.
 export function athleteScore(track, W, H) {
@@ -78,7 +86,8 @@ export function pickAthlete(tracks, W, H) {
 // and about one body width to the side: a drop jump filmed low loses the head out of the top of
 // the picture in the air, the detector loses the person, and the landing came back as a new
 // track that the athlete pick left out (2026-11-17, Stanley 15:18: no landing, no RSI).
-export function rejoinTracks(athlete, tracks, maxGap) {
+// back = false joins only the tracks after it (a jump: the landing; the far start is left as it was).
+export function rejoinTracks(athlete, tracks, maxGap, { back = true } = {}) {
   const pts = athlete.points;
   for (;;) {
     const end = pts[pts.length - 1];
@@ -93,6 +102,7 @@ export function rejoinTracks(athlete, tracks, maxGap) {
   }
   // and the other way, when the pick was the landing part
   for (;;) {
+    if (!back) return athlete;
     const start = pts[0];
     const prev = tracks
       .filter(t => t !== athlete && t.points.at(-1).frame < start.frame && start.frame - t.points.at(-1).frame <= maxGap)
