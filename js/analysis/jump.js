@@ -77,8 +77,7 @@ function withGround(f, g, hLand = NaN) {
     vxTO: g.vxTO, speedLast: g.speedLast, speedLoss: g.speedLoss, speedLossTO: g.speedLossPct,
     approach: g.approach ?? NaN, speedKeep: g.approach > 0 ? (g.speedLast / g.approach - 1) * 100 : NaN,
     vxTD: NaN, velocityLoss: NaN,
-    // the two lowerings on the leg as measured against the board, same instants as above
-    ...lowerings(g, f),
+    // the two lowerings stay flightAnalysis's (leg angles x real lengths, its instants and unsure flags)
     // Vertical speed comes from the time to the apex (g x t, no scale), so with the runway's
     // horizontal speed the angle no longer depends on the gravity fit.
     // The fit's own gate (3 cm) is for a gravity scale; here it only has to place the apex, and a
@@ -179,14 +178,6 @@ function derivedMetrics(base, ev, f, fps, sex, height) {
   return out;
 }
 
-function lowerings(g, f) {
-  const by = Object.fromEntries((g.steps ?? []).map(s => [s.id, s]));
-  const out = {};
-  const pen = by.pen, third = by.third, take = by.take;
-  if (third && pen && Number.isFinite(third.com.td - pen.com.td)) { out.hipDrop = (third.com.td - pen.com.td) * 100; out.hipDropFrame = pen.td; out.hipDropParts = dropParts(third.com.parts?.td, pen.com.parts?.td); }
-  if (pen && take && Number.isFinite(pen.com.to - take.com.low)) { out.comDropBoard = (pen.com.to - take.com.low) * 100; out.comDropBoardFrame = take.com.lowFrame; out.comDropBoardParts = dropParts(pen.com.parts?.to, take.com.parts?.low); }
-  return out;
-}
 
 const pct = k => `${k > 1 ? '+' : '−'}${Math.abs((k - 1) * 100).toFixed(1).replace('.', ',')} %`;
 function tapeNote(t) {

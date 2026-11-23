@@ -160,25 +160,31 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
   // the frame whose height is that median, for the breakdown into shank, thigh, foot and trunk
   const medFrame = (c, js) => { const v = js.filter(j => j >= c.td && j <= c.to).map(j => [j, above(j, c)]).filter(([, h]) => Number.isFinite(h)).sort((x, y) => x[1] - y[1]); return v.length ? v[v.length >> 1][0] : null; };
   const partsAt = (c, j) => (j == null ? null : heightParts(track[j], c.foot, legM, sex));
-  // Into the penultimate: 3rd-last touchdown minus penultimate touchdown, Shimizu & Ae's interval
-  // and instants. No published source reads mid-stance (research 2026-11-10), so neither do we.
-  let hipDrop = NaN, hipDropFrame = null, hipDropParts = null;
+  // Into the penultimate, Panoutsakopoulos et al. 2010 (NSA 25:1, 8 men 7.00-8.05 m, 3D): 3rd-last
+  // toe-off to penultimate touchdown, the flight of the penultimate stride, where most of the lowering
+  // happens (7 ± 2 cm of ~9). A toe-off height is the shakiest read on a phone (2026-11-23: the same
+  // support read 7 cm higher or lower at toe-off than at touchdown, by camera, where 3D data show
+  // ~1 cm), so a support whose two ends differ by more than 6 cm marks its toe-off as unsure.
+  const w4 = i => [i - 1, i, i + 1, i + 2], toW = c => [c.to - 1, c.to];
+  const atW = (c, js) => median(js.filter(j => j >= c.td && j <= c.to).map(j => above(j, c)).filter(Number.isFinite));
+  const shaky = c => Math.abs(atW(c, w4(c.td)) - atW(c, toW(c))) > 6;
+  let hipDrop = NaN, hipDropFrame = null, hipDropParts = null, hipDropUnsure = false;
   if (ev.pen && ev.third) {
-    hipDrop = steady(ev.third, ev.third.td) - steady(ev.pen, ev.pen.td);
+    hipDrop = atW(ev.third, toW(ev.third)) - steady(ev.pen, ev.pen.td);
     hipDropFrame = ev.pen.td;
-    const w = i => [i - 1, i, i + 1, i + 2];
-    hipDropParts = dropParts(partsAt(ev.third, medFrame(ev.third, w(ev.third.td))), partsAt(ev.pen, medFrame(ev.pen, w(ev.pen.td))));
+    hipDropParts = dropParts(partsAt(ev.third, medFrame(ev.third, toW(ev.third))), partsAt(ev.pen, medFrame(ev.pen, w4(ev.pen.td))));
+    hipDropUnsure = shaky(ev.third);
   }
   // Into the board, World Athletics' interval: penultimate toe-off to the lowest point on the board.
-  let comDropBoard = NaN, comDropBoardFrame = null, comDropBoardParts = null;
+  let comDropBoard = NaN, comDropBoardFrame = null, comDropBoardParts = null, comDropBoardUnsure = false;
   if (ev.pen) {
-    // the last two frames of the toe-off, not one: a single frame's toe point moved it by cm
-    const start = median([ev.pen.to - 1, ev.pen.to].map(i => above(i, ev.pen)).filter(Number.isFinite));
+    const start = atW(ev.pen, toW(ev.pen));
     let low = Infinity;
     for (let i = T.td; i <= T.to; i++) { const h = above(i, T); if (h < low) { low = h; comDropBoardFrame = i; } }
     if (Number.isFinite(start) && Number.isFinite(low)) {
       comDropBoard = start - low;
-      comDropBoardParts = dropParts(partsAt(ev.pen, medFrame(ev.pen, [ev.pen.to - 1, ev.pen.to])), partsAt(T, comDropBoardFrame));
+      comDropBoardParts = dropParts(partsAt(ev.pen, medFrame(ev.pen, toW(ev.pen))), partsAt(T, comDropBoardFrame));
+      comDropBoardUnsure = shaky(ev.pen);
     }
   }
 
@@ -211,7 +217,7 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
     apexRise: (fit.b * fit.b) / (4 * fit.a * pxPerM), // height of the fitted arc itself
     takeoffDist, flightDistance,
     speedLast, speedLoss: vxTO - speedLast,
-    hipDrop, hipDropFrame, hipDropParts, comDropBoard, comDropBoardFrame, comDropBoardParts, speedLossTO,
+    hipDrop, hipDropFrame, hipDropParts, hipDropUnsure, comDropBoard, comDropBoardFrame, comDropBoardParts, comDropBoardUnsure, speedLossTO,
     peakHeight: ((fit.b * fit.b) / (4 * fit.a * pxPerM)) * 100,
     zoomTD: zoom(T.td), zoomPen: ev.pen ? zoom(ev.pen.td) : NaN,
     landingReach: reach,

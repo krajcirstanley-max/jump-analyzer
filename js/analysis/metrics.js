@@ -19,12 +19,12 @@ export const NORMS = {
   contactPen: { label: 'Kontakt predposledného kroku', unit: 'ms', m: [100, 135], f: [95, 135], good: 'low' },
   // WA17/WA18/PAN means 70-76 ms both sexes, finalists 56-92 (women down to 40).
   flightToBoard: { label: 'Let do dosky', unit: 'ms', m: [56, 92], f: [45, 90] },
-  // Centre of mass above the foot on the ground, 3rd-last touchdown minus penultimate touchdown
-  // (cm on the athlete's leg; with the runway found, the leg as measured against the board).
-  // Shimizu & Ae (ISBS, 6 university men, PB 7.06): 3 cm lower at penultimate touchdown, 6 ± 2 at
-  // board touchdown. Published lowering is 1-9 cm against a ~3 cm measurement error (Lees 1993).
-  // NOT SHOWN since 2026-11-23 (no finalist source); kept for old saved jumps and the what-if card.
-  hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [2, 6], f: [2, 6] },
+  // Panoutsakopoulos, Papaiakovou, Katsikas & Kollias 2010 (New Studies in Athletics 25:1, 55-68;
+  // 2006 European Cup, 8 men, 7.00-8.05 m, 3D-DLT, Table 5): centre of mass 3rd-last toe-off to
+  // penultimate touchdown -0.07 ± 0.02 m (-0.05 to -0.10); penultimate support +0.01; penultimate
+  // toe-off to board touchdown -0.03 ± 0.02; ~9 cm in all, 'as also reported in the 2007 World
+  // Championship'. No women's figure: the men's band is used for both.
+  hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [5, 10], f: [5, 10] },
   // WA's interval: penultimate toe-off to the lowest centre of mass on the board. WA17 men 1-6,
   // WA18 men 2-8 (mean 3); WA17 women 1-6, WA18 women 1-9 (mean 3-4).
   comDropBoard: { label: 'Zníženie ťažiska do dosky', unit: 'cm', m: [1, 8], f: [1, 9] },
@@ -215,6 +215,8 @@ export function scaleReason(f) {
 }
 
 // A lowering split into where it comes from (cm, positive = lower): shank, thigh, foot, trunk.
+// A lowering that starts at a toe-off the video can't read (see flight.js) is hidden, with why.
+const unsure = (r, flag, step) => (r && flag && r.status !== 'hidden' ? { ...r, status: 'hidden', reason: `výška ťažiska pri odlepení ${step} kroku sa na tomto videu nedá prečítať spoľahlivo (začiatok a koniec kontaktu sa líšia o viac ako 6 cm)` } : r);
 const withParts = (r, parts) => (r && parts && Object.values(parts).every(Number.isFinite) ? { ...r, parts } : r);
 
 // Measurements from flightAnalysis(); withheld when the gravity scale check fails, except the
@@ -262,8 +264,8 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('speedKeep', f.speedKeep, ev.pen?.td ?? null),
     row('speedTO', f.vxTO, ev.takeoff.to),
     row('speedLoss', f.speedLoss, ev.takeoff.to),
-    // lowering into the penultimate (hipDrop) not shown since 2026-11-23: one study of 6 university men
-    withParts(row('comDropBoard', f.comDropBoard, f.comDropBoardFrame), f.comDropBoardParts),
+    unsure(withParts(row('hipDrop', f.hipDrop, f.hipDropFrame), f.hipDropParts), f.hipDropUnsure, '3. posledného'),
+    unsure(withParts(row('comDropBoard', f.comDropBoard, f.comDropBoardFrame), f.comDropBoardParts), f.comDropBoardUnsure, 'predposledného'),
     row('speedLossTO', f.speedLossTO, ev.takeoff.to),
     row('peakHeight', f.peakHeight, ev.apex),
     row('landingReach', f.landingReach, ev.landing),
