@@ -4,6 +4,7 @@
 // detail screen. The capture and analysis code stays in each module; this file only lists and
 // routes.
 import { modeOfRun } from './analysis/sprint.js';
+import { airLabel } from './history.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (x, dp) => (Number.isFinite(x) ? Number(x).toFixed(dp).replace('.', ',') : '–');
@@ -22,6 +23,7 @@ export function jumpSummary(r, athletes) {
     kind: 'skok', id: r.id, who: r.athlete, at: Date.parse(r.recordedAt || r.analysedAt),
     title: `${athletes[r.athlete]?.name ?? ''} · skok${r.runup ? ` z ${r.runup} krokov` : ''}`,
     sub: weak ? `najslabšie ${PHASE[weak.id] ?? weak.id} ${Math.round(weak.score)}` : '',
+    air: airLabel(r),   // time in the air, first on the line (Stanley, 2026-11-23)
     value: Number.isFinite(r.score) ? String(Math.round(r.score)) : '–', valueSub: r.measured > 0 ? `${num(r.measured, 2)} m` : Number.isFinite(est) ? `≈ ${num(est, 2)} m` : 'skóre',   // the tape without ≈
   };
 }
@@ -29,7 +31,7 @@ export function jumpSummary(r, athletes) {
 export function itemHtml(it, { showTime = true } = {}) {
   return `<button class="feed-item" data-item="${esc(it.kind)}" data-id="${esc(it.id)}" data-who="${esc(it.who ?? '')}">
     <span class="feed-ic k-${it.kind}">${LABEL[it.kind]}</span>
-    <span class="feed-t"><b>${esc(it.title)}</b><small>${showTime ? `${hm(it.at)}${it.sub ? ' · ' : ''}` : ''}${esc(it.sub)}</small></span>
+    <span class="feed-t"><b>${esc(it.title)}</b><small>${showTime ? `${hm(it.at)}${it.air || it.sub ? ' · ' : ''}` : ''}${it.air ? `<b class="feed-air">${esc(it.air)}</b>${it.sub ? ' · ' : ''}` : ''}${esc(it.sub)}</small></span>
     <span class="feed-v">${esc(it.value)}<small>${esc(it.valueSub)}</small></span></button>`;
 }
 

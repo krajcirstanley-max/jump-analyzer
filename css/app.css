@@ -215,7 +215,7 @@ h2 + .met, .all-h + .met { border-top: 0; padding-top: 2px; }
 div.att-open { cursor: default; }
 .att-score { flex: 0 0 40px; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .att-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 15px; }
-.att-air { color: var(--accent); font-weight: 700; }
+.feed-t small b.feed-air, .att-air { display: inline; font-size: inherit; color: var(--accent); font-weight: 700; }
 .att-meta small { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .att-go { color: var(--muted); font-size: 20px; }
 .att-del { flex: 0 0 auto; min-width: 64px; min-height: 44px; align-self: center; border-radius: 8px; border: 0; background: none; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
@@ -468,7 +468,7 @@ div.att-open { cursor: default; }
 .feed-ic { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
 .k-rozbeh { background: #e6f1fb; color: #185fa5; } .k-sprint { background: #e1f5ee; color: #085041; } .k-rsi { background: #faeeda; color: #854f0b; } .k-skok { background: #eeedfe; color: #3c3489; }
 .feed-t { flex: 1; min-width: 0; }
-.feed-t b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-t > b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .feed-t small { color: var(--muted); font-size: 12.5px; }
 .feed-v { text-align: right; font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; }
 .feed-v small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
