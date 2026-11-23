@@ -140,10 +140,27 @@ const FAULTS = [
     id: 'hipDropLow', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
     img: 'Rytmus tá-dam: predposledný krok dlhší a nižší, posledný krátky a rýchly.',
     keys: [['hipDrop', 'low', 1.5]],
+    // when the hips do come down, only on the last step into the board, hipDropLate speaks instead
+    unless: [['comDropBoard', ['ok', 'high']]],
     title: 'Trochu znížiť boky pred doskou',
     take: 'malé zníženie bokov pred doskou ti dá z čoho ísť hore',
     body: m => `Boky klesnú len o ${val(m)}, cieľ je ${norm(m)}.`,
     why: 'Bez malého zníženia niet z čoho ísť hore a rýchlosť ostane vodorovná.',
+  },
+  {
+    // 2026-11-23 (Miška, 22 Nov evening): into the penultimate 0-2 cm, but 5-10 cm from the
+    // penultimate toe-off to the board. Her penultimate knee bent no more than the step before
+    // (penKnee -7 to +8°), so the drop comes late, on the board. Telling her to lower at all was
+    // wrong; the point is where. Stanley's pattern is the textbook one: 8-14 cm into the
+    // penultimate, then a flat last step.
+    id: 'hipDropLate', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
+    img: 'Rytmus tá-dam: predposledný krok dlhší a nižší, posledný krátky a rýchly.',
+    keys: [['hipDrop', 'low', 1.5]],
+    requires: [['comDropBoard', ['ok', 'high']]],
+    title: 'Znížiť sa už v predposlednom kroku',
+    take: 'keď sa znížiš už v predposlednom kroku, z dosky pôjdeš rovno hore',
+    body: m => `Boky klesnú hlavne na poslednom kroku do dosky. Do predposledného ${val(m)}, cieľ je ${norm(m)}.`,
+    why: 'Keď boky klesnú v predposlednom, posledný krok je plochý a rýchly a z dosky ideš hore.',
   },
   {
     id: 'flightToBoard', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
@@ -292,7 +309,11 @@ const phaseWeight = id => PHASES.find(p => p.id === id)?.weight ?? 0.1;
 // A metric counts only when visible and beyond the norm by more than the margin.
 function offending(fault, by) {
   // a fault that only counts together with another measurement out of its norm
-  if (fault.requires && !fault.requires.every(([k, side]) => by[k] && by[k].status === side)) return [];
+  // (a side may be a list: any of them)
+  const is = (k, side) => by[k] && [].concat(side).includes(by[k].status);
+  if (fault.requires && !fault.requires.every(([k, side]) => is(k, side))) return [];
+  // and one that a measurement in that state rules out
+  if (fault.unless && fault.unless.some(([k, side]) => is(k, side))) return [];
   const hits = [];
   // firstPresent: judge only by the first of the keys that was measured (approach speed over 1-11 m
   // when known, the last step otherwise), never by whichever looks worst

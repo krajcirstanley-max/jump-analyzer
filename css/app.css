@@ -13,6 +13,8 @@ body {
   overflow-x: hidden;
   overflow-anchor: none;   /* showCoach keeps the scroll position itself: Safari has no anchoring */
 }
+/* The status bar gets the page's background: scrolled text ran under the clock (2026-11-23). */
+body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top); background: var(--bg); z-index: 60; pointer-events: none; }
 .hidden, [hidden] { display: none !important; }
 button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
 
@@ -685,8 +687,8 @@ div.att-open { cursor: default; }
 /* hand-set contact frames: "Upraviť" then "Dotyk je tu" on the video (view.js) */
 .kf.kf-edit { margin-left: auto; font-weight: 700; color: var(--accent); border-color: var(--accent); }
 .kf.hand { border-style: dashed; }
-.kf-bar { position: absolute; left: 8px; right: 8px; top: 54px; display: grid; gap: 6px; z-index: 3; }   /* below "Ty / Ideál", clear of the feet */
-.kf-edge { background: rgba(10, 12, 16, 0.82); color: #fff; border-radius: 14px; padding: 8px 10px; }
+.kf-bar { display: grid; gap: 6px; margin: 8px 0 4px; }   /* under the ‹ › buttons, off the video */
+.kf-edge { background: #1b1d22; color: #fff; border-radius: 14px; padding: 8px 10px; }
 .kf-edge p { margin: 0 0 6px; font-size: 13.5px; }
 .kf-edge small { display: block; color: #d6d3cc; font-size: 12.5px; margin: -2px 0 6px; }
 .kf-btns { display: flex; gap: 8px; }

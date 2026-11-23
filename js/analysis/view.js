@@ -383,10 +383,13 @@ export function renderResult(els, jump, player, { feel = null, onFeel, noReplayN
   function drawBar() {
     const stage = player?.stage;
     if (!stage) return;
-    let bar = stage.querySelector('.kf-bar');
+    // Under the ‹ › buttons, not on the video: on a close portrait clip the panels covered the foot
+    // being set (2026-11-23).
+    const host = stage.parentElement, anchor = host.querySelector('.controls') ?? stage;
+    let bar = host.querySelector('.kf-bar');
     const p = phases.find(x => x.id === sel), list = editOn ? edgesOf(p) : [];
     if (!list.length) { bar?.remove(); return; }
-    if (!bar) { bar = document.createElement('div'); bar.className = 'kf-bar'; stage.appendChild(bar); }
+    if (!bar) { bar = document.createElement('div'); bar.className = 'kf-bar'; anchor.after(bar); }
     const cur = player.index;
     bar.innerHTML = list.map(k => {
       const ok = cur !== k.frame && Math.abs(cur - k.frame) <= EDGE_REACH;
