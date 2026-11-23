@@ -238,7 +238,9 @@ test('a metre metric is hidden with a reason when the scale fails', () => {
   const f = { ...flightAnalysis(frames, ev, frames.map((_, i) => i / FPS), 'male', contacts[0].dir), scaleOk: false };
   const rows = flightMetrics(f, ev, 'female');
   // Lowering in cm comes from the leg length and the step losses are ratios: no scale needed.
-  for (const k of ['hipDrop', 'speedLossTO']) assert.notEqual(rows.find(x => x.key === k)?.status, 'hidden', k);
+  assert.notEqual(rows.find(x => x.key === 'speedLossTO')?.status, 'hidden');
+  // cm of lowering is withheld: a phone's body scale isn't good to the 2 % it needs (2026-11-23)
+  assert.equal(rows.find(x => x.key === 'hipDrop')?.status, 'hidden');
   for (const k of ['speedLast', 'speedTO', 'speedLoss']) {
     const m = rows.find(x => x.key === k);
     assert.equal(m.status, 'hidden', k);
@@ -333,7 +335,7 @@ test('IMG_4390 (landing hidden, 0.27 s of flight): metres stay hidden, angles do
   const j = real('IMG_4390', 'female'), m = by(j);
   assert.deepEqual(frames(j), { td3: 421, penTD: 453, penTO: 469, TD: 483, maxFlex: 490, TO: 497, apex: 530 });
   for (const k of ['peakHeight', 'speedLast', 'speedTO', 'speedLoss']) assert.equal(m[k].status, 'hidden', k);
-  for (const k of ['hipDrop', 'comDropBoard']) assert.notEqual(m[k]?.status ?? 'missing', 'hidden', k);
+  for (const k of ['hipDrop', 'comDropBoard']) assert.equal(m[k]?.status ?? 'missing', 'hidden', k);
   assert.notEqual(m.kneeDrive.status, 'hidden');
   assert.notEqual(m.trunkStability.status, 'hidden');
   assert.equal(j.speed.sure, 'nízka');

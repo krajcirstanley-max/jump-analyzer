@@ -456,7 +456,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
     runupJudged: steps, expected: steps ? expectedDistance(steps, pb) : null,
     profile: profileData(flight, ev),
     timeline: timelineOf(contacts, ev, flight?.ground, runThrough ? null : ev.landing, ev.apex, fps),
-    lowering: flight?.scaleSource === 'board' ? { intoPen: flight.hipDrop, intoBoard: flight.ground?.raised ? null : flight.comDropBoard } : null,
+    lowering: null, // cm of lowering not shown: see metrics.js (2026-11-23)
     replay: {
       from: Math.max(result.first ?? 0, ev.takeoff.td - Math.round(fps)),
       to: ev.landing != null ? Math.min(last, ev.landing + Math.round(fps / 2)) : last,

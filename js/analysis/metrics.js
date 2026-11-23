@@ -235,10 +235,16 @@ export function flightMetrics(f, ev, sex = 'male') {
     // The angle too: its horizontal speed is the same arc speed, and a phone that follows the jumper
     // shrinks it (2026-11-20, IMG_5166 from a raised plank: 2.7 m/s, 46°; IMG_5169 31°).
     const noRunway = !board && !fromApex && key !== 'speedApproach' && !SCALE_FREE.has(key);
-    const usable = !raisedBox && !plankDist && !noRunway && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk && !(f.fitSeconds < 0.3) : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
+    // Lowering in cm: hidden (2026-11-23). On IMG_5166 the same frames gave 1-10 cm into the penultimate
+    // depending on which body length sets the scale (both legs smoothed, the stance leg, the trunk), and
+    // the whole body shrank ~7 % at once (nose -12, hips -8 cm): a scale error, not a lowering. Stanley
+    // saw no such drop on the video. The knee bend in the penultimate (penKnee, an angle) stays.
+    const lowering = key === 'hipDrop' || key === 'comDropBoard';
+    const usable = !lowering && !raisedBox && !plankDist && !noRunway && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk && !(f.fitSeconds < 0.3) : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
     const status = !usable ? 'hidden' : value < lo ? 'low' : value > hi ? 'high' : 'ok';
     const arc = board ? { ...f, scaleWhy: f.fitWhy } : f;
-    const why = plankDist ? 'z debničky sa dĺžka skoku zatiaľ nemeria dosť presne (±0,2 m); rýchlosť a kroky áno'
+    const why = lowering ? 'centimetre zníženia sa z videa z telefónu nedajú zmerať dosť presne; zníženie ukazuje ohyb kolena v predposlednom'
+      : plankDist ? 'z debničky sa dĺžka skoku zatiaľ nemeria dosť presne (±0,2 m); rýchlosť a kroky áno'
       : noRunway ? 'na videu sa nezmerala dráha (doska a čiary), a rýchlosť len z letu by mohla byť mimo až o 15 %'
       : raisedBox ? 'odraz z debničky: ťažisko sa meria od chodidla na debničke, zníženie by vyšlo o výšku debničky väčšie'
       : key === 'takeoffAngle' || fromApex ? (f.angleOk ? 'vrchol letu nie je na videu' : scaleReason(arc)) : scaleReason(f);

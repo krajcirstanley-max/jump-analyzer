@@ -174,7 +174,8 @@ function stepsHtml(steps, heightCm, lowering) {
   const cols = ['third', 'pen', 'take'].map(id => steps.find(s => s.id === id)).filter(Boolean);
   const f = (v, dp, unit) => (Number.isFinite(v) ? `${num(v, dp)}${unit ? ` ${unit}` : ''}` : '–');
   const row = (label, get) => `<tr><th>${label}</th>${cols.map(s => `<td>${get(s)}</td>`).join('')}</tr>`;
-  const pct = heightCm ? row('Pri dotyku, % výšky', s => f((s.com.td * 100 / heightCm) * 100, 0, '%')) : '';
+  // centre-of-mass heights in cm are not shown: a phone's body scale moves them by several cm (2026-11-23)
+  const pct = '';
   // between contacts: each one with the next
   const gaps = cols.slice(0, -1).map((s, k) => [s, cols[k + 1]]);
   const far = s => (s.id === 'third' ? '≈ ' : '');
@@ -195,9 +196,6 @@ function stepsHtml(steps, heightCm, lowering) {
       ${row('Kontakt', s => f(s.contactMs, 0, 'ms'))}
       ${row('Došľap pred ťažiskom', s => (s.id === 'third' ? '–' : f(s.tdDist, 2, 'm')))}
       ${row('Ťažisko pred špičkou pri odlepení', s => (s.id === 'third' ? '–' : f(s.toDist, 2, 'm')))}
-      ${row('Ťažisko pri dotyku', s => f(s.com.td * 100, 0, 'cm'))}
-      ${row('Ťažisko najnižšie', s => f(s.com.low * 100, 0, 'cm'))}
-      ${row('Ťažisko pri odlepení', s => f(s.com.to * 100, 0, 'cm'))}
       ${pct}
     </tbody></table>
     ${low?.length ? `<p class="note">Zníženie ťažiska: ${low.join('; ')}. Publikované hodnoty sú 1–9 cm a chyba merania aj v laboratóriu je okolo 3 cm.</p>` : ''}
