@@ -262,8 +262,10 @@ export function initRsi({ root, athletes, getAthlete, roster, rememberAthlete, c
       ? `<h2>${esc(athletes[who]?.name ?? '')} · odrazy</h2>${videoHtml(rec)}<div data-rsi-prog="${esc(rec.id)}">${pendingSteps(rec)}</div>`
       : `<button class="top-who rsi-swap" data-rsi-swap>${esc(athletes[who].name)}<span class="who-swap" aria-hidden="true">⇄</span></button>${videoHtml(rec)}${resultHtml(rec)}`;
     // analysed before the 0.26.0 contact edges (2026-11-18): one tap analyses the saved clip again
-    const again = !rec.pending && !rec.error && rec.hasClip && (rec.algo ?? 1) < RSI_ALGO
-      ? `<button class="btn primary" data-rsi-retry="${esc(rec.id)}">Prepočítať s novým meraním</button>` : '';
+    // and on every analysis with its clip, "Znovu analyzovať" (Stanley, 2026-11-23)
+    const old = (rec.algo ?? 1) < RSI_ALGO;
+    const again = !rec.pending && !rec.error && rec.hasClip
+      ? `<button class="btn${old ? ' primary' : ''}" data-rsi-retry="${esc(rec.id)}">${old ? 'Prepočítať s novým meraním' : 'Znovu analyzovať'}</button>` : '';
     $('rsi-result').insertAdjacentHTML('beforeend', `${again}<button class="btn danger" data-rsi-del>Zmazať</button>`);
     attachClip(rec);
   };

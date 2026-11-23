@@ -29,7 +29,7 @@ import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.31.4';
+const APP_VERSION = '0.31.5';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -755,6 +755,22 @@ function setOverlays() {
   }
   syncIdeal(player.index);
 }
+// "Znovu analyzovať" (Stanley, 2026-11-23: "daj tam tlačidlo všade"): the stored clip goes to the
+// server again as a background jump under the same id, so the new reading replaces this one and
+// the typed fields stay (saveNumbers). The row in Tréning / História shows it on its way.
+document.addEventListener('click', async e => {
+  const b = e.target.closest('#res-again');
+  if (!b || !resultId || background.has(resultId)) return;
+  if (!cloudReady()) return alert('Chýba spojenie so serverom.');
+  const id = resultId, rec = await hist.getAttempt(id), blob = rec && await hist.loadOriginal(id);
+  if (!blob) return alert('Video tohto skoku už v telefóne nie je.');
+  const file = blob instanceof File ? blob : new File([blob], rec.file, { type: blob.type || 'video/quicktime', lastModified: Date.parse(rec.recordedAt) || Date.now() });
+  const clip = { file: { name: rec.file, size: rec.size }, recordedAt: rec.recordedAt ?? null, duration: null };
+  b.disabled = true; b.textContent = 'Posiela sa na server…';
+  bgSet(id, { athlete: rec.athlete, clip, at: Date.parse(rec.recordedAt) || Date.now(), stage: 'posiela sa', error: false });
+  showTab(backTo ?? 'history');
+  runQueue([{ id, file, clip, athlete: rec.athlete }]).finally(() => { b.disabled = false; b.textContent = 'Znovu analyzovať'; });
+});
 // The copy for Photos with the jump's panel burned in, from the numbers of this moment (tape, Freelap).
 document.addEventListener('click', e => {
   const b = e.target.closest('#res-burn');
@@ -967,6 +983,7 @@ function present(feel, noReplayNote) {
     },
   });
   $('res-ask').classList.toggle('hidden', !cloudReady() || !jump || !!jump.error);
+  $('res-again').classList.toggle('hidden', !cloudReady() || !resultId);
 }
 
 // Reopens a saved attempt: its clip, keypoints and numbers, no re-analysis.
@@ -1395,6 +1412,10 @@ async function saveNumbers(ctx, result, jobId) {
   if (split) j.split = split;   // Freelap's time stands like a typed one
   const rec = hist.attemptRecord(j, { athlete: a, ...ctx.clip });
   if (split) rec.runKey = fl.key;
+  // A re-analysis keeps what was typed for this jump (feel, run-up steps, the tape); the hand-moved
+  // contacts go, since redoing the reading is the point (2026-11-23, "Znovu analyzovať").
+  const old = await hist.getAttempt(rec.id);
+  for (const k of ['feel', 'runup', 'measured', 'tapeFrom']) if (old?.[k] != null && rec[k] == null) { rec[k] = old[k]; rec.jump[k] = old[k]; }
   rec.coachPending = true;
   rec.coachJob = jobId;
   await hist.saveAttempt(rec, { clip: ctx.file, pose: result });

@@ -664,7 +664,7 @@ export function initRozbeh({ root, athletes, freelap, getAthlete, roster, inspec
     const n = runOf(rec)?.steps ?? RUNUP_STEPS;
     root.innerHTML = `<h2 class="ath-name">${esc(name)}${name ? ' · ' : ''}rozbeh${n ? ` ${n} kr.` : ''}</h2>${video}${state}
       ${rec.pending || rec.error ? '' : commentHtml(rec) + freelapHtml(rec) + fiveHtml(rec) + targetHtml(rec) + rhythmHtml(rec) + takeoffHtml(rec) + stepsHtml(rec)}
-      <section class="card"><button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
+      <section class="card">${rec.hasClip && !rec.pending && !rec.error ? `<button class="btn" data-rb-retry="${esc(rec.id)}">Znovu analyzovať</button>` : ''}<button class="btn danger" data-rb-del="${esc(rec.id)}">Zmazať rozbeh</button></section>`;
     mountVideo(rec);
     // typed Freelap times or a new reading change the overlay of the video already playing
     if (player?.id === rec.id && player.hud) { player.hud.tl = hudTimeline(rec, player.hud.k); player.p?.player?.refresh?.(); }

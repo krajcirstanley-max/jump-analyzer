@@ -489,7 +489,7 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     if (tl) { live.hud = hudOverlay(tl, p, { W: p.src.width, H: p.src.height }); p.overlays.push(live.hud); }
     p.refresh?.();
   }
-  const delHtml = rec => `${rec.hasClip && !rec.pending && burnTl(rec) ? `<button class="btn" data-sp-burn="${esc(rec.id)}">Uložiť video s overlay do Fotiek</button>` : ''}<button class="btn danger" data-sp-del="${esc(rec.id)}">Zmazať beh</button>`;
+  const delHtml = rec => `${rec.hasClip && !rec.pending && burnTl(rec) ? `<button class="btn" data-sp-burn="${esc(rec.id)}">Uložiť video s overlay do Fotiek</button>` : ''}${rec.hasClip && !rec.pending ? `<button class="btn" data-sp-again="${esc(rec.id)}">Znovu analyzovať</button>` : ''}<button class="btn danger" data-sp-del="${esc(rec.id)}">Zmazať beh</button>`;
   function remove(id) {
     const list = load(), r = list.find(x => x.id === id);
     if (!r) return;
@@ -521,6 +521,20 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     if (e.target.closest('[data-sl-del]')) { slExtra = Math.max(0, slExtra - 1); draw(); return; }
     const o = e.target.closest('[data-sp-open]');
     if (o) { current = o.dataset.spOpen === current ? null : o.dataset.spOpen; draw(); if (current && cloudReady()) rerunOld(current); root.scrollIntoView?.({ behavior: 'smooth' }); return; }
+    // "Znovu analyzovať": the stored clip to the server as a new job (fresh), the old numbers stay on
+    // screen until the new ones land, as with an algorithm update (rerunOld)
+    const ag = e.target.closest('[data-sp-again]');
+    if (ag && loadClip) {
+      const id = ag.dataset.spAgain, r0 = load().find(r => r.id === id);
+      if (!r0 || inFlight.has(id)) return;
+      ag.disabled = true; ag.textContent = 'Analyzujem znova…';
+      loadClip(id).then(blob => {
+        if (!blob) return alert('Video sa v telefóne nenašlo.');
+        const file = new File([blob], 'sprint.mov', { type: blob.type || 'video/quicktime', lastModified: r0.at ?? Date.now() });
+        return upload(file, r0.filmed ?? (r0.run ? { times: null, recordedAt: r0.video?.recordedAt ?? r0.at, freelap: true } : null), id, null, true);
+      }).catch(() => {}).finally(() => draw());
+      return;
+    }
     const rt2 = e.target.closest('[data-sp-retry]');
     if (rt2 && loadClip) {
       retry(rt2.dataset.spRetry).then(ok => { if (!ok) alert('Video sa v telefóne nenašlo.'); });
