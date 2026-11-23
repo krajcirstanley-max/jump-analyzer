@@ -335,6 +335,15 @@ export function wireTrend(root) {
 
 const fmtTime = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 
+// Time in the air, on every row so it shows without opening the jump (Stanley, 2026-11-23). Older
+// records carry it too: the flight metric has been kept since the first schema. A run-through lands
+// on one foot and runs out, so it has no full flight.
+export function airLabel(r) {
+  if (r.jump?.kind === 'runthrough') return 'výbeh';
+  const ms = r.metrics?.flight?.v ?? r.jump?.metrics?.find?.(m => m.key === 'flight')?.value;
+  return Number.isFinite(ms) && ms > 0 ? `let ${(ms / 1000).toFixed(2).replace('.', ',')} s` : '';
+}
+
 // n: the attempt's number in its training day.
 function attemptRow(r, n) {
   const legacy = !(r.schema >= SCHEMA);
@@ -342,7 +351,7 @@ function attemptRow(r, n) {
   const sub = waiting ? 'Čaká na tvoj pocit'
     : [r.runup ? `${r.runup} ${r.runup <= 4 ? "kroky" : "krokov"}` : null, r.feel ? `Pocit ${r.feel}/5` : null, legacy ? 'starší pokus, bez záznamu' : null, r.cue ? `„${r.cue}“` : null].filter(Boolean).join(' · ');
   const body = `<b class="att-score">${waiting || r.score == null ? '–' : Math.round(r.score)}</b>
-    <span class="att-meta"><span>${n}. skok${fmtTime(r.recordedAt) ? ` · ${esc(fmtTime(r.recordedAt))}` : ''}</span><small>${esc(sub)}</small></span>`;
+    <span class="att-meta"><span>${n}. skok${fmtTime(r.recordedAt) ? ` · ${esc(fmtTime(r.recordedAt))}` : ''}${airLabel(r) ? ` · <b class="att-air">${esc(airLabel(r))}</b>` : ''}</span><small>${esc(sub)}</small></span>`;
   return `<div class="att">
     ${legacy ? `<div class="att-open">${body}</div>` : `<button class="att-open" data-open="${esc(r.id)}">${body}<span class="att-go" aria-hidden="true">›</span></button>`}
     <button class="att-del" data-del="${esc(r.id)}" aria-label="Zmazať pokus">Zmazať</button>
