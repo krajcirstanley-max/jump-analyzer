@@ -151,8 +151,8 @@ const FAULTS = [
     // 2026-11-23 (Miška, 22 Nov evening): into the penultimate 0-2 cm, but 5-10 cm from the
     // penultimate toe-off to the board. Her penultimate knee bent no more than the step before
     // (penKnee -7 to +8°), so the drop comes late, on the board. Telling her to lower at all was
-    // wrong; the point is where. Stanley's pattern is the textbook one: 8-14 cm into the
-    // penultimate, then a flat last step.
+    // wrong; the point is where. Stanley has the opposite pattern, 6-14 cm into the penultimate and a
+    // flat last step: the right shape, but deeper than the band (hipDropHigh).
     id: 'hipDropLate', tier: 'approach', phase: 'pen', cue: 'dlhý – krátky',
     img: 'Rytmus tá-dam: predposledný krok dlhší a nižší, posledný krátky a rýchly.',
     keys: [['hipDrop', 'low', 1.5]],
