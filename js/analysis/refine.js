@@ -110,6 +110,11 @@ export function refineClaudeEdges(result, events, sources, { height = null, tolM
   for (const [src, kTD, kTO] of [['take', 'TD', 'TO'], ['pen', 'penTD', 'penTO']]) {
     const td = events[kTD], to = events[kTO];
     if (sources?.[src] !== 'claude' || td == null || to == null || to - td < 4) continue;
+    // The server's toe-against-track pass (locate.fast, its steps) holds a take-off to a frame; when its
+    // contact is the named one, the edges stand (2026-11-24, Stanley 19:47: steps 895-909 = named, the heel
+    // on the board at 894/895 by eye; the level test below, misled by a phone following the jumper, moved it
+    // to 899 and the plant read 74° leg, 146° knee, 92 ms). IMG_4933, before that pass existed, keeps the move.
+    if (result.locate?.fast && (result.locate.steps ?? []).some(st => Math.abs(st.td - td) <= 1 && Math.abs(st.to - to) <= 1)) continue;
     const inner = []; for (let i = td + 2; i <= to - 2; i++) inner.push(i);
     const lowOf = f => median(inner.map(i => lowPoint(raw(i), f)?.[1]));
     const f = (lowOf('l') || -1) > (lowOf('r') || -1) ? 'l' : 'r';
