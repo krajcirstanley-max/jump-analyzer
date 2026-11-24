@@ -272,6 +272,28 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
       if (land != null && (land - c.to - 1) / fps >= 0.3) contacts.push({ td: land, to: n - 1, level: c.level, feet: c.feet, atEnd: true });
     }
   }
+  // The last landing of a series, when the athlete lands and walks off at once: the feet are never still
+  // long enough for a contact, and the last rebound lost its flight with it (pogo IMG_0278, 2026-11-24:
+  // last rebound 914-931, landing 989 by eye, walking from 996, clip end 1003). After the last contact the
+  // feet rise at least 5 cm and come down; the landing is where that fall brakes (as above).
+  {
+    const c = contacts.at(-1);
+    if (c && !c.atEnd && c.to < n - 8) {
+      // the following phone moves the floor's row, so the landing is judged by the fall, not the level:
+      // past half the way back down from the top, the first frame whose drop brakes under half
+      let top = Infinity, land = null;
+      for (let i = c.to + 1; i < n - 1 && (i - c.to - 1) / fps <= 0.8; i++) {
+        const y = lowY(i);
+        if (!Number.isFinite(y)) continue;
+        top = Math.min(top, y);
+        const rise = c.level - top;
+        if (rise < 0.05 * pxM || y < top + 0.5 * rise || i < 4) continue;
+        const v = [1, 2, 3].map(q => lowY(i - q) - lowY(i - q - 1)), fall = median(v), now = y - lowY(i - 1);
+        if (fall > PX / 2 && now < 0.5 * fall) { land = i; break; }
+      }
+      if (land != null && (land - c.to - 1) / fps >= 0.15) contacts.push({ td: land, to: n - 1, level: c.level, feet: c.feet, atEnd: true });
+    }
+  }
   // Without a box, pieces with no frame of flight between them are one contact: walking up to the first
   // hurdle with a panning phone moves the feet's row 80 px, and the box rule cut the stand in two, the
   // second piece neither a stand nor a rebound, so the standing take-off was lost (IMG_4577, 2026-11-24).
