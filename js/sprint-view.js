@@ -17,6 +17,7 @@ import { sprintAdvice, runSummary } from './analysis/sprint-advice.js';
 import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 import { analyzeSprint, pairRun, modeOfRun, runMetres, cleanSteps, SPRINT_ALGO } from './analysis/sprint.js';
 import { accelCurveHtml } from './accel-curve.js';
+import { accelStallHtml } from './analysis/accel-stall.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = x => (x == null ? '–' : Number(x).toFixed(2).replace('.', ','));
@@ -83,7 +84,7 @@ function sidesHtml(a) {
 // the athlete's best Freelap 0-10 m from a standing start (the card and the chat use the same one)
 const bestFirst10Of = (a, run, runs) => (a.kind === 'accel' && run ? Math.min(...runs.filter(r => r.who === a.who && r.legs?.length >= 2 && modeOfRun(r) === 'accel').map(r => r.legs[0])) : null);
 
-export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = [], canAsk = false } = {}) {
+export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = [], canAsk = false, bestAccel = null } = {}) {
   const name = esc(athletes[a.who]?.name ?? '');
   const what = run?.type === 'rozbeh' ? `rozbeh${run.steps ? ` ${run.steps} krokov` : ''}` : `${KIND[a.kind]}${a.distance ? ` ${a.distance} m` : ''}`;
   const title = `${name}${name ? ' · ' : ''}${what}`;
@@ -145,7 +146,8 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = []
     : '<section class="card sp-card"><p class="note">Video sa k rozboru ukladá od verzie 0.9. Pri starších rozboroch ostalo len vo Fotkách.</p></section>';
   // Only what is measured (Stanley, 2026-11-15): the acceleration profile (F0, Pmax) stays out; the
   // speed curve is back on accel runs since 2026-11-24, drawn as the fit over the measured 10 m bars.
-  return video + overview + adviceHtml + ask + steps;
+  const stall = a.kind === 'accel' && run ? accelStallHtml(a, bestAccel) : '';
+  return video + overview + stall + adviceHtml + ask + steps;
 }
 
 // The video first, the numbers when they come (Stanley, 2026-11-14: "video si viem pozrieť hneď po
@@ -292,7 +294,19 @@ export function initSprint({ root, athletes, freelap, getAthlete = () => null, r
     const run = cleanLegs(rec.runKey ? all.find(r => r.key === rec.runKey) ?? rec.run ?? null : null);
     const who = run?.who ?? rec.who ?? rec.video.who?.id ?? getAthlete()?.id ?? null;
     const a = analyzeSprint(rec.video, run, { mode: run ? null : rec.mode ?? null, who, height: athletes[who]?.height ?? null });
-    return { a, run, html: resultHtml(rec, a, run, all, athletes, { extra: slExtra, others: othersOf(rec, who), canAsk: !!onAsk && cloudReady() }) };
+    const bestAccel = a.kind === 'accel' && run ? bestAccelOf(rec, who, run, all) : null;
+    return { a, run, html: resultHtml(rec, a, run, all, athletes, { extra: slExtra, others: othersOf(rec, who), canAsk: !!onAsk && cloudReady(), bestAccel }) };
+  }
+
+  // The athlete's fastest other acceleration over the same distance, analysed, for "kde zrýchľovanie stráca".
+  function bestAccelOf(rec, who, run, all) {
+    const n = run.legs?.length ?? 0, lap = r => r.legs.reduce((x, y) => x + y, 0);
+    const pick = load().filter(r => r.id !== rec.id && !r.pending && r.video?.steps && (r.who ?? r.run?.who) === who)
+      .map(r => ({ r, run: cleanLegs(r.runKey ? all.find(x => x.key === r.runKey) ?? r.run ?? null : null) }))
+      .filter(x => x.run?.legs?.length === n && modeOfRun(x.run) === 'accel')
+      .sort((x, y) => lap(x.run) - lap(y.run))[0];
+    if (!pick || lap(pick.run) >= lap(run)) return null;
+    try { return analyzeSprint(pick.r.video, pick.run, { who, height: athletes[who]?.height ?? null }); } catch { return null; }
   }
 
   // The athlete's earlier runs, as the advice compares them (their own usual contact, foot, sides).

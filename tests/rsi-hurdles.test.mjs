@@ -5,7 +5,9 @@
 // no-box re-read the server does when Claude names hurdle hops. Each hand edge is matched to the
 // app's nearest edge of its kind; further than 8 frames counts as missed.
 // 2026-11-24 before the fixes: 60 of 188 edges missed (the deep rebound's sinking toe, contacts
-// dropped as 'in the air' while the phone panned, the stand cut in two); after: 26.
+// dropped as 'in the air' while the phone panned, the stand cut in two); after: 26, then 18 (stops with a
+// re-set step joined, a dipping foot point before a landing dropped, late touchdowns searched back). Half
+// of the 18 are standing take-offs before the first hurdle, which show no contact time anyway.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
@@ -52,7 +54,7 @@ test('hurdle hops: blind hand reads of every touchdown and toe-off', { skip: !ha
   }
   const within = a => a.filter(x => Math.abs(x) <= 2).length / a.length;
   assert.ok(n >= 180, `${n} hand edges`);
-  assert.ok(missed <= 26, `missed ${missed} of ${n}`);
+  assert.ok(missed <= 18, `missed ${missed} of ${n}`);
   // the orange hall clips are soft: two blind readers differed by 2 frames on the same touchdowns
   // 2026-11-24: 0.89 and 0.90; the rest are standing take-offs read 3-6 frames early and late last landings
   assert.ok(within(off.TD) >= 0.88 && within(off.TO) >= 0.88, `within 2 frames TD ${within(off.TD)} TO ${within(off.TO)}`);

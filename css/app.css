@@ -348,6 +348,8 @@ div.att-open { cursor: default; }
 .fl-del.armed { background: var(--bad); border-color: var(--bad); color: #fff; font-size: 14px; font-weight: 700; padding: 0 12px; }
 .fl-legs { display: flex; gap: 3px; margin-top: 10px; }
 .sp-curve { margin-top: 12px; }
+.sp-gain { margin: 4px 0 8px; padding-left: 18px; }
+.sp-gain li { margin: 2px 0; }
 .sp-curve svg { display: block; margin: 4px 0; }
 .fl-leg { position: relative; min-width: 56px; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 34px; border-radius: 8px; background: var(--accent-bg); color: var(--accent); }
 .fl-leg b { font-size: 15px; font-variant-numeric: tabular-nums; }

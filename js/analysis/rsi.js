@@ -194,6 +194,14 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
       contacts.splice(k, 1);
     }
   }
+  // A sliver under 80 ms followed 2-6 frames later by a contact is a foot point dipping before the landing,
+  // not a contact of its own: it took the next landing's flight away and the rebound was lost (IMG_2977,
+  // 2026-11-24: 573-580, 57 px above the landing at 585). It sits above the landing: a real short hop
+  // contact is on the floor. Touching slivers are joined above.
+  for (let k = contacts.length - 2; k >= 1; k--) {
+    const a = contacts[k], b = contacts[k + 1], g = b.td - a.to - 1;
+    if ((a.to - a.td + 1) / fps < 0.08 && g >= 1 && g <= 6 && (b.to - b.td + 1) > (a.to - a.td + 1) && b.level - a.level > 0.04 * pxM) contacts.splice(k, 1);
+  }
   // A flight lifts the feet. Standing still on the box, filmed close with only the legs in the
   // picture and the phone moving, the foot points wander and the stillness rule broke the stand into
   // pieces with "flights" of 0.06-0.39 s between them, during which the lowest foot never rose
@@ -271,6 +279,16 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     const c = contacts[k], nx = contacts[k + 1];
     if (nx.td <= c.to + 1) { c.to = Math.max(c.to, nx.to); c.level = Math.max(c.level, nx.level); c.feet = [...new Set((c.feet + nx.feet).split(''))].sort().join(''); contacts.splice(k + 1, 1); }
   }
+  // A gap under 0.04 s is no flight (stepping off a box takes 0.13 s; the shortest hop seen, the first
+  // pogo out of a stand in 1794698393052, 0.06 s),
+  // and a level change under 12 cm is no box: a stop between hurdles with a small re-set step came in two
+  // pieces, each under the 0.6 s of a stand, and the stop was lost (IMG_3354, 2026-11-24: 105-143 and
+  // 147-204, 270-334 and 335-364 at 24 px apart).
+  for (let k = contacts.length - 2; k >= 0; k--) {
+    const c = contacts[k], nx = contacts[k + 1];
+    const long = x => (x.to - x.td + 1) / fps >= 0.15;   // two real pieces, not a sliver before a hop (6 frames at 60 fps is 0.1 s)
+    if (long(c) && long(nx) && (nx.td - c.to - 1) / fps < 0.04 && Math.abs(nx.level - c.level) < 0.12 * pxM) { c.to = Math.max(c.to, nx.to); c.level = Math.max(c.level, nx.level); c.feet = [...new Set((c.feet + nx.feet).split(''))].sort().join(''); contacts.splice(k + 1, 1); }
+  }
   // Rocking on the feet before a standing take-off is no flight: the toes come up and down again in
   // under 0.2 s while the hips only sink into the dip. A flight lifts the hips with the feet (IMG_4964,
   // 2026-11-24: stand 1-223, toes 6 cm up over 224-238 with the hips 7 cm down, then "a rebound" of
@@ -281,7 +299,10 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
     const hs = []; for (let i = c.to; i <= nx.td; i++) if (Number.isFinite(hipAt(i))) hs.push(hipAt(i));
     if (hs.length < 0.7 * (nx.td - c.to + 1) || !Number.isFinite(hipAt(c.to))) continue;
     const feetUp = (() => { let m = -Infinity; for (let i = c.to + 1; i < nx.td; i++) { const y = lowY(i); if (Number.isFinite(y)) m = Math.max(m, c.level - y); } return m / pxM; })();
-    if (feetUp > 0.03 && Math.min(...hs) >= hipAt(c.to) - 0.01 * pxM) { c.to = nx.to; c.level = Math.max(c.level, nx.level); c.feet = [...new Set((c.feet + nx.feet).split(''))].sort().join(''); contacts.splice(k + 1, 1); }
+    // and the hips end lower (sinking into the dip); a small hop lands with them where it left (the first
+    // pogo out of a stand, 1794698393052 at 60 fps: 0.12 s up, joined to the stand and lost)
+    const sank = Number.isFinite(hipAt(nx.td)) && hipAt(nx.td) - hipAt(c.to) > 0.03 * pxM;
+    if (feetUp > 0.03 && sank && Math.min(...hs) >= hipAt(c.to) - 0.01 * pxM) { c.to = nx.to; c.level = Math.max(c.level, nx.level); c.feet = [...new Set((c.feet + nx.feet).split(''))].sort().join(''); contacts.splice(k + 1, 1); }
   }
   if (!contacts.length) return { error: 'Na videu som nenašiel žiadny dotyk so zemou.' };
   // The run grows to every frame within 2 cm of its level, and filmed close (only the legs, the
@@ -289,6 +310,19 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // before the shoe was down (2026-11-17, 932274606: 212 for 216, 929272459: 236 for 239). After a
   // flight the contact starts where the fall stops: the first frame whose drop is under half of the
   // three before it. (With a still phone the toe edges set the frames later anyway: refineEdges.)
+  // ...and back: a deep landing keeps the toe sinking 2-3 px a frame after the shoe is down (a following
+  // phone, the knees bending), so the stillness rule started the contact late (IMG_4964's last landing:
+  // the fall of 12-15 px a frame stops at 959, the contact began at 965, by eye 957/958). Within 10 frames
+  // before, the first frame whose drop is under half of the three before it, with a real fall before it.
+  const drop = i => lowY(i) - lowY(i - 1);
+  for (let k = 1; k < contacts.length; k++) {
+    const c = contacts[k], p = contacts[k - 1];
+    if (c.td - p.to < 12) continue;
+    for (let i = Math.max(p.to + 6, c.td - 10); i < c.td; i++) {
+      const fall = median([1, 2, 3].map(q => drop(i - q)));
+      if (fall > 1.2 * PX && [0, 1, 2].every(q => drop(i + q) < 0.5 * fall)) { c.td = i; break; }   // and stays braked
+    }
+  }
   for (let k = 1; k < contacts.length; k++) {
     const c = contacts[k], p = contacts[k - 1];
     if (c.td - p.to < 6 || c.to - c.td < 6) continue;
