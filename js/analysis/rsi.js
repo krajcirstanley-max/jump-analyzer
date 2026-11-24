@@ -113,7 +113,12 @@ function footRuns(y, fps, pxM, { stillMs = 0.35, tolM = 0.02, minMs = 60 } = {})
     // mid-air and lost the jump (2026-11-14, 240 fps, hand-held: 764-806 and 824-851).
     const risingInto = a - k >= 0 && below(a - k);
     const q = Math.max(2, Math.round((b - a + 1) / 4));
-    const sinking = (b - a + 1) / fps < 0.3 && median(y.slice(b - q + 1, b + 1)) - median(y.slice(a, a + q)) > Math.max(0.025 * pxM, 1.25 * PX);
+    // ...but a foot that rises right after the run was on the ground: a deep rebound over a hurdle,
+    // filmed by a phone that follows the athlete, sinks the planted toe 7-8 cm in the picture as the
+    // body goes down (IMG_4964, 2026-11-24: 885 -> 903 px over 557-572, up from 586), while the slow
+    // fall after a top keeps falling into its landing.
+    const risesAfter = b + k < n && Number.isFinite(y[b + k]) && y[b + k] < median(y.slice(b - q + 1, b + 1)) - tol;
+    const sinking = !risesAfter && (b - a + 1) / fps < 0.3 && median(y.slice(b - q + 1, b + 1)) - median(y.slice(a, a + q)) > Math.max(0.025 * pxM, 1.25 * PX);
     // and at least 3 frames: at 60 fps a 2-frame "contact" of the other foot just before the landing
     // (IMG_2213, 381-382) split the hop and lost it; a real contact is 80 ms or more
     if (!apex && !risingInto && !sinking && (b - a + 1) / fps * 1000 >= minMs && b - a + 1 >= 3) runs.push({ td: a, to: b, level });
@@ -208,11 +213,29 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // Later, not next: two such pieces in a row kept each other (2026-11-18, rsi.mp4: the rebound took
   // the feet out of the top of the picture and the pose sat on someone behind the box, 177-199 and
   // 206-214 some 30 cm "up", the landing on the floor at 217; the flight read 0.33 s for 0.66 s).
+  // Not when the hips sit lower through it than in the flights on both sides: that is a landing.
+  // Feet held up at a top come with the hips at their highest. A phone that follows the athlete over
+  // a row of hurdles moves the floor's row in the corrected picture (IMG_4964, 2026-11-24: contacts at
+  // 907, 902, 860, 811, 730 and 799 px, the one at 730 dropped as 'in the air', 1.5 s of 'flight').
+  const hipAt = i => { const kp = track[i], a = kp && at(kp, 'lhip'), b = kp && at(kp, 'rhip'); return a && b ? (a[1] + b[1]) / 2 : a ? a[1] : b ? b[1] : NaN; };
+  // Only between two real flights (0.25 s or more each way, a hop over a hurdle is 0.5-0.65 s) and with
+  // a hip drop a body makes (5-80 cm): the pose on someone behind the box (1795037345193, 1.5 m) and
+  // pieces 0.05-0.14 s from the next contact (1794929272459) are not landings.
+  const hipsDown = c => {
+    const k = contacts.indexOf(c), p = contacts[k - 1], nx = contacts[k + 1];
+    if (!p || !nx || (c.td - p.to - 1) / fps < 0.25 || (nx.td - c.to - 1) / fps < 0.25) return false;
+    const w = Math.round(0.15 * fps), ys = (p, q) => { const o = []; for (let i = Math.max(0, p); i <= Math.min(n - 1, q); i++) if (Number.isFinite(hipAt(i))) o.push(hipAt(i)); return o; };
+    const mid = ys(c.td, c.to), pre = ys(c.td - w, c.td - 1), post = ys(c.to + 1, c.to + w);
+    if (mid.length < 3 || pre.length < 3 || post.length < 3) return false;
+    const low = median(mid), d = 0.05 * pxM;
+    const up = [low - Math.min(...pre), low - Math.min(...post)];
+    return up.every(x => x > d && x < 0.8 * pxM);
+  };
   for (let again = true; again;) {
     again = false;
     for (let k = contacts.length - 2; k >= 1; k--) {
       const c = contacts[k], up = 0.10 * pxM, later = Math.max(...contacts.slice(k + 1).map(x => x.level));
-      if ((c.to - c.td + 1) / fps < 0.3 && c.level < contacts[k - 1].level - up && c.level < later - up) { contacts.splice(k, 1); again = true; }
+      if ((c.to - c.td + 1) / fps < 0.3 && c.level < contacts[k - 1].level - up && c.level < later - up && !hipsDown(c)) { contacts.splice(k, 1); again = true; }
     }
   }
   // The same at the top of the last flight, when the clip ends before a landing run is long enough
@@ -240,6 +263,25 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
       }
       if (land != null && (land - c.to - 1) / fps >= 0.3) contacts.push({ td: land, to: n - 1, level: c.level, feet: c.feet, atEnd: true });
     }
+  }
+  // Without a box, pieces with no frame of flight between them are one contact: walking up to the first
+  // hurdle with a panning phone moves the feet's row 80 px, and the box rule cut the stand in two, the
+  // second piece neither a stand nor a rebound, so the standing take-off was lost (IMG_4577, 2026-11-24).
+  if (noBox) for (let k = contacts.length - 2; k >= 0; k--) {
+    const c = contacts[k], nx = contacts[k + 1];
+    if (nx.td <= c.to + 1) { c.to = Math.max(c.to, nx.to); c.level = Math.max(c.level, nx.level); c.feet = [...new Set((c.feet + nx.feet).split(''))].sort().join(''); contacts.splice(k + 1, 1); }
+  }
+  // Rocking on the feet before a standing take-off is no flight: the toes come up and down again in
+  // under 0.2 s while the hips only sink into the dip. A flight lifts the hips with the feet (IMG_4964,
+  // 2026-11-24: stand 1-223, toes 6 cm up over 224-238 with the hips 7 cm down, then "a rebound" of
+  // 0,333 s before the first hurdle; by eye he stood until 284). Off a box the feet only go down.
+  for (let k = contacts.length - 2; k >= 0; k--) {
+    const c = contacts[k], nx = contacts[k + 1], T = (nx.td - c.to - 1) / fps;
+    if ((c.to - c.td + 1) / fps < 0.5 || T > 0.2 || T <= 0) continue;
+    const hs = []; for (let i = c.to; i <= nx.td; i++) if (Number.isFinite(hipAt(i))) hs.push(hipAt(i));
+    if (hs.length < 0.7 * (nx.td - c.to + 1) || !Number.isFinite(hipAt(c.to))) continue;
+    const feetUp = (() => { let m = -Infinity; for (let i = c.to + 1; i < nx.td; i++) { const y = lowY(i); if (Number.isFinite(y)) m = Math.max(m, c.level - y); } return m / pxM; })();
+    if (feetUp > 0.03 && Math.min(...hs) >= hipAt(c.to) - 0.01 * pxM) { c.to = nx.to; c.level = Math.max(c.level, nx.level); c.feet = [...new Set((c.feet + nx.feet).split(''))].sort().join(''); contacts.splice(k + 1, 1); }
   }
   if (!contacts.length) return { error: 'Na videu som nenašiel žiadny dotyk so zemou.' };
   // The run grows to every frame within 2 cm of its level, and filmed close (only the legs, the
@@ -395,7 +437,12 @@ export function rsiAnalysis(result, ts, { sex = 'male', height = null, boxCm = n
   // three or more contacts in a row on one foot each, the feet taking turns, and the hips moving
   // over 1.5 m. Hops on one leg keep one foot; hurdle hops land on both feet (IMG_2213 travels 5
   // body lengths, never on one foot). No RSI clip so far had even two in turn.
-  if (runningSteps(events) >= 3 && hipTravelM(track, pxM) > 1.5) {
+  // And running flights: a step's is 0.1-0.15 s, a hop over a hurdle's 0.5-0.65 s. A phone that pans
+  // with hurdle hops lifts one foot's point over the other's now and then, and the feet seemed to take
+  // turns (IMG_0772, 2026-11-24, once its contacts were all found).
+  const flights = events.map(e => e.flightAfter).filter(x => x != null && x > 0);
+  const runFlights = flights.length && median(flights) < 300;
+  if (runFlights && runningSteps(events) >= 3 && hipTravelM(track, pxM) > 1.5) {
     return { error: 'Toto vyzerá ako rozbeh alebo skok do diaľky, nie skok na mieste. Skok do diaľky patrí pod Skok, beh pod Šprint.', running: true };
   }
   const singleLeg = jumps.length && jumps.every(j => j.feet.length === 1);
