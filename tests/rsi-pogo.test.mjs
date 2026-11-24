@@ -1,6 +1,7 @@
 // Pogo and single-leg hops (2026-08-12 to 2026-09-17 and one of May, both athletes, hand-held phones that
 // follow; 8 of the 20 are single-leg hops): every touchdown and toe-off read blind on 2026-11-24
-// (rsi-pogo.json). Replayed like rsi-hurdles.test.mjs. 2026-11-24: 25 of 392 edges missed, mostly the
+// (rsi-pogo.json; IMG_1681 left out on its reader's own word, +-3 frames; IMG_1682 and IMG_1686 not read,
+// far and oblique). Replayed like rsi-hurdles.test.mjs. 2026-11-24: 25 of 392 edges missed, mostly the
 // standing take-off and the first rebound; the walk-off last landing is found since then.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
