@@ -626,15 +626,36 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
     // gates, so the steps of a 10 m add up to its 10 m. The time is measured to a frame; the speed between
     // two gates is the curve's, smooth, so a stumble inside a 10 m shows in the rate and contact, not here.
     // Not for a step that spans a lost one (over 1.5 times the usual step time): its length would be two.
+    // Not from the speed curve: it only rises, and an athlete easing off near the finish got her last
+    // steps 2.4 m long (Miška 22 Nov, step time 0.24 -> 0.27 s; her flying runs that day: 2.1 m at the same
+    // speed; Stanley: "Miška nemá krok 2.40"). Each 10 m's mean step is its Freelap speed times its mean
+    // measured step time; between the 10 m centres it runs linearly; each step's speed is that length over
+    // its own measured time, so a slower step shows as slower.
     const usual = median(out.steps.filter(s => s.step != null).map(s => s.step));
+    const ok = s => s.step != null && s.step < 1.5 * usual;   // not a step spanning a lost one
+    const segL = out.legStats.map((l, k) => {
+      const mine = out.steps.filter(s => ok(s) && s.td >= l.end - l.time && s.td < l.end);
+      return mine.length >= 2 ? { t: l.end - l.time / 2, L: (10 / l.time) * mean(mine.map(s => s.step)) } : null;
+    }).filter(Boolean);
+    const lenAt = t => {
+      if (!segL.length) return null;
+      if (segL.length === 1 || t >= segL.at(-1).t) return segL.at(-1).L;   // past the last 10 m's centre: held, not extended
+      let i = segL.findIndex(x => x.t > t); if (i === 0) i = 1;
+      const a = segL[i - 1], b = segL[i]; return a.L + ((b.L - a.L) * (t - a.t)) / (b.t - a.t);
+    };
     out.steps = out.steps.map(s => {
       if (s.step == null) return s;
       const t1 = s.td - zero, t2 = s.td + s.step - zero, len = posAt(t2, fit) - posAt(t1, fit);
-      // No cap on the length: Miška's last 10 m of 22 Nov has 4 touchdowns by the blind reads, 2.4 m steps,
-      // and a cap hid real steps (Stanley: "nereálne kroky nie že sú preč, fixni ich").
-      const whole = s.step < 1.5 * usual;
+      const L = ok(s) ? lenAt(s.td + s.step / 2) : null;
       return { ...s, modelLength: r3(len), modelSpeed: r3(len / s.step), freq: r3(1 / s.step), at: r3(posAt((t1 + t2) / 2, fit)),
-        ...(whole ? { length: r3(len), speed: r3(len / s.step), fromCurve: true } : {}) };
+        ...(L != null && L > 0 ? { length: r3(L) } : {}) };
+    });
+    // A step's speed over it and its two neighbours (lengths over times): one step time is good to a frame
+    // at each end (±8 % of a 0.24 s step: Miška's 15th read 10.2 m/s alone) and left and right differ.
+    out.steps.forEach((s, i) => {
+      if (s.length == null) return;
+      const near = out.steps.slice(Math.max(0, i - 1), i + 2).filter(x => x.length != null && x.step != null);
+      s.speed = r3(near.reduce((t, x) => t + x.length, 0) / near.reduce((t, x) => t + x.step, 0));
     });
     // Only the steps inside the timed distance, up to the one that crosses its end.
     const endT = out.legStats.at(-1).end, fpsV = video.fps ?? 120;
