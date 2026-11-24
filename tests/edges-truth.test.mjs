@@ -46,7 +46,9 @@ test('Claude-only board edges are moved to the raw foot (IMG_4933), pose edges s
     assert.ok(j.metrics.find(m => m.key === 'kneeTO').value > 160);
   }
   const q = load(4930), k = analyzeJump(q, 'male', q.ts, { height: 186 });
-  assert.equal(k.takeoff.td, 911);
+  // 911 by hand; since 2026-11-24 the board touchdown is never moved later than named (910): a following
+  // phone made the late move 3 frames on every jump of that day's session
+  assert.ok(k.takeoff.td >= 910 && k.takeoff.td <= 911, `TD ${k.takeoff.td}`);
   assert.ok(Math.abs(k.takeoff.to - 926.5) <= 1, `TO ${k.takeoff.to}`);
 });
 

@@ -22,7 +22,7 @@ function lowPoint(kp, f) {
 // events: { td3, penTD, penTO, TD, TO } frame numbers (Claude's names with the pose's edges).
 // Returns a copy with td3 / penTD / TD moved to the first frame the foot is really down, and
 // what moved. Never moves a touchdown by more than 2 frames earlier or 4 later.
-export function refineTouchdowns(result, events, { height = null, tolM = 0.015 } = {}) {
+export function refineTouchdowns(result, events, { height = null, tolM = 0.015, noLateTD = false } = {}) {
   const raw = i => result.accurate?.[i] ?? result.fast?.[i] ?? null;
   const frames = result.ground?.frames ?? {};
   const Hcache = {};
@@ -75,6 +75,17 @@ export function refineTouchdowns(result, events, { height = null, tolM = 0.015 }
     // the heel can be down a frame before the foot stops sinking: back up while the frame before
     // is within the tolerance of the stopped level
     while (best != null && best > td - 2 && Number.isFinite(y(best - 1)) && y(best) - y(best - 1) <= tol) best--;
+    // Without the runway the phone's motion is unknown and taken as none; a phone that follows the jumper
+    // and tilts down keeps the planted foot "falling" in the picture, and the touchdown moved late
+    // (2026-11-24, Ostrava hall, runway not found on any clip: Stanley's board 681 named, 684 refined, heel
+    // down at 680 by eye; leg angle 73° for 60°, inclination −12° for −26°). Then it only moves earlier.
+    // The board touchdown is never moved later than named. On 2026-11-24 (Ostrava hall, a phone following
+    // the jumper) the move was +3 on every jump, with and without the runway: Stanley 681 -> 684 (heel down
+    // at 680 by eye), Miška 800 -> 803 (798-800): leg angle 73° for 60°, inclination −12° for −26°, the
+    // whole plant phase graded down. The bench got better without it (292 -> 293 of 308 within a frame).
+    // The penultimate's late moves stay: they were right (4676 520 -> 521, 5161). So do the run-ups' board
+    // contacts filmed across the hall (Rozbeh, rozbeh-cones.test: +1/+2 and right); only jumps ask for this.
+    if (noLateTD && key === 'TD' && best != null && best > td) best = td;
     if (best != null && best !== td) { out[key] = best; moved[key] = best - td; }
   }
   return { events: out, moved };

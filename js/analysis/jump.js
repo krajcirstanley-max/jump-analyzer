@@ -300,7 +300,8 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // Edges Claude read itself (no pose contact there) first get both ends from the raw foot.
   // Those keep their new frames; refineTouchdowns' narrower search would nudge them again.
   const claudeFixed = named0 ? refineClaudeEdges(result, named0, result.locate?.edges, { height }) : null;
-  const refined = claudeFixed ? refineTouchdowns(result, claudeFixed.events, { height }) : null;
+  // a jump's board touchdown is never moved later than named (refine.js, 2026-11-24); a run-up's is
+  const refined = claudeFixed ? refineTouchdowns(result, claudeFixed.events, { height, noLateTD: !trustTakeoff }) : null;
   if (refined) for (const k of claudeFixed.done) refined.events[k] = claudeFixed.events[k];
   // On a take-off plank the foot lands above the runway, and the raw track's "really down" comes a
   // frame or two late (IMG_5166, 2026-11-20: 986 named, 987 refined, 985 by hand): the named board
