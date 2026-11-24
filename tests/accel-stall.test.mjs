@@ -37,3 +37,15 @@ test('head-on 30 m runs: no step length from a 10 m with lost steps', { skip: !h
   assert.equal(P[0].length, null);
   assert.equal(P[1].length != null, true);
 });
+
+test('every 5 m against the sprinters: rate and contact flags, no first 5 m without the start, women not graded', { skip: !have }, async () => {
+  const { bandsVsNorm } = await import('../js/analysis/accel-stall.js');
+  const recs = JSON.parse(readFileSync(new URL('jump.sprint.analyses.json', R)));
+  const run = id => { const r = recs.find(x => x.id === id), d = JSON.parse(readFileSync(new URL(`dump2/${id}.json`, R))).dump;
+    return analyzeSprint({ ...r.video, steps: sprintFromMotion({ motion: d.motion, ts: d.ts, fps: d.meta.fps }).steps }, r.run, { who: r.who, height: r.who === 'miska' ? 171 : 186 }); };
+  const S = bandsVsNorm(run('sp1795352344038'), { sex: 'male', heightM: 1.86 });
+  assert.ok(S.graded && S.rows[0].from === 5, 'first 5 m left out: the first steps were not seen');
+  assert.ok(S.rows.some(r => r.lowFreq));
+  const M = bandsVsNorm(run('sp1795352175439'), { sex: 'female', heightM: 1.71 });
+  assert.equal(M.graded, false); assert.ok(M.rows.every(r => !r.lowFreq && !r.short && !r.longContact));
+});

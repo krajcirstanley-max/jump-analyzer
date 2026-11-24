@@ -538,7 +538,9 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
   const k0 = mode ?? (run ? modeOfRun(run) : video.modeGuess);
   const kind = k0 === 'rozbeh' ? 'fly' : k0;   // a run-up is analysed like a fly: steady steps at the end
   const raw = video.steps.filter(s => s.contact != null);
-  const all = cleanSteps(kind === 'fly' ? mendLateTouchdowns(raw) : raw, { accel: kind === 'accel' && !!video.start, fps: video.fps ?? 120 });
+  // a late touchdown is mended in an acceleration too (2026-11-24, Miška's 30 m of 22 Nov: l474-482 read 5
+  // frames late, the step pair 35 + 23 frames, the run broke and every step after it lost its length)
+  const all = cleanSteps(mendLateTouchdowns(raw), { accel: kind === 'accel' && !!video.start, fps: video.fps ?? 120 });
   const legs = runMetres(run) ? run.legs : [];
   const out = { kind, distance: legs.length ? legs.length * 10 : null, legs, who, dropped: raw.length - all.length };
   if (all.length < 3) return { ...out, steps: [], tooFew: true, legStats: legs.map(l => ({ time: l, speed: r3(10 / l), stepLength: null })), sides: sidesOf([]) };
@@ -619,14 +621,25 @@ export function analyzeSprint(video, run, { mode = null, who = null, height = nu
       const len = n ? 10 / n : null;
       return { time: l, speed: r3(10 / l), steps: seenStart ? +n.toFixed(1) : null, stepLength: len && len >= 0.5 * hM && len <= SANE.length[1] * hM ? r3(len) : null, end: r3(b) };
     });
+    // Each step's length and speed (Stanley, 2026-11-24: "máš frekvenciu každého kroku a Freelap čas, cez
+    // pomer a počet krokov"): the step's measured time on the speed curve that runs through the Freelap
+    // gates, so the steps of a 10 m add up to its 10 m. The time is measured to a frame; the speed between
+    // two gates is the curve's, smooth, so a stumble inside a 10 m shows in the rate and contact, not here.
+    // Not for a step that spans a lost one (over 1.5 times the usual step time): its length would be two.
+    const usual = median(out.steps.filter(s => s.step != null).map(s => s.step));
     out.steps = out.steps.map(s => {
       if (s.step == null) return s;
       const t1 = s.td - zero, t2 = s.td + s.step - zero, len = posAt(t2, fit) - posAt(t1, fit);
-      return { ...s, modelLength: r3(len), modelSpeed: r3(len / s.step), freq: r3(1 / s.step), at: r3(posAt((t1 + t2) / 2, fit)) };
+      // No cap on the length: Miška's last 10 m of 22 Nov has 4 touchdowns by the blind reads, 2.4 m steps,
+      // and a cap hid real steps (Stanley: "nereálne kroky nie že sú preč, fixni ich").
+      const whole = s.step < 1.5 * usual;
+      return { ...s, modelLength: r3(len), modelSpeed: r3(len / s.step), freq: r3(1 / s.step), at: r3(posAt((t1 + t2) / 2, fit)),
+        ...(whole ? { length: r3(len), speed: r3(len / s.step), fromCurve: true } : {}) };
     });
     // Only the steps inside the timed distance, up to the one that crosses its end.
-    const endT = out.legStats.at(-1).end;
-    out.steps = out.steps.filter(s => s.td < endT && s.step != null);
+    const endT = out.legStats.at(-1).end, fpsV = video.fps ?? 120;
+    // (a touchdown on the finish frame itself starts a step beyond the gate: Miška 22 Nov, r620 at 5.162 s)
+    out.steps = out.steps.filter(s => s.td < endT - 0.5 / fpsV && s.step != null);
     out.steps.forEach(s => { s.leg = out.legStats.findIndex(l => s.td < l.end); });
     const tAtX = x => { let lo = 0, hi = 15; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (posAt(m, fit) < x) lo = m; else hi = m; } return lo; };
     out.curve = [2, 5, 10, 15, 20, 30, 40].filter(x => x <= out.distance).map(x => ({ x, v: r3(speedAt(tAtX(x), fit)) }));

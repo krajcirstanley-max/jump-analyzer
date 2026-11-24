@@ -106,3 +106,70 @@ export function accelStallHtml(a, best = null) {
     ${s.lines.length ? `<p class="sp-lb">Odkiaľ prišla rýchlosť v každej desiatke</p><ul class="sp-gain">${s.lines.map(l => `<li>${l}</li>`).join('')}</ul>` : ''}
     <p class="note">Z nameraného: časy Freelapu, kroky spočítané v každej desiatke, kontakt a čas každého kroku (±0,01 s). Zaseknutie sa hlási až pri zmene o 3 snímky, ktorá trvá aspoň 2 kroky.</p></section>`;
 }
+
+// ---------- against published norms (research 2026-11-24) ----------
+// Stavridis et al. 2022 (J Phys Educ Sport 22:1126, Tables 2-3): sub-elite men sprinters, n = 9, 1.80 m,
+// 100 m 10.49 s, 3-point standing start, per 5 m to 30 m. Only rate and contact told levels apart there.
+// No per-5 m values for women from a standing start exist: women are shown, not graded.
+export const STAVRIDIS_MEN = {
+  relLength: [0.63, 0.88, 1.02, 1.07, 1.12, 1.16],   // step length / body height
+  freq: [3.45, 4.73, 4.66, 4.77, 4.68, 4.66],        // Hz
+  contact: [0.161, 0.128, 0.116, 0.106, 0.104, 0.103], // s
+};
+// Flag bands: rate 1 SD (~0.25 Hz), length 0.06 of height, contact judged from 15 m only (earlier steps
+// vary 12-20 % trial to trial, Thomson 2007) and 2 frames over.
+const LOW_FREQ = 0.25, SHORT_REL = 0.06, LONG_CONTACT = 2 / 120;
+// Haugen et al. 2019 (PLoS One, Table 1), long jumpers from a standing start: 10 m segments men n = 9
+// 10-20 8.40, 20-30 9.35, 30-40 9.52 m/s; women n = 8 7.69, 8.33, 8.40. Freelap is good to ±2 % per 10 m.
+export const HAUGEN_JUMPERS = { m: [null, 8.40, 9.35, 9.52], f: [null, 7.69, 8.33, 8.40] };
+
+export function bandsVsNorm(a, { sex = 'male', heightM = null } = {}) {
+  if (!a || a.kind !== 'accel' || !a.steps?.length) return null;
+  const S = a.steps.filter(s => Number.isFinite(s.at) && Number.isFinite(s.step));
+  const men = sex !== 'female' && Number.isFinite(heightM);
+  const rows = [];
+  // the first 5 m only when the first step out of the start was seen (head-on, 30 m away, it often isn't)
+  const L0 = a.legStats?.[0], startSeen = !!L0 && Math.min(...a.steps.map(s => s.td)) - (L0.end - L0.time) <= 0.45;
+  for (let b = 0; b < 6; b++) {
+    const mine = S.filter(s => s.at >= b * 5 && s.at < b * 5 + 5);
+    if (!mine.length || (b === 0 && !startSeen)) continue;
+    const mean = k => mine.reduce((t, s) => t + s[k], 0) / mine.length;
+    const freq = 1 / mean('step'), contact = mean('contact');
+    const lens = mine.filter(s => Number.isFinite(s.length)).map(s => s.length), length = lens.length ? lens.reduce((x, y) => x + y, 0) / lens.length : null;
+    const n = men ? { freq: STAVRIDIS_MEN.freq[b], length: STAVRIDIS_MEN.relLength[b] * heightM, contact: STAVRIDIS_MEN.contact[b] } : null;
+    rows.push({ band: b, from: b * 5, to: b * 5 + 5, steps: mine.length, freq, length, contact, norm: n,
+      lowFreq: !!n && b >= 1 && freq < n.freq - LOW_FREQ,
+      short: !!n && length != null && length < n.length - SHORT_REL * heightM,
+      longContact: !!n && b >= 3 && contact > n.contact + LONG_CONTACT });
+  }
+  // does the speed still grow like a long jumper's, or flatten early: 10 m segment gains against Haugen's
+  const g = sex === 'female' ? 'f' : 'm', H = HAUGEN_JUMPERS[g], v = (a.legStats ?? []).map(l => 10 / l.time);
+  const plateau = [];
+  for (let k = 2; k < v.length && k < H.length; k++) {
+    const mineGain = v[k] / v[k - 1] - 1, normGain = H[k] / H[k - 1] - 1;
+    plateau.push({ k, mine: mineGain, norm: normGain, early: mineGain < normGain - 0.04 });
+  }
+  return { rows, plateau, graded: men };
+}
+
+const z5 = r => `${r.from}–${r.to} m`;
+export function bandsHtml(a, opts) {
+  const B = bandsVsNorm(a, opts);
+  if (!B || !B.rows.length) return '';
+  const say = [];
+  const lf = B.rows.filter(r => r.lowFreq), sh = B.rows.filter(r => r.short), lc = B.rows.filter(r => r.longContact);
+  if (lf.length) say.push(`Frekvencia nižšia ako u šprintérov v ${lf.map(z5).join(', ')} (${lf.map(r => `${n2(r.freq)} vs ${n2(r.norm.freq)}`).join('; ')} kr/s).`);
+  if (sh.length) say.push(`Kratší krok v ${sh.map(z5).join(', ')} (${sh.map(r => `${n2(r.length)} vs ${n2(r.norm.length)}`).join('; ')} m).`);
+  if (lc.length) say.push(`Dlhší kontakt v ${lc.map(z5).join(', ')} (${lc.map(r => `${r.contact.toFixed(3).replace('.', ',')} vs ${r.norm.contact.toFixed(3).replace('.', ',')}`).join('; ')} s).`);
+  if (B.graded && !say.length) say.push('Frekvencia, krok aj kontakt v pásme šprintérov v každých 5 m.');
+  const early = B.plateau.filter(p => p.early);
+  const pl = B.plateau.map(p => `${zone(p.k - 1)} → ${zone(p.k)}: ${p.mine >= 0 ? '+' : ''}${Math.round(p.mine * 100)} % (skokani ${p.norm >= 0 ? '+' : ''}${Math.round(p.norm * 100)} %)`);
+  const plText = early.length ? `Rýchlosť sa ustáli skôr ako u skokanov: ${pl.join(', ')}.` : pl.length ? `Rýchlosť ešte rastie ako u skokanov: ${pl.join(', ')}.` : '';
+  const head = `<div class="sp-row sp-head"><span class="sp-i">m</span><span class="sp-n">kr/s</span><span class="sp-n">krok m</span><span class="sp-n">zem s</span></div>`;
+  const cell = (v, nv, bad, d) => `<span class="sp-n${bad ? ' bad' : ''}">${v == null ? '–' : d(v)}${nv != null ? `<small> ${d(nv)}</small>` : ''}</span>`;
+  const rows = B.rows.map(r => `<div class="sp-row"><span class="sp-i">${r.from}–${r.to}</span>${cell(r.freq, r.norm?.freq, r.lowFreq, n2)}${cell(r.length, r.norm?.length, r.short, n2)}${cell(r.contact, r.norm?.contact, r.longContact, x => Number(x).toFixed(3).replace('.', ','))}</div>`).join('');
+  return `<section class="card sp-card"><h2>Každých 5 m oproti normám</h2>
+    ${say.map(t => `<p>${t}</p>`).join('')}${plText ? `<p>${plText}</p>` : ''}
+    <div class="sp-bands">${head}${rows}</div>
+    <p class="note">${B.graded ? 'Malým číslom norma: šprintéri zo štartu z miesta (Stavridis 2022, 9 mužov), dĺžka kroku prepočítaná na tvoju výšku. ' : 'Pre ženy zo štartu z miesta publikované normy po 5 m nie sú, čísla sa nehodnotia. '}Rast rýchlosti oproti skokanom do diaľky (Haugen 2019). Frekvencia a kontakt namerané z každého kroku, dĺžka kroku z času kroku na krivke cez brány Freelapu. Freelap ±2 % na 10 m, preto sa rozdiel rastu hlási až od 4 %.</p></section>`;
+}

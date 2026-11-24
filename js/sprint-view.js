@@ -17,7 +17,7 @@ import { sprintAdvice, runSummary } from './analysis/sprint-advice.js';
 import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 import { analyzeSprint, pairRun, modeOfRun, runMetres, cleanSteps, SPRINT_ALGO } from './analysis/sprint.js';
 import { accelCurveHtml } from './accel-curve.js';
-import { accelStallHtml } from './analysis/accel-stall.js';
+import { accelStallHtml, bandsHtml } from './analysis/accel-stall.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = x => (x == null ? '–' : Number(x).toFixed(2).replace('.', ','));
@@ -58,16 +58,16 @@ function camera(cap = globalThis.Capacitor) {
 // step's frequency (steps per second) and its length (with Freelap only; Stanley, 2026-11-15).
 function stepsHtml(a) {
   const scale = 520;
-  const metres = a.steps.some(s => s.length != null);
+  const metres = a.steps.some(s => s.length != null), speeds = a.steps.some(s => s.speed != null);
   let lastLeg = 0;
   const rows = a.steps.map((s, i) => {
     let sep = '';
     if (s.leg != null && s.leg > lastLeg) { sep = `<div class="sp-sep">${(lastLeg + 1) * 10} m · Freelap ${n2(a.legs.slice(0, lastLeg + 1).reduce((x, y) => x + y, 0))}</div>`; lastLeg = s.leg; }
     return `${sep}<div class="sp-row"><span class="sp-i">${i + 1}</span><span class="sp-f">${FOOT[s.foot]}</span>
       <span class="sp-bar"><span class="c" style="width:${(s.contact * scale).toFixed(0)}px"></span>${s.flight != null ? `<span class="fl" style="width:${(s.flight * scale).toFixed(0)}px"></span>` : ''}</span>
-      <span class="sp-n">${s.estContact ? '–' : n3(s.contact).replace(/^0/, '')}</span><span class="sp-n">${s.flight != null && !s.estFlight ? n3(s.flight).replace(/^0/, '') : '–'}</span><span class="sp-n">${s.freq != null ? n2(s.freq) : '–'}</span>${metres ? `<span class="sp-n">${n2(s.length)}</span>` : ''}</div>`;
+      <span class="sp-n">${s.estContact ? '–' : n3(s.contact).replace(/^0/, '')}</span><span class="sp-n">${s.flight != null && !s.estFlight ? n3(s.flight).replace(/^0/, '') : '–'}</span><span class="sp-n">${s.freq != null ? n2(s.freq) : '–'}</span>${metres ? `<span class="sp-n">${s.length != null ? n2(s.length) : '–'}</span>` : ''}${speeds ? `<span class="sp-n">${s.speed != null ? n1(s.speed) : '–'}</span>` : ''}</div>`;
   }).join('');
-  return `<div class="sp-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span><span class="sp-n">kr/s</span>${metres ? '<span class="sp-n">m</span>' : ''}</div>${rows}`;
+  return `<div class="sp-row sp-head"><span class="sp-i">#</span><span class="sp-f"></span><span class="sp-bar"></span><span class="sp-n">zem</span><span class="sp-n">let</span><span class="sp-n">kr/s</span>${metres ? '<span class="sp-n">m</span>' : ''}${speeds ? '<span class="sp-n">m/s</span>' : ''}</div>${rows}`;
 }
 
 function sidesHtml(a) {
@@ -139,14 +139,15 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = []
   const outside = a.kind === 'fly' && a.steps.length && a.legs.length && !a.measured
     ? `<p class="note">Kroky vo videu nie sú z úseku, ktorý meral Freelap, preto bez dĺžky kroku.</p>` : '';
   const steps = `<section class="card sp-card"><p class="sp-bar-top"><span>Kroky</span><span>${a.steps.length} krokov${a.distance ? ` do ${a.distance} m` : ''}</span></p><h2>Každý krok</h2>
-    ${clear}${outside}${a.steps.length ? `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let · kr/s frekvencia kroku${a.steps.some(s => s.length != null) ? ' · m dĺžka kroku' : ''}</p>${stepsHtml(a)}` : ''}${shorter}${sidesHtml(a)}
+    ${clear}${outside}${a.steps.length ? `<p class="sp-legend"><i class="c"></i>na zemi <i class="fl"></i>let · kr/s frekvencia kroku${a.steps.some(s => s.length != null) ? ' · m dĺžka kroku' : ''}${a.steps.some(s => s.speed != null) ? ' · m/s rýchlosť (čas kroku na krivke cez brány Freelapu)' : ''}</p>${stepsHtml(a)}` : ''}${shorter}${sidesHtml(a)}
     <p class="sp-lb">${a.kind === 'accel' && a.fit ? 'Dĺžky krokov 1–4 ±0,15 m, od 5. ±0,05 m. ' : ''}Zem a let ±0,01 s. Frekvencia a dĺžka jedného kroku ±5 %, za desiatku presnejšie.${few}</p></section>`;
   const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox" data-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
     <div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div></section>`
     : '<section class="card sp-card"><p class="note">Video sa k rozboru ukladá od verzie 0.9. Pri starších rozboroch ostalo len vo Fotkách.</p></section>';
   // Only what is measured (Stanley, 2026-11-15): the acceleration profile (F0, Pmax) stays out; the
   // speed curve is back on accel runs since 2026-11-24, drawn as the fit over the measured 10 m bars.
-  const stall = a.kind === 'accel' && run ? accelStallHtml(a, bestAccel) : '';
+  const sex = athletes[a.who]?.sex === 'female' ? 'female' : 'male', hM = (athletes[a.who]?.height ?? null) / 100 || null;
+  const stall = a.kind === 'accel' && run ? accelStallHtml(a, bestAccel) + bandsHtml(a, { sex, heightM: hM }) : '';
   return video + overview + stall + adviceHtml + ask + steps;
 }
 
