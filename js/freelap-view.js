@@ -5,6 +5,7 @@
 import { createListener, nativeBle } from './freelap/listen.js';
 import { cleanLegs } from './freelap/frame.js';
 import { modeOfRun, runMetres } from './analysis/sprint.js';
+import { accelCurveHtml } from './accel-curve.js';
 
 const KEY = 'jump.freelap';
 const SESSION_KEY = 'jump.freelap.session';
@@ -250,6 +251,7 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       <div class="fl-row"><div class="fl-who"><b>${esc(name(r))}</b><small>${esc(typeLabel(r))} · ${runMetres(r) ? `${runMetres(r)} m` : ''}</small></div>
         <div class="fl-time"><b>${sec(r.lap)}</b><span>s</span></div></div>
       ${legsHtml(r)}
+      ${modeOfRun(r) === 'accel' && !(r.cut && !r.edited) ? accelCurveHtml(r.legs, r.who) : ''}
       ${r.cut && !r.edited ? '<p class="banner warn">Chip poslal viac medzičasov, ako sa zmestilo do signálu: posledný úsek je dlhší ako 10 m. Doplň ho z MyFreelap.</p>' : ''}
       ${legsFormHtml(r.legs?.length ? r.legs : [r.lap], { extra: draftExtra, orig: !!r.orig })}
       <p class="sp-lb">Čo to bol za beh</p>

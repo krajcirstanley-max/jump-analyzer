@@ -347,6 +347,8 @@ div.att-open { cursor: default; }
 .fl-del { flex: none; min-width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--line); background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; touch-action: manipulation; }
 .fl-del.armed { background: var(--bad); border-color: var(--bad); color: #fff; font-size: 14px; font-weight: 700; padding: 0 12px; }
 .fl-legs { display: flex; gap: 3px; margin-top: 10px; }
+.sp-curve { margin-top: 12px; }
+.sp-curve svg { display: block; margin: 4px 0; }
 .fl-leg { position: relative; min-width: 56px; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 34px; border-radius: 8px; background: var(--accent-bg); color: var(--accent); }
 .fl-leg b { font-size: 15px; font-variant-numeric: tabular-nums; }
 .fl-leg small { position: absolute; right: -2px; bottom: -18px; transform: translateX(50%); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }

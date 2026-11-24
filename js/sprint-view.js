@@ -16,6 +16,7 @@ import { burnAndSave } from './burn.js';
 import { sprintAdvice, runSummary } from './analysis/sprint-advice.js';
 import { analyzeInCloud, cloudReady, CloudError, warmCloud } from './cloud.js';
 import { analyzeSprint, pairRun, modeOfRun, runMetres, cleanSteps, SPRINT_ALGO } from './analysis/sprint.js';
+import { accelCurveHtml } from './accel-curve.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = x => (x == null ? '–' : Number(x).toFixed(2).replace('.', ','));
@@ -120,7 +121,7 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = []
   const overview = `<section class="card sp-card"><p class="sp-bar-top"><span>Šprint</span><span>${rec.at ? esc(when(rec.at)) : ''}</span></p>
     <h2>${title}</h2>
     <p class="sp-chips">${run ? '' : `<button class="sp-chip" data-sp-kind="${a.kind === 'accel' ? 'fly' : 'accel'}">${a.kind === 'accel' ? 'Akcel' : 'Fly'} ⇄</button>`}${a.legs.length ? `<span class="sp-chip">${a.legs.length} úseky × 10 m</span>` : ''}${a.kind === 'accel' && rec.video.start?.estimated ? '<span class="sp-note">štart z rúk</span>' : ''}</p>
-    ${run ? `<div class="sp-g2">${legCards}</div>` : `<p class="banner warn">K videu sa nenašiel čas z Freelapu. Bez neho sú tu len kroky, kontakty a frekvencia.</p>
+    ${run ? `<div class="sp-g2">${legCards}</div>${a.kind === 'accel' ? accelCurveHtml(a.legs, a.who) : ''}` : `<p class="banner warn">K videu sa nenašiel čas z Freelapu. Bez neho sú tu len kroky, kontakty a frekvencia.</p>
     ${legsFormHtml([], { extra, attr: 'data-sl', title: 'Doplň časy z Freelapu, úseky po 10 m' })}`}
     <div class="sp-g3">${trio.map(([l, v, u]) => `<div class="sp-cd"><p class="sp-lb">${l}</p><p class="sp-mid">${v}</p><p class="sp-lb">${u}</p></div>`).join('')}</div>
     ${split != null ? `<div class="sp-cd"><p class="sp-lb">Jeden krok · ${n3(a.stepTime)} s</p><div class="sp-split"><span style="width:${split}%"></span></div><p class="sp-lb">na zemi ${split} % · vo vzduchu ${100 - split} %</p></div>` : ''}
@@ -142,8 +143,8 @@ export function resultHtml(rec, a, run, runs, athletes, { extra = 0, others = []
   const video = rec.hasClip ? `<section class="card sp-card sp-video"><div class="sp-vbox" data-clip="${esc(rec.id)}"><p class="note">Načítavam video…</p></div>
     <div class="filt sp-rate"><button data-rate="1" class="on">1×</button><button data-rate="0.5">½×</button><button data-rate="0.25">¼×</button><button data-rate="0.1">⅒×</button></div></section>`
     : '<section class="card sp-card"><p class="note">Video sa k rozboru ukladá od verzie 0.9. Pri starších rozboroch ostalo len vo Fotkách.</p></section>';
-  // Only what is measured (Stanley, 2026-11-15): the modelled speed curve and acceleration profile
-  // are left out.
+  // Only what is measured (Stanley, 2026-11-15): the acceleration profile (F0, Pmax) stays out; the
+  // speed curve is back on accel runs since 2026-11-24, drawn as the fit over the measured 10 m bars.
   return video + overview + adviceHtml + ask + steps;
 }
 
