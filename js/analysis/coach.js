@@ -28,7 +28,7 @@ export const metricScore = scoreMetric;
 // A phase is its average pulled toward its worst metric (70 / 30), so one clear fault isn't
 // averaged away by five measurements that were fine; the overall score weights the phases.
 export function techniqueScore(metrics) {
-  const by = Object.fromEntries(metrics.filter(m => m.status !== 'hidden').map(m => [m.key, m]));
+  const by = Object.fromEntries(metrics.filter(m => m.status !== 'hidden' && m.status !== 'info').map(m => [m.key, m]));
   let total = 0, wsum = 0;
   const phases = PHASES.map(p => {
     const ms = p.keys.map(k => by[k]).filter(Boolean);
@@ -303,7 +303,7 @@ export function coachFits(coach, metrics = []) {
   return coach.fixes.every(f => {
     if (f.metricKey == null) return true;
     const m = by[f.metricKey];
-    return !!m && m.status !== 'hidden' && m.status !== 'ok';
+    return !!m && m.status !== 'hidden' && m.status !== 'ok' && m.status !== 'info';
   });
 }
 

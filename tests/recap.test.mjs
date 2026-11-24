@@ -23,10 +23,11 @@ test('values are shown the way the app shows them', () => {
 test('two jumps: whole jump first, phases with values, same-measure improvement, best of each, next', { skip: !have }, () => {
   const s = story([mk('4676', 1.09, null), mk('4677', 1.10, 6.85)], { athlete: { name: 'Stanley' }, date: '2026-11-11T14:43:00Z', height: 186 });
   const p = s.plan;
-  assert.equal(p.count, 2); assert.equal(p.intro, 2); assert.equal(p.best, 1); assert.equal(p.split, 1.09);
-  assert.deepEqual(p.phases.slice(0, 3), ['pen:0,125 s', 'plant:63°', 'toeoff:0,125 s']);
-  assert.deepEqual(p.improved, { key: 'inclTD', from: '23°', to: '25°', a: 1, b: 2 });
-  assert.deepEqual(p.bestOf, ['pen:1', 'plant:2', 'toeoff:1']);
+  // 2026-11-24 audit: ungraded metrics left the score, so 4677 is now the better jump overall
+  assert.equal(p.count, 2); assert.equal(p.intro, 2); assert.equal(p.best, 2); assert.equal(p.split, 1.10);
+  assert.deepEqual(p.phases.slice(0, 3), ['pen:0,133 s', 'plant:61°', 'toeoff:0,142 s']);
+  assert.deepEqual(p.improved, { key: 'legTD', from: '63°', to: '61°', a: 1, b: 2 });
+  assert.deepEqual(p.bestOf, ['pen:2', 'plant:2', 'toeoff:1']);
   assert.equal(p.together, null, 'no "spolu" without a confirmed full run-up');
   assert.equal(p.next.value, '1,10 s');
   // no scores anywhere on screen; only measured words

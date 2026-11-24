@@ -327,9 +327,10 @@ test('IMG_2674 (landing visible): key frames, plausible numbers, full result sha
   assert.deepEqual(j.phases.map(p => p.id), ['pen', 'plant', 'toeoff', 'flight', 'landing']);
   j.phases.forEach((p, i) => { if (i) assert.equal(p.from, j.phases[i - 1].to + 1, p.id); });
   for (const x of j.metrics) {
-    if (x.status === 'hidden') { assert.equal(x.score, null); continue; }
+    if (x.status === 'hidden' || x.status === 'info') { assert.equal(x.score, null); assert.equal(x.target ?? null, null); continue; }
     assert.ok(x.score >= 0 && x.score <= 100, x.key);
-    assert.ok(x.target >= x.norm[0] && x.target <= x.norm[1], x.key);
+    // ok includes a value past the band on its good side (a shorter contact): target is the value itself
+    if (x.status !== 'ok') assert.ok(x.target >= x.norm[0] && x.target <= x.norm[1], x.key);
     if (x.status === 'ok' && !x.range) assert.equal(x.target, x.value, x.key);   // a range is ok when it overlaps
   }
 });

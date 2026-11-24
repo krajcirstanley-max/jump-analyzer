@@ -13,41 +13,49 @@ const deg = r => (r * 180) / Math.PI;
 // so its "last step contact" is the penultimate stance, not the board.
 // `good` gives the direction that is better, if any.
 export const NORMS = {
-  // Upper edge: 2009 World Final 127 ± 8 ms men, 125 ± 9 ms women (Panoutsakopoulos 2017, vault doc 24).
-  contactTO: { label: 'Kontakt na doske', unit: 'ms', m: [110, 135], f: [105, 134], good: 'low' },
+  // 2009 World Final 127 ± 4 ms men, 125 ± 9 ms women (Panoutsakopoulos 2017 Table 1, p.86); Berlin
+  // 2009 take-off duration 0.11-0.13 s both sexes. Nothing supports a women's floor under 110 (audit 2026-11-24).
+  contactTO: { label: 'Kontakt na doske', unit: 'ms', m: [110, 135], f: [110, 134], good: 'low' },
   // WA17 0.122 (0.120-0.130) men, 0.113 (0.095-0.135) women; WA18 men up to 0.144; PAN 109/117.
-  contactPen: { label: 'Kontakt predposledného kroku', unit: 'ms', m: [100, 135], f: [95, 135], good: 'low' },
+  // WA18 Fig. 6 men 0.104-0.144 (Tentoglou 0.144).
+  contactPen: { label: 'Kontakt predposledného kroku', unit: 'ms', m: [104, 144], f: [95, 135], good: 'low' },
   // WA17/WA18/PAN means 70-76 ms both sexes, finalists 56-92 (women down to 40).
   flightToBoard: { label: 'Let do dosky', unit: 'ms', m: [56, 92], f: [45, 90] },
   // Panoutsakopoulos, Papaiakovou, Katsikas & Kollias 2010 (New Studies in Athletics 25:1, 55-68;
   // 2006 European Cup, 8 men, 7.00-8.05 m, 3D-DLT, Table 5): centre of mass 3rd-last toe-off to
   // penultimate touchdown -0.07 ± 0.02 m (-0.05 to -0.10); penultimate support +0.01; penultimate
   // toe-off to board touchdown -0.03 ± 0.02; ~9 cm in all, 'as also reported in the 2007 World
-  // Championship'. No women's figure: the men's band is used for both. The app reads the supports at
-  // the pose with the centre of mass over the ankle (flight.js), ~1-2 cm off the study's instants.
-  hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [5, 10], f: [5, 10] },
+  // Championship'. No women's figure anywhere (Hay & Nohara 1990, Shimizu & Ae: men too): shown to
+  // women against the men's band, not graded. The app reads the supports at the pose with the centre
+  // of mass over the ankle (flight.js), ~1-2 cm off the study's instants.
+  hipDrop: { label: 'Zníženie ťažiska do predposledného', unit: 'cm', m: [5, 10], f: [5, 10], info: ['f'], ref: { f: 'Muži (Panoutsakopoulos 2010)' }, why: { f: 'pre ženy niet údajov' } },
   // Penultimate touchdown to board touchdown, Panoutsakopoulos et al. 2010 Table 5 (penultimate support
   // + its last flight), per athlete -1 to +4 cm, mean 1.6. Replaced WA's penultimate toe-off to the lowest
   // point on the board (1-8) on 2026-11-23: a toe-off can't be read on a phone. No women's figure.
-  comDropBoard: { label: 'Zníženie ťažiska do dosky', unit: 'cm', m: [-1, 4], f: [-1, 4] },
+  comDropBoard: { label: 'Zníženie ťažiska do dosky', unit: 'cm', m: [-1, 4], f: [-1, 4], info: ['f'], ref: { f: 'Muži (Panoutsakopoulos 2010)' }, why: { f: 'pre ženy niet údajov' } },
   // Take-off speed against the mean speed from the penultimate touchdown to the board touchdown, %.
   // That is Berlin 2009's "loss at take-off" (men 12-22 %, women 13-19 %), not WA's touchdown-to-
   // take-off loss; the earlier WA-derived band (-17 to -3) was the wrong reference (2026-11-10).
   speedLossTO: { label: 'Strata rýchlosti na odraze', unit: '%', m: [-22, -12], f: [-19, -13] },
   // Heel ahead of the centre of mass at board touchdown (runway scale). Nemtsev 2016 sub-elite,
   // mean ± 1 SD: men 0.44 ± 0.06 m (6.94 m jumps), women 0.39 ± 0.05 m (5.50 m). No elite figure found.
-  touchdownDist: { label: 'Došľap pred ťažiskom', unit: 'm', m: [0.38, 0.50], f: [0.34, 0.44] },
+  // Not graded (audit 2026-11-24): sub-elite only, and the same geometry as inclTD, so it scored twice.
+  touchdownDist: { label: 'Došľap pred ťažiskom', unit: 'm', m: [0.38, 0.50], f: [0.34, 0.44], info: true, ref: 'Nemtsev 2016, nie elita', why: 'to isté ako náklon tela pri dotyku' },
   // Knee range of motion over the time from touchdown to the deepest bend, as a speed. WA17 range:
-  // men 143-764 °/s (mean 536), women 238-682 (mean 465). Phone at 120 fps: about ±20 %.
-  kneeVel: { label: 'Rýchlosť ohybu kolena na doske', unit: '°/s', m: [143, 764], f: [238, 682] },
+  // men 143-764 °/s (mean 536), women 238-682 (mean 465). Phone at 120 fps: about ±20 %. Not graded:
+  // it is the knee's bend over the braking time, both read at the deepest bend the free leg hides.
+  kneeVel: { label: 'Rýchlosť ohybu kolena na doske', unit: '°/s', m: [143, 764], f: [238, 682], info: true, why: 'najväčší ohyb kolena zakrýva švihová noha' },
   // Trunk at toe-off minus trunk at touchdown: forward rotation on the board. Berlin 2009 finalists:
-  // men 6-13°, women 1-15° (WA18 means +6.4 / +8.4°).
-  trunkRotBoard: { label: 'Rotácia trupu na doske', unit: '°', m: [6, 13], f: [1, 15] },
-  // Centre of mass at toe-off as % of standing height. Linthorne 2005 Table II: 63-69 % (n = 3).
-  toHeight: { label: 'Výška ťažiska pri odraze', unit: '%', m: [62, 70], f: [62, 70], good: 'high' },
+  // men 6-13°, women 1-15°. WA18 per athlete (TO − TD) men −3.5 to +16.3 (mean 4.7), women 2.0-19.4
+  // (mean 6.4): 9 of 15 WA18 men sit under Berlin's band. Two finalist sources disagree: not graded.
+  trunkRotBoard: { label: 'Rotácia trupu na doske', unit: '°', m: [6, 13], f: [1, 15], info: true, ref: 'Berlín 2009', why: 'MS 2018 dáva iné čísla ako Berlín' },
+  // Centre of mass at toe-off as % of standing height. Linthorne 2005 Table II: 63-69 %, but only 3 men
+  // in training, and the app reads it at toe-off, which the phone gets 7-12 cm wrong: no grade, no band.
+  toHeight: { label: 'Výška ťažiska pri odraze', unit: '%', m: [62, 70], f: [62, 70], good: 'high', info: true, noRef: true, why: 'iba 3 skokani v štúdii a odraz špičky sa z mobilu nedá zmerať presne' },
   // Last step (penultimate to board, toe to toe) against the one before, %. WA17 men -9 % (-19 to
-  // -1), women -10 %; WA18 women -12 % (-27 to -5). Our earlier step is far from the board: ±0.15 m.
-  stepChange: { label: 'Skrátenie posledného kroku', unit: '%', m: [-19, -1], f: [-27, -5] },
+  // -1), women -10 %; WA18 women -12 % (-27 to -5); WA17 women −20 to +3; Berlin men 77-102 %, women
+  // 80-98 % of the step before. Our earlier step is far from the board: ±0.15 m (7 % of a step), so not graded.
+  stepChange: { label: 'Skrátenie posledného kroku', unit: '%', m: [-23, 2], f: [-27, 3], info: true, why: 'krok pred predposledným sa meria s chybou ±15 cm' },
   // Stanley's idea (2026-11-10): the lowering shows as a deeper bend of the stance knee in the
   // penultimate than in the step before. An angle, so no scale and no perspective. It agreed
   // in direction with hipDrop on all five clips (+5/+8° Stanley, 0/+1/-7° Miška). PROVISIONAL
@@ -56,52 +64,60 @@ export const NORMS = {
   penKnee: { label: 'Ohyb kolena v predposlednom navyše', unit: '°', m: [3, 15], f: [3, 15] },
   // WA17 men 165.5-179.9, WA18 160.1-172.2; women WA17 155.8-177.5, WA18 160.0-174.5. NEM sub-elite
   // 167 ± 4.5 / 165.5 ± 4.6.
-  kneeTD: { label: 'Koleno pri dotyku', unit: '°', m: [160, 178], f: [158, 177], good: 'high' },
-  // Hip to ankle vs ground: Bridgett & Linthorne 61 ± 3 (one 8.30 m man), NEM 57.7 ± 3.0 / 59.6 ± 2.8.
-  // PAN's 66° (old band) is centre of mass to ankle, a different line.
-  legTD: { label: 'Uhol nohy pri dotyku', unit: '°', m: [55, 65], f: [56, 64] },
+  kneeTD: { label: 'Koleno pri dotyku', unit: '°', m: [160, 180], f: [156, 178], good: 'high' },
+  // Hip to ankle vs ground: NEM 57.7 ± 3.0 / 59.6 ± 2.8 (sub-elite, n = 26 / 21; Bridgett & Linthorne is one
+  // man). PAN's 66° is centre of mass to ankle, a different line. No finalist figure for hip-ankle.
+  legTD: { label: 'Uhol nohy pri dotyku', unit: '°', m: [55, 61], f: [57, 62], ref: 'Nemtsev 2016 (nie elita)' },
   // Centre of mass to the HEEL from vertical: Graham-Smith & Lees 2005 32.2 ± 2.2, Barros 2007
   // 27.0 ± 3.9 (20-31). WA's -35 to -37 means use an unstated foot point and read ~8° more.
   // Heel-based data centre on −28 (Berlin 2009 CM-heel 25.6 / 26.4, Lees 1992 28.6 ± 3.2, Barros 27.0):
   // the old −36..−26 sat ~3° too far back (verification 2026-11-14).
-  inclTD: { label: 'Náklon tela pri dotyku', unit: '°', m: [-33, -23], f: [-32, -22] },
+  // 2026-11-24: Berlin 2009 finalists' CM-heel only (men 22-30, women 21-29); the −33 edge came from
+  // Graham-Smith & Lees' UK nationals. WA measures to the foot tip (Table 1), hence its −35 to −37.
+  inclTD: { label: 'Náklon tela pri dotyku', unit: '°', m: [-30, -22], f: [-29, -21] },
   // WA18: men -5.6 (-16.3 to +0.7), women -7.4 (-18.5 to -1.6); 0 = upright, negative = back.
-  trunkTD: { label: 'Trup pri dotyku', unit: '°', m: [-10, 1], f: [-10, -1] },
-  // WA17/WA18 men 120.5-158.7, women 123.6-150.6; NEM 136.8 / 137.2.
-  kneeMin: { label: 'Najväčší ohyb kolena', unit: '°', m: [120, 152], f: [124, 151], good: 'high' },
-  // WA17/WA18 range of motion men 10.7-49.2 (IQR-ish 19-42), women 18.9-43.4.
-  flexion: { label: 'Poddajnosť kolena na doske', unit: '°', m: [19, 42], f: [19, 40], good: 'low' },
-  // Not reported directly; derived per athlete from WA tables (median 55-72 ms) and Wei 2026
-  // 54 ± 9 / 56 ± 9. Propulsion: Wei 56 ± 8 / 60 ± 10, and board contact minus braking.
-  braking: { label: 'Dotyk → najväčší ohyb', unit: 'ms', m: [40, 75], f: [40, 70] },
-  propulsion: { label: 'Najväčší ohyb → odraz', unit: 'ms', m: [45, 75], f: [45, 75] },
-  // Only Wei 2026 (8.0-8.2 m men): 172.8 ± 6.4. No women's value found.
-  kneeTO: { label: 'Koleno pri odraze', unit: '°', m: [166, 180], f: [166, 180] },
-  // Only Wei 2026: 195.4 ± 8.5, convention not stated. Ours: same-side shoulder-hip-knee.
-  hipTO: { label: 'Vystretie bedra pri odraze', unit: '°', m: [185, 205], f: [185, 205], good: 'high' },
+  trunkTD: { label: 'Trup pri dotyku', unit: '°', m: [-16, 1], f: [-19, -2] },
+  // WA17/WA18 men 120.5-158.7, women 123.6-150.6; NEM 136.8 / 137.2. Not graded since 2026-11-24: at the
+  // deepest bend the free leg covers the stance knee (hand 121 vs app 130, 131 vs 139).
+  kneeMin: { label: 'Najväčší ohyb kolena', unit: '°', m: [120, 159], f: [124, 151], good: 'high', info: true, why: 'najväčší ohyb kolena zakrýva švihová noha' },
+  // WA17/WA18 range of motion, finalists' min-max: men 10.7-49.2, women 18.9-43.4 (true IQR 24.8-37.8 /
+  // 23.8-32.9). No 'good': ROM vs distance r = −0.04. Not graded: read at the hidden deepest bend.
+  flexion: { label: 'Poddajnosť kolena na doske', unit: '°', m: [11, 49], f: [19, 43], info: true, why: 'najväčší ohyb kolena zakrýva švihová noha' },
+  // Computed per finalist from WA17/WA18 (knee range of motion ÷ the mean knee speed from touchdown to the
+  // deepest bend, Table 1's definition): men 35-80 ms, women 40-100. Not graded: the deepest bend is hidden.
+  braking: { label: 'Dotyk → najväčší ohyb', unit: 'ms', m: [35, 80], f: [40, 100], info: true, why: 'najväčší ohyb kolena zakrýva švihová noha' },
+  // Board contact minus braking; no finalist source reports it (Wei 2026 only, 100 Hz national men).
+  propulsion: { label: 'Najväčší ohyb → odraz', unit: 'ms', m: [45, 75], f: [45, 75], info: true, noRef: true, why: 'žiadna štúdia finalistov to neuvádza' },
+  // Only Wei 2026 (11 Chinese men, 8.0-8.2 m, 2D 100 Hz): 172.8 ± 6.4. No women's value, no finalist value.
+  kneeTO: { label: 'Koleno pri odraze', unit: '°', m: [166, 180], f: [166, 180], info: true, ref: 'Wei 2026, 11 mužov (ženy bez údajov)', why: 'jediná malá štúdia' },
+  // Only Wei 2026: 195.4 ± 8.5, convention not stated; ours (same-side shoulder-hip-knee) moves it up to 11°.
+  hipTO: { label: 'Vystretie bedra pri odraze', unit: '°', m: [185, 205], f: [185, 205], good: 'high', info: true, noRef: true, why: 'jediná štúdia a nevieme, ako uhol merali' },
   // WA17/WA18 men 13.5-22.7, women 12.6-23.7; measured to the toe, the contact at toe-off.
-  inclTO: { label: 'Náklon tela pri odraze', unit: '°', m: [13, 24], f: [13, 24] },
-  // WA18 men -9.4 to +10.4, women -8.3 to +7.3.
-  trunkTO: { label: 'Trup pri odraze', unit: '°', m: [-9, 10], f: [-8, 7] },
+  inclTO: { label: 'Náklon tela pri odraze', unit: '°', m: [13.5, 23], f: [12.5, 24] },
+  // WA18 men -9.4 to +10.4, women -8.3 to +7.3; WA17 Table 8 (converted) men −10.4 to +7.3, women −13.2 to +5.7.
+  trunkTO: { label: 'Trup pri odraze', unit: '°', m: [-10, 10], f: [-13, 7] },
   // WA17/WA18 swing thigh vs horizontal: men -33.1 to -5.4, women -28.4 to +11.8.
-  thighTO: { label: 'Stehno švihovej nohy pri odraze', unit: '°', m: [-33, -5], f: [-28, 12], good: 'high' },
+  // Shown as kneeDrive (the same line re-expressed); graded there only. No 'good': r = −0.05 with distance.
+  thighTO: { label: 'Stehno švihovej nohy pri odraze', unit: '°', m: [-33, -5], f: [-28, 12], info: true, why: 'to isté ako švih kolena' },
   // The thighTO band re-expressed: 0° thigh hanging, 90° horizontal, read at toe-off.
-  kneeDrive: { label: 'Švih kolena pri odraze', unit: '°', m: [57, 85], f: [62, 100], good: 'high' },
-  flight: { label: 'Čas letu', unit: 'ms', m: [800, 950], f: [700, 850], good: 'high' },
+  kneeDrive: { label: 'Švih kolena pri odraze', unit: '°', m: [57, 85], f: [62, 102] },
+  // No study reports a measured elite flight time (WA, Berlin, Linthorne searched, 2026-11-24). Derived from
+  // the finalists' vertical take-off speed with a 0.4-0.6 m drop to landing: men ~0.76-0.98 s, women ~0.61-0.89.
+  flight: { label: 'Čas letu', unit: 'ms', m: [760, 980], f: [610, 890], good: 'high', info: true, ref: 'Odvodené z rýchlostí finalistov', why: 'žiadna štúdia let finalistov nemerala' },
   // PROVISIONAL band, engineering judgement: no published elite value found. Definition from Hay
   // 1986 and Herzog 1986: takeoff leaves forward angular momentum, the limbs absorb it so the trunk
   // holds its orientation. Hence trunk only (limbs excluded) and net change up to the apex, so
   // hitch-kick swinging and the landing pike do not count against the athlete.
   // Positive = forward. Looser backward because that literature only warns about forward rotation.
-  trunkStability: { label: 'Stabilita trupu v lete', unit: '°', m: [-20, 10], f: [-20, 10] },
+  trunkStability: { label: 'Stabilita trupu v lete', unit: '°', m: [-20, 10], f: [-20, 10], info: true, noRef: true, why: 'pre let niet publikovanej normy' },
   // From flight.js (gravity scale + planted-toe anchor). Estimates: see accuracy notes.
-  // WA17/WA18/PAN men 19.4-26.3, women 18.4-26.6; NEM sub-elite 22.8 / 21.3.
-  takeoffAngle: { label: 'Uhol odrazu', unit: '°', m: [19, 27], f: [18, 27] },
+  // WA17/WA18/PAN men 19.4-26.3, Berlin 18.9-27.9; women WA18 16.1-26.6 (Lesueur 16.1), Berlin 17.6-24.5.
+  takeoffAngle: { label: 'Uhol odrazu', unit: '°', m: [19, 28], f: [16, 27] },
   speedTD: { label: 'Rýchlosť pri dotyku', unit: 'm/s', m: [9.5, 10.8], f: [8.4, 9.6], good: 'high' },
   // WA17/WA18 men -0.53 to -2.80, women -0.83 to -2.37.
   velocityLoss: { label: 'Strata rýchlosti na doske', unit: 'm/s', m: [-2.8, -0.5], f: [-2.4, -0.8] },
-  // WA17/WA18 men 3.22-4.20, women 2.51-3.46 (three 2017 finalists under 2.8).
-  vyTO: { label: 'Zvislá rýchlosť pri odraze', unit: 'm/s', m: [3.2, 4.2], f: [2.5, 3.5], good: 'high' },
+  // WA17/WA18 men 3.22-4.20, Berlin 3.14-4.23; women WA18 Table 6 2.31-3.68 (Lesueur, Sagnia), Berlin 2.64-3.42.
+  vyTO: { label: 'Zvislá rýchlosť pri odraze', unit: 'm/s', m: [3.1, 4.2], f: [2.3, 3.7], good: 'high' },
   // WA 2017 Fig. 7-8, "last step" mean horizontal CM velocity (penultimate contact + flight into board).
   // Berlin 2009 last stride (video, the same method as ours: its ratio to the 11-1 m photocell mean
   // is 0.998, and ours matched Freelap on IMG_4677). Was WA17 (9.36-10.0 / 8.36-9.20), whose CoM
@@ -109,27 +125,31 @@ export const NORMS = {
   // 2026-11-14 research (no published norm for either; rules built from physics and Jin 2024):
   // the legs go forward only after the flight apex (Schmolinsky via Marchetti; an early pike speeds
   // the forward rotation, ~5 cm per 0.1 s early, derived) — ms from the apex, negative = before it;
-  legsOut: { label: 'Nohy dopredu po vrchole letu', unit: 'ms', m: [0, 470], f: [0, 430] },
+  legsOut: { label: 'Nohy dopredu po vrchole letu', unit: 'ms', m: [0, 470], f: [0, 430], info: true, noRef: true, why: 'pásmo je odvodené, nie zo štúdie' },
   // the free thigh is braked late in the contact (Jin et al. 2024, Heliyon 10:e31015: later braking
   // 7.48 vs 7.26 m): degrees it has already fallen from its peak by toe-off when that peak came
   // more than 20 ms early.
-  freeDrop: { label: 'Pokles švihového stehna pred odrazom', unit: '°', m: [0, 5], f: [0, 5] },
+  // Jin reports WHEN the swing leg brakes, not degrees dropped: the 0-5° and the 20 ms rule are ours.
+  freeDrop: { label: 'Pokles švihového stehna pred odrazom', unit: '°', m: [0, 5], f: [0, 5], info: true, noRef: true, why: 'jediná malá štúdia a bez čísla v stupňoch' },
   // 1-11 m approach speed (Freelap or the video's cones) and how much of it reaches the board.
   // Berlin 2009: the 11-1 m photocell mean ≈ the last stride (ratio 0.998 ± 0.010, 0.98-1.01).
   speedApproach: { label: 'Rýchlosť 1–11 m', unit: 'm/s', m: [10.17, 10.78], f: [9.07, 9.59], good: 'high' },
-  speedKeep: { label: 'Rýchlosť do dosky oproti 1–11 m', unit: '%', m: [-2, 2], f: [-2, 2] },
+  // Berlin men's last stride vs photocell, analysed jumps −2.0 to +0.9 % (n = 7). Not graded: our two
+  // inputs carry 2-5 % each (video cones 2.4 % fast on IMG_4677, board-scale last step 3-7 % short).
+  speedKeep: { label: 'Rýchlosť do dosky oproti 1–11 m', unit: '%', m: [-2, 2], f: [-2, 2], info: true, why: 'chyba merania je väčšia ako pásmo' },
   speedLast: { label: 'Rýchlosť z predposledného do odrazu', unit: 'm/s', m: [10.17, 10.78], f: [9.07, 9.59], good: 'high' },
   // WA 2017 Table 7, horizontal CM velocity at take-off.
   speedTO: { label: 'Rýchlosť pri odraze', unit: 'm/s', m: [7.82, 9.56], f: [7.2, 8.98], good: 'high' },
-  // WA 2017, take-off velocity minus last-step velocity, per athlete (range of the finalists).
-  speedLoss: { label: 'Strata rýchlosti', unit: 'm/s', m: [-1.66, -0.25], f: [-1.48, -0.12] },
-  // v²/2g of vertical takeoff velocity. WA17 men (3.85) is the high outlier; WA18, Linthorne and
-  // Seo put men at 0.55-0.80 m. Women WA17 2.51-3.46 m/s.
-  peakHeight: { label: 'Výška letu', unit: 'cm', m: [55, 80], f: [32, 61], good: 'high' },
+  // Berlin 2009 "loss at take-off" in m/s (men 1.25-2.30, women 1.22-1.75): the same last-stride level as our
+  // speedLast. WA17's last step reads ~0.7 m/s lower, so its −1.66 to −0.25 clashed with speedLossTO.
+  speedLoss: { label: 'Strata rýchlosti', unit: 'm/s', m: [-2.3, -1.25], f: [-1.75, -1.22] },
+  // v²/2g of the finalists' vertical take-off speed (WA18 men 3.22-4.20, women 2.31-3.68 m/s).
+  peakHeight: { label: 'Výška letu', unit: 'cm', m: [53, 90], f: [27, 69], good: 'high', ref: 'Odvodené zo zvislej rýchlosti finalistov' },
   // Heel ahead of the centre of mass at first sand contact, WA18 Table 9 (the only report with
   // landing data): men 0.67 ± 0.09, women 0.59 ± 0.09 m.
   landingReach: { label: 'Dosah pri dopade', unit: 'm', m: [0.55, 0.75], f: [0.50, 0.70], good: 'high' },
-  estDistance: { label: 'Odhad dĺžky od odrazu', unit: 'm', m: [7.8, 8.6], f: [6.4, 7.2], good: 'high' },
+  // An outcome, not technique; no source for a band. Finalists' effective distances WA17/18: men 7.54-8.65, women 6.13-7.24.
+  estDistance: { label: 'Odhad dĺžky od odrazu', unit: 'm', m: [7.54, 8.65], f: [6.13, 7.24], good: 'high', info: true, ref: 'Efektívne dĺžky finalistov MS 2017/2018', why: 'je to výsledok, nie technika' },
   // WA18 at first sand contact: knee men 131 ± 12, women 134 ± 15; hip men 95 ± 18 (IQR 83-108),
   // women 90 ± 16 (IQR 79-101), hip definition not stated. In those rows a more open hip went with
   // a longer reach (r = +0.4, not significant), so a deep fold is not the better landing.
@@ -143,11 +163,30 @@ export const NORMS = {
 // the fall ran over two widths with a 10-unit floor, and a 10 cm over-lowering against a 2-6 cm
 // norm still scored 78 (Stanley: "skóre celkovo je príliš prívetivé").
 const SPAN_FLOOR = { '°': 6, ms: 15, cm: 3, '%': 4, m: 0.3, 'm/s': 0.5, '°/s': 100 };
+// A value past the band on its good side (a shorter contact, a faster approach) is not a miss
+// (audit 2026-11-24: an 11.0 m/s approach lost points against 10.17-10.78).
 export function scoreMetric(m) {
   const [lo, hi] = m.norm;
   const span = Math.max(hi - lo, SPAN_FLOOR[m.unit] ?? 6);
-  const miss = m.value < lo ? lo - m.value : m.value > hi ? m.value - hi : 0;
+  const miss = m.value < lo ? (m.good === 'low' ? 0 : lo - m.value) : m.value > hi ? (m.good === 'high' ? 0 : m.value - hi) : 0;
   return Math.max(0, 100 * (1 - miss / span));
+}
+export function bandStatus(value, [lo, hi], good) {
+  return value < lo ? (good === 'low' ? 'ok' : 'low') : value > hi ? (good === 'high' ? 'ok' : 'high') : 'ok';
+}
+
+// Shown but not graded (status 'info', no score, no cue): no finalist or adequate published band, a band
+// two finalist sources disagree on, the same quantity graded elsewhere, or a reading the phone can't make
+// to the band's width (audit 2026-11-24). `info` is true or the sexes it holds for; `ref` names a source
+// that is not the finalists; `noRef` shows no band at all; `why` says in a few words why it isn't graded.
+const bySex = (v, g) => (v && typeof v === 'object' && !Array.isArray(v) ? v[g] : v);
+export function infoFor(key, g) {
+  const i = NORMS[key]?.info;
+  return i === true || (Array.isArray(i) && i.includes(g));
+}
+export function normMeta(key, g) {
+  const n = NORMS[key] ?? {}, info = infoFor(key, g);
+  return { ref: bySex(n.ref, g) ?? null, why: info ? bySex(n.why, g) ?? null : null, noRef: info && !!n.noRef };
 }
 
 // How far the view is from side-on (0 = perfectly side-on, 90 = along the runway),

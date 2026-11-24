@@ -34,11 +34,20 @@ function metricRow(m, on) {
   const go = m.frame != null ? ` data-frame="${m.frame}"` : '';
   return `<div class="met st-${m.status}${on ? ' on' : ''}" data-key="${esc(m.key)}"${go}>
     <div class="met-top"><span>${esc(m.label)}</span><b>${pre}${m.range ? withUnit(m, `${num(m.range[0], 0)}–${num(m.range[1], 0)}`) : value(m, m.value)}${off ? ` <i>→ ${value(m, m.target)}</i>` : ''}</b></div>
-    ${bandHtml(m)}
-    <div class="met-n">Norma finalistov ${rangeText(m)}</div>
+    ${m.noRef ? '' : bandHtml(m)}
+    ${normLine(m)}
     ${poseHtml(m)}
     ${partsHtml(m)}
   </div>`;
+}
+
+// The band's source under the value. Not every band is the finalists' (legTD is Nemtsev's sub-elite
+// jumpers, kneeTO one study), and an info-only metric says it isn't graded and why (audit 2026-11-24).
+function normLine(m) {
+  const why = m.why ? `nehodnotí sa: ${esc(m.why)}` : 'nehodnotí sa';
+  if (m.status === 'info' && m.noRef) return `<div class="met-n">Bez publikovanej normy, ${why}.</div>`;
+  const src = m.ref ? `${esc(m.ref)}:` : 'Norma finalistov';
+  return `<div class="met-n">${src} ${rangeText(m)}${m.status === 'info' ? ` · ${why}` : ''}</div>`;
 }
 
 // Where a lowering is read (2026-11-23, Stanley: „správnu pózu … a píš to tam presne“): the two poses,
@@ -342,7 +351,7 @@ export function timelineHtml(jump) {
     ${rows}${land}
     <div class="tl-sum">
       ${ct ? box('Odraz na zemi', ct, `${num(ct.value / 1000, 3)} s`, `finalisti ${num(ct.norm[0] / 1000, 3)}–${num(ct.norm[1] / 1000, 3)}`) : ''}
-      ${fl && fl.status !== 'hidden' ? box('Let', fl, `${num(fl.value / 1000, 2)} s`, `finalisti ${num(fl.norm[0] / 1000, 2)}–${num(fl.norm[1] / 1000, 2)}`) : ''}
+      ${fl && fl.status !== 'hidden' ? box('Let', fl, `${num(fl.value / 1000, 2)} s`, `${fl.ref ? 'odvodené' : 'finalisti'} ${num(fl.norm[0] / 1000, 2)}–${num(fl.norm[1] / 1000, 2)}`) : ''}
       ${pen && take ? box('Rytmus', null, `${n3(pen.contact)} → ${n3(take.contact)}`, 'predposl. → odraz') : ''}
     </div>`;
 }

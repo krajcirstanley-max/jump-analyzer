@@ -3,7 +3,7 @@
 import { detectContacts, keyFrames, withEvents, approachToeOffs } from './events.js';
 import { countSteps } from './stepcount.js';
 import { adjustForRunup, judgedSteps, expectedDistance } from './runup.js';
-import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS } from './metrics.js';
+import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS, bandStatus, infoFor, normMeta } from './metrics.js';
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
 import { refineTouchdowns, refineClaudeEdges } from './refine.js';
@@ -18,15 +18,19 @@ const PHASE_KF = { pen: ['td3', 'penTD', 'penTO'], plant: ['TD', 'maxFlex'], toe
 
 const viewYawAt = (track, i) => (track[i] ? viewYaw(track[i]) : NaN);
 
-// value → target, per-metric score; hidden metrics have neither.
-function finish(m) {
+// value → status, target, per-metric score; hidden and info-only metrics have no score or target.
+// The status is judged here, once, against the (run-up adjusted) norm, so every metric follows the same
+// rules: info-only keys (metrics.js infoFor) and a miss on the band's good side.
+function finish(m, g) {
   const hidden = m.status === 'hidden', [lo, hi] = m.norm;
   // a value known only as a range is judged by its end nearest the norm (in it when they overlap)
   const v = m.range ? (m.status === 'high' ? m.range[0] : m.status === 'low' ? m.range[1] : Math.min(hi, Math.max(lo, m.value))) : m.value;
+  const info = !hidden && infoFor(m.key, g);
+  const status = hidden ? 'hidden' : info ? 'info' : bandStatus(v, m.norm, m.good);
   return {
-    ...m, reason: m.reason ?? null, estimate: m.estimate ?? false,
-    score: hidden ? null : scoreMetric({ ...m, value: v }),
-    target: hidden ? null : Math.min(hi, Math.max(lo, v)),
+    ...m, ...normMeta(m.key, g), status, reason: m.reason ?? null, estimate: m.estimate ?? false,
+    score: hidden || info ? null : scoreMetric({ ...m, value: v }),
+    target: hidden || info ? null : status === 'ok' ? v : Math.min(hi, Math.max(lo, v)),
   };
 }
 
@@ -433,7 +437,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   const stepCount = countSteps(clean, { td: ev.takeoff.td, foot: ev.takeoffFoot, fps, first: result.first ?? 0 });
   const steps = judgedSteps(runup, stepCount);
   const metrics = adjustForRunup([...base, ...derivedMetrics(base, ev, flight, fps, sex, height)], steps, { pb })
-    .filter(m => !(runThrough && NO_LANDING.has(m.key))).map(finish);
+    .filter(m => !(runThrough && NO_LANDING.has(m.key))).map(m => finish(m, sex === 'female' ? 'f' : 'm'));
   const score = techniqueScore(metrics);
   const by = Object.fromEntries(metrics.map(m => [m.key, m]));
   const last = result.last ?? clean.length - 1;
