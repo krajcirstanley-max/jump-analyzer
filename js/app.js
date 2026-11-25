@@ -29,7 +29,7 @@ import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.34.0';
+const APP_VERSION = '0.34.1';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -895,6 +895,15 @@ async function rejudge(id, v, force = false) {
   if (!pose || !jump || jump.error || (!force && (jump.runupJudged ?? null) === v)) return;
   const a = resultAthlete, who = ATHLETES[a];
   if (!outcomeHist[a].length) await refreshOutcomeHist(a);
+  // a Freelap time paired before 2026-11-25 without the take-off check: kept only if it ends at the take-off
+  if (jump.runKey) {
+    const run = freelapView.runs().find(r => r.key === jump.runKey), rec0 = await hist.getAttempt(id);
+    const t0 = Date.parse(rec0?.recordedAt ?? ''), tt = player?.ts?.[jump.takeoff?.td];
+    if (run && Number.isFinite(t0) && Number.isFinite(tt) && !runFits(run, t0 + tt * 1000)) {
+      runOwner.delete(jump.runKey); jump.split = null; jump.runKey = null;
+      await hist.patchAttempt(id, { split: null, runKey: null });
+    }
+  }
   const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null, split: typedSplit(jump), edges: jump.edges ?? null });
   if (next.error || id !== resultId) return;
   // the written coaching stays unless today's numbers contradict it; then the template speaks
@@ -1089,15 +1098,20 @@ const jumpCam = (() => {
 // the chip passes the 1 m cone, a moment before the board, and reaches the phone up to ~2 s later,
 // so it has to land from 1.5 s before to 3 s after the touchdown. The whole clip is too loose: clips
 // copied or edited together carry one time (IMG_5162-5166 all 11:08:49-50, 2026-11-20 test).
+// A run is this jump's when it ends at the take-off: the last gate stands at the board. One heard while
+// filming is no exception (2026-11-24, Miška 19:18: her chip sent 1.78, 3.06, 1.08, 2.24, 0.86 ... s
+// passing gates off the runway, and the 1.08 heard as the recording began became her 1-11 m, 9.26 m/s).
+const RUN_AT_TAKEOFF = { before: 1500, after: 3000 };
+function runFits(run, at) { return !!run && Number.isFinite(at) && run.at >= at - RUN_AT_TAKEOFF.before && run.at <= at + RUN_AT_TAKEOFF.after; }
 function jumpRun(clip, who = null, tTake = null, self = null) {
-  const filmed = filmedRuns.get(clip?.file?.name);
-  if (filmed) return filmed;
   const t = typeof clip?.recordedAt === 'string' ? Date.parse(clip.recordedAt) : clip?.recordedAt;
+  const at = t && Number.isFinite(tTake) ? t + tTake * 1000 : NaN;
+  const filmed = filmedRuns.get(clip?.file?.name);
+  if (filmed && runFits(filmed, at) && (!who || !filmed.who || filmed.who === who)) return filmed;
   if (!t || !Number.isFinite(tTake)) return null;
-  const at = t + tTake * 1000;
   // a run already on another jump stays there (one run, one jump)
   const free = r => !runOwner.has(r.key) || runOwner.get(r.key) === self;
-  const near = freelapView.runs().filter(r => r.type !== 'accel' && r.type !== 'fly' && r.legs?.length && r.at >= at - 1500 && r.at <= at + 3000 && (!who || !r.who || r.who === who) && free(r));
+  const near = freelapView.runs().filter(r => r.type !== 'accel' && r.type !== 'fly' && r.legs?.length && runFits(r, at) && (!who || !r.who || r.who === who) && free(r));
   return near.length === 1 ? near[0] : null;   // two runs that close: not ours to pick
 }
 // Runs the app's own camera heard, by the clip's file name: those need no time window.
