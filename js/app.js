@@ -29,7 +29,7 @@ import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.34.4';
+const APP_VERSION = '0.34.5';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1320,7 +1320,12 @@ $('train-pick').addEventListener('click', e => {
 // were saved, the last with the ninth one's numbers: each new clip took over the screen's clip
 // before the one before had left, and the one before was dropped or saved under the new clip).
 // Sprints and RSI queue on their own.
+let picking = 0;   // gallery batches still sending their clips (keeps the screen on)
 async function pickFromGallery() {
+  picking++; keepAwakeWhileBusy();
+  try { await pickBatch(); } finally { picking--; }
+}
+async function pickBatch() {
   let files;
   try { files = (await globalThis.Capacitor.nativePromise('SprintCamera', 'pickVideo', { limit: 10 }))?.files ?? []; }
   catch (err) { return alert(`Galériu sa nepodarilo otvoriť: ${err?.message ?? err}`); }
@@ -1370,7 +1375,11 @@ async function runQueue(list) {
 // The screen stays on while anything is on its way, so iOS does not pause the app mid-upload.
 let awake = false;
 function keepAwakeWhileBusy() {
-  const busy = background.size > 0 || rozbehView.busy() || rozbehView.records().some(r => r.pending);
+  // RSI and sprint too (2026-11-25: two drop-jump clips picked together took 5 min, the first upload
+  // stood 2 min and the second waited 1.5 min in line: the phone locked itself mid-upload, while
+  // the server needed 25 s for each), and a gallery batch until its last clip has gone out
+  const busy = background.size > 0 || picking > 0 || rsiView.busy() || sprintView.busy()
+    || rozbehView.busy() || rozbehView.records().some(r => r.pending);
   if (busy === awake) return;
   awake = busy;
   globalThis.Capacitor?.nativePromise?.('SprintCamera', 'keepAwake', { on: busy }).catch(() => {});
