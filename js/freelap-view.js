@@ -102,9 +102,25 @@ export function readLegs(box, attr = 'data-leg') {
   return v.length && v.every(x => x >= 0.7 && x <= 4) ? v.map(x => Math.round(x * 100) / 100) : null;
 }
 const sumLegs = l => Math.round(l.reduce((a, b) => a + b, 0) * 100) / 100;
+// A 10 m nobody here runs: faster than 0.90 s (11.1 m/s, world-class; Stanley's best flying 10 m 0.97) or slower
+// than 3 s (a jog). Walking past the cones the
+// chip catches gates in any order and sends laps of 0.86, 3.4, 4.5 ... 90 s (2026-11-24, Stanley: "nereálne
+// časy vymaž, nech sa ani nezachytia"). Those are never stored, and the stored ones go. Typed runs stay.
+export const LEG_OK = [0.90, 3.0];
+export const legOk = l => l >= LEG_OK[0] && l <= LEG_OK[1];
+export const runPlausible = r => !!r && (r.edited || ((r.legs?.length ? r.legs : [r.lap]).every(legOk)));
+// Leading legs nobody runs are the walk to the first gate ([278.67, 1.13]: the 1.13 is a run): cut, the rest kept.
+export function trimRun(r) {
+  if (!r || r.edited || !(r.legs?.length > 1)) return r;
+  const legs = [...r.legs];
+  while (legs.length > 1 && !legOk(legs[0])) legs.shift();
+  return legs.length === r.legs.length ? r : { ...r, legs, lap: sumLegs(legs) };
+}
 
 export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = null, onOpen = () => {}, onChange = () => {} }) {
   let reps = load(KEY, []).map(cleanLegs), open = load(SESSION_KEY, null);
+  const before = JSON.stringify(reps.map(r => r.legs)); reps = reps.map(trimRun).filter(runPlausible);
+  if (JSON.stringify(reps.map(r => r.legs)) !== before) store(KEY, reps.slice(0, 500));
   let filter = { type: 'all', steps: null, ...load(FILTER_KEY, {}) };
   let linker = () => null;             // run key → its sprint analysis (with the video), set by the app
   let detailKey = null;                // the run open on the detail screen
@@ -117,7 +133,9 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
   const seen = new Map(reps.map(r => [r.key, r.legs?.length ?? 0]));
   const pendingRaw = new Map();   // frames of a run not stored yet (the frame came before the rep)
   const listener = createListener(ble, {
-    rep(r) {
+    rep(r0) {
+      const r = trimRun(r0);
+      if (!runPlausible(r)) return;
       open = sessionFor(open, r.at);
       store(SESSION_KEY, open);
       const run = { chip: r.chip, who: r.who, lap: r.lap, legs: r.legs, at: r.at, key: r.key, session: open.id, ...(r.cut ? { cut: true } : {}) };
@@ -129,9 +147,11 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
       navigator.vibrate?.(60);
       for (const f of subs) f('run', run);
     },
-    update(r) {   // the same run, now with its intermediate
+    update(r0) {   // the same run, now with its intermediate
+      const r = trimRun(r0);
       const i = reps.findIndex(x => x.key === r.key);
       if (i < 0 || reps[i].edited) return;   // splits typed by hand win
+      if (!runPlausible(r)) { reps.splice(i, 1); save(); draw(); return; }   // its intermediate showed it was no run
       reps[i] = { ...reps[i], lap: r.lap, legs: r.legs, cut: r.cut || undefined };
       save();
       draw();
@@ -369,6 +389,8 @@ export function initFreelap({ root, athletes, ble = nativeBle(), detailRoot = nu
   function addHeard(r) {
     if (!r?.key || !(r.lap > 0)) return null;
     const run0 = cleanLegs({ chip: r.chip ?? null, who: r.who ?? null, lap: r.lap, legs: r.legs?.length ? r.legs : [r.lap], at: r.at ?? Date.now(), key: r.key });
+    if (!r.edited && !runPlausible(trimRun(run0))) return null;
+    if (!r.edited) Object.assign(run0, trimRun(run0));
     if (r.raw?.length) run0.raw = r.raw;
     if (r.edited) run0.edited = true;
     const i = reps.findIndex(x => x.key === run0.key);
