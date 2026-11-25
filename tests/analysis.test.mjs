@@ -166,8 +166,12 @@ test('speeds, takeoff angle and scale from a panning camera (synthetic jumper)',
 test('score is 100 inside the norms and falls off outside', () => {
   assert.equal(metricScore({ value: 120, norm: [110, 130] }), 100);
   assert.ok(metricScore({ value: 150, norm: [110, 130] }) < 60);
-  const s = techniqueScore([{ key: 'contactTO', value: 120, norm: [110, 130], status: 'ok' }]);
+  const ok = (key, value, norm) => ({ key, value, norm, status: 'ok' });
+  const s = techniqueScore([ok('contactTO', 120, [110, 130]), ok('kneeTD', 165, [160, 180]), ok('legTD', 58, [55, 61])]);
   assert.equal(Math.round(s.score), 100);
+  // a phase from under 3 graded numbers gets no score (2026-11-25)
+  const one = techniqueScore([ok('contactTO', 120, [110, 130])]);
+  assert.equal(one.score, null); assert.equal(one.phases.find(p => p.id === 'plant').thin, true);
 });
 
 import { existsSync, readFileSync } from 'node:fs';

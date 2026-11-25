@@ -27,18 +27,23 @@ export const metricScore = scoreMetric;
 
 // A phase is its average pulled toward its worst metric (70 / 30), so one clear fault isn't
 // averaged away by five measurements that were fine; the overall score weights the phases.
+// A phase scored from fewer than 3 graded numbers gets no score and stays out of the total (2026-11-25,
+// Stanley: "skóre je príliš dobré, chýbajú tam údaje": the take-off phase scored 100 from the knee drive
+// and the trunk alone, its angle hidden without the runway; the flight phase from nothing).
+export const MIN_GRADED = 3;
 export function techniqueScore(metrics) {
   const by = Object.fromEntries(metrics.filter(m => m.status !== 'hidden' && m.status !== 'info').map(m => [m.key, m]));
-  let total = 0, wsum = 0;
+  let total = 0, wsum = 0, n = 0;
   const phases = PHASES.map(p => {
     const ms = p.keys.map(k => by[k]).filter(Boolean);
-    if (!ms.length) return { ...p, score: null };
+    if (ms.length < MIN_GRADED) return { ...p, score: null, graded: ms.length, thin: true };
+    n += ms.length;
     const sc = ms.map(m => m.score ?? metricScore(m));   // m.score: from jump.js
     const score = 0.7 * (sc.reduce((a, b) => a + b, 0) / sc.length) + 0.3 * Math.min(...sc);
     total += score * p.weight; wsum += p.weight;
-    return { ...p, score };
+    return { ...p, score, graded: ms.length };
   });
-  return { score: wsum ? total / wsum : null, phases };
+  return { score: wsum ? total / wsum : null, phases, graded: n, phasesScored: phases.filter(p => p.score != null).length };
 }
 
 // Titles and takes say what to do and what it brings, never what is wrong (Stanley, 2026-11-14:

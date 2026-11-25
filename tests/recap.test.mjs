@@ -27,7 +27,7 @@ test('two jumps: whole jump first, phases with values, same-measure improvement,
   assert.equal(p.count, 2); assert.equal(p.intro, 2); assert.equal(p.best, 2); assert.equal(p.split, 1.10);
   assert.deepEqual(p.phases.slice(0, 3), ['pen:0,133 s', 'plant:61°', 'toeoff:0,142 s']);
   assert.deepEqual(p.improved, { key: 'legTD', from: '63°', to: '61°', a: 1, b: 2 });
-  assert.deepEqual(p.bestOf, ['pen:2', 'plant:2', 'toeoff:1']);
+  assert.deepEqual(p.bestOf, ['pen:2', 'plant:2', 'toeoff:2']);
   assert.equal(p.together, null, 'no "spolu" without a confirmed full run-up');
   assert.equal(p.next.value, '1,10 s');
   // no scores anywhere on screen; only measured words

@@ -83,7 +83,7 @@ function bandHtml(m) {
 function tile(p) {
   const s = p.score == null ? null : Math.round(p.score);
   return `<button class="tile b-${band(s)}" data-phase="${p.id}" aria-pressed="false">
-    <span class="tile-l">${p.id === 'pen' ? 'Predposl.' : esc(p.label)}</span><b>${s ?? '–'}</b>
+    <span class="tile-l">${p.id === 'pen' ? 'Predposl.' : esc(p.label)}</span><b>${s ?? '–'}</b>${p.thin ? '<small class="tile-thin">málo údajov</small>' : ''}
   </button>`;
 }
 
@@ -290,6 +290,7 @@ function scoreHtml(jump, s, feel) {
       <circle cx="52" cy="52" r="${r}" class="track"/><circle cx="52" cy="52" r="${r}" class="fill" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 52 52)"/>
       <text x="52" y="58" class="n">${s == null ? '–' : Math.round(s)}</text><text x="52" y="76" class="of">/ 100</text></svg>
     <div class="score-side"><span class="score-l">Technika</span><b>${WORD(s)}</b>
+      ${typeof jump.score === 'object' && jump.score?.graded != null ? `<span class="score-n">z ${jump.score.graded} čísel · ${jump.score.phasesScored} z 5 fáz</span>` : ''}
       <span class="score-feel" data-feel-shown>${feel ? `Pocit ${feel}/5` : ''}</span>
       ${est ? `<span class="score-est">odhad dĺžky <b>≈ ${num(est.value, 2)} m</b></span>` : ''}</div>
   </div>`;

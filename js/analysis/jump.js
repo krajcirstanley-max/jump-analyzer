@@ -55,6 +55,7 @@ function buildPhases(ev, metrics, score, last, runThrough = false) {
     return {
       id: p.id, label: p.label, weight: p.weight,
       score: score.phases.find(s => s.id === p.id)?.score ?? null,
+      ...(score.phases.find(s => s.id === p.id)?.thin ? { thin: true } : {}),
       from, to, frame,
       keyFrames: PHASE_KF[p.id].map(id => kf[id]).filter(Boolean).map(k => ({ id: k.id, label: k.label, frame: k.frame, ...(k.hand ? { hand: true } : {}) })),
       metrics: p.keys.map(k => by[k]).filter(Boolean),
