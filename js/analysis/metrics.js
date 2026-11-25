@@ -307,7 +307,9 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('speedTD', f.vxTD, ev.takeoff.td),
     row('velocityLoss', f.velocityLoss, ev.takeoff.to),
     row('vyTO', f.vyTO, ev.takeoff.to),
-    row('speedLast', f.speedLast, ev.pen?.td ?? null),
+    // the body's scale first, also over the runway's: on the five Freelap jumps that have both the
+    // runway read +4.9, +3.0, −2.4, +3.3, +10.6 %, the body +1.4, −0.1, −6.3, −2.6, −1.1 % (2026-11-25)
+    Number.isFinite(f.speedLastBody) ? bodyRow(f, ev, g) : row('speedLast', f.speedLast, ev.pen?.td ?? null),
     row('speedApproach', f.approach, ev.pen?.td ?? null),
     row('speedKeep', f.speedKeep, ev.pen?.td ?? null),
     row('speedTO', f.vxTO, ev.takeoff.to),
@@ -319,6 +321,14 @@ export function flightMetrics(f, ev, sex = 'male') {
     row('landingReach', f.landingReach, ev.landing),
     row('estDistance', f.estDistance, ev.landing),
   ].filter(Boolean);
+}
+
+// The penultimate-step speed on the body's own scale (flight.js lastStepByBody: ±3 % against
+// Freelap on six jumps), shown and graded like the runway's.
+function bodyRow(f, ev, g) {
+  const n = NORMS.speedLast, [lo, hi] = n[g], v = f.speedLastBody;
+  return { key: 'speedLast', label: n.label, unit: n.unit, value: v, norm: [lo, hi], status: v < lo ? 'low' : v > hi ? 'high' : 'ok',
+    frame: ev.pen?.td ?? null, good: n.good, estimate: true, reason: null, from: 'body' };
 }
 
 // ev: output of keyFrames(); track: smoothed keypoints per frame.

@@ -196,7 +196,14 @@ function tapeNote(t) {
 }
 
 // How far to trust the speed card, from the fit itself.
+// The last step's speed is the body's (flight.js lastStepByBody) whenever it reads, said first.
 function speedCard(flight, by, ev, track) {
+  const c = speedCardOf(flight, by, ev, track);
+  if (flight && !flight.error && by.speedLast?.from === 'body')
+    c.note = `Rýchlosť v predposlednom kroku z veľkosti tela (tvoja výška): proti Freelapu na 6 skokoch ±3 %. ${c.note}`;
+  return c;
+}
+function speedCardOf(flight, by, ev, track) {
   const last = by.speedLast ?? null, takeoff = by.speedTO ?? null, loss = by.speedLoss ?? null;
   // A percentage is a ratio of two speeds: the gravity scale cancels, so a short arc doesn't hurt it.
   const lossPct = flight && !flight.error && flight.angleOk && Number.isFinite(flight.speedLast) && flight.speedLast > 0

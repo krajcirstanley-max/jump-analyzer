@@ -29,7 +29,7 @@ import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.34.5';
+const APP_VERSION = '0.35.0';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1678,7 +1678,7 @@ if (splash) setTimeout(() => { splash.classList.add('gone'); setTimeout(() => sp
 // Saved jumps are read again with today's code from their stored pose, as Rozbeh does, so the list's
 // scores follow every fix without opening each jump (2026-11-25, Stanley: "znovu dať analýzy by malo
 // byť aj pri skokoch"). On the phone, from the stored pose: no server, no upload. Bumped with the reading.
-const JUMP_ALGO = 2;   // 2 (2026-11-25): the Let tile is the result, phases from 2 numbers; 1 (2026-11-25): one score, the board touchdown never moved later, Freelap at the take-off only
+const JUMP_ALGO = 3;   // 3 (2026-11-25): last-step speed from the body scale without the runway; 2 (2026-11-25): the Let tile is the result, phases from 2 numbers; 1 (2026-11-25): one score, the board touchdown never moved later, Freelap at the take-off only
 async function rereadJumps() {
   for (const a of Object.keys(ATHLETES)) {
     const who = ATHLETES[a], list = (await hist.listAttempts(a)).filter(r => (r.algo ?? 0) < JUMP_ALGO && r.media?.pose && !r.jump?.error);

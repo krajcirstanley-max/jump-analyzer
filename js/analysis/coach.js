@@ -411,13 +411,14 @@ export function unifiedScore(jump, { sex = 'male', V = null, history = [] } = {}
 // The approach speed a jump brought: Freelap's 1-11 m (typed or heard), else the video's 1-11 m.
 export function approachSpeed(jump) {
   if (jump?.split > 0.6 && jump.split < 2.5) return 10 / jump.split;
-  const m = (jump?.metrics ?? []).find(x => x.key === 'speedApproach' && x.status !== 'hidden');
-  return m?.value ?? null;
+  const shown = k => (jump?.metrics ?? []).find(x => x.key === k && x.status !== 'hidden')?.value ?? null;
+  // without Freelap or the cones, the penultimate step (Berlin 2009 finalists: last stride / 11-1 m 0.998)
+  return shown('speedApproach') ?? shown('speedLast');
 }
 // A stored record as one point of the athlete's history.
 export function historyPoint(rec) {
-  const f = rec?.metrics?.flight, a = rec?.metrics?.speedApproach;
+  const f = rec?.metrics?.flight, a = rec?.metrics?.speedApproach, l = rec?.metrics?.speedLast;
   const T = f && f.s !== 'hidden' && f.v != null ? f.v / 1000 : null;
-  const V = rec?.split > 0.6 && rec.split < 2.5 ? 10 / rec.split : a && a.s !== 'hidden' ? a.v : null;
+  const V = rec?.split > 0.6 && rec.split < 2.5 ? 10 / rec.split : a && a.s !== 'hidden' ? a.v : l && l.s !== 'hidden' && l.v != null ? l.v : null;
   return { id: rec?.id, T, V };
 }

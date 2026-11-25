@@ -150,6 +150,7 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
     if (ct.length >= 5) speedLast = slope(ct, cx) / (pxPerM * zoom(Math.round((ev.pen.td + ev.pen.to) / 2)));
   }
 
+  const body = lastStepByBody(track, ev, ts, sex, dir, height);
   const low = lowering(track, ev, sex, height);
 
   // Speed lost on the board, as a percentage: stance speeds in image units over the body's local
@@ -180,7 +181,7 @@ export function flightAnalysis(track, ev, ts, sex = 'male', dir = 1, height = nu
     takeoffSpeed: Math.hypot(vxTO, vyTO),
     apexRise: (fit.b * fit.b) / (4 * fit.a * pxPerM), // height of the fitted arc itself
     takeoffDist, flightDistance,
-    speedLast, speedLoss: vxTO - speedLast,
+    speedLast, speedLoss: vxTO - speedLast, speedLastBody: body.v, bodyWhy: body.why, bodyFrom: body.from,
     ...low, speedLossTO,
     peakHeight: ((fit.b * fit.b) / (4 * fit.a * pxPerM)) * 100,
     zoomTD: zoom(T.td), zoomPen: ev.pen ? zoom(ev.pen.td) : NaN,
@@ -232,4 +233,48 @@ export function lowering(track, ev, sex = 'male', height = null) {
     if (d) ({ value: comDropBoard, parts: comDropBoardParts, frames: comDropBoardFrames } = d), comDropBoardFrame = T.td;
   }
   return { hipDrop, hipDropFrame, hipDropParts, hipDropFrames, comDropBoard, comDropBoardFrame, comDropBoardParts, comDropBoardFrames };
+}
+
+// The penultimate-step speed on the body's own scale (2026-11-25, Stanley: "musíme nájsť spôsob, ako
+// rýchlosť vypočítať efektívne"). The centre of mass over the planted toe through the penultimate
+// stance, in pixels a second: the toe stands on the runway, so a phone that follows the jumper cancels
+// out. Pixels become metres through the body at that same moment: torso + hip-knee-ankle, which is
+// 0.779 of standing height (Drillis & Contini 1966: shoulder 0.818 H, hip 0.530, knee 0.285, ankle
+// 0.039). No flight arc, no runway lines, no constant fitted to our clips. Against Freelap on the six
+// jumps that have both (Miška 11 Nov and 24 Nov ×4, Stanley 23 and 24 Nov): −6.3 to +1.7 %, mean −1.2 %,
+// 2.9 % rms; the flight's arc read −2.4 to +10.6 % on the same six and failed on Stanley's 24 Nov clips
+// (he shrinks 30 % in flight, the phone behind the board). Not read when the body is under 55 px of
+// torso (24 Nov 19:44: 48 px, −29 %) or when the toe point slides (toe slower than the heel: the toe was
+// mistracked, 22 Nov ×3; the heel reads 1.12× slower than the toe across 47 clean clips, so it stands in).
+const BODY_OF_HEIGHT = 0.288 + 0.245 + 0.246;
+export function lastStepByBody(track, ev, ts, sex = 'male', dir = 1, height = null) {
+  const c = ev.pen;
+  if (!c || !(height > 100)) return { v: NaN, why: c ? 'height' : 'pen' };
+  const H = height / 100;
+  const legLen = (k, s) => (has(k, s + 'hip', s + 'knee', s + 'ank') ? dist(P(k, s + 'hip'), P(k, s + 'knee')) + dist(P(k, s + 'knee'), P(k, s + 'ank')) : NaN);
+  const torso = k => (k && has(k, 'lsho', 'rsho', 'lhip', 'rhip') ? torsoLength(k) : NaN);
+  const sizes = [], torsos = [];
+  for (let i = c.td - 3; i <= c.to + 3; i++) {
+    const k = track[i]; if (!k) continue;
+    const t = torso(k); torsos.push(t);
+    sizes.push(t + median([legLen(k, 'l'), legLen(k, 'r')]));
+  }
+  const bodyPx = median(sizes), torsoPx = median(torsos);
+  if (!(torsoPx >= 55)) return { v: NaN, why: 'small' };
+  const pxPerM = bodyPx / (BODY_OF_HEIGHT * H);
+  const over = anchor => {
+    const t = [], x = [];
+    for (let i = c.td + 2; i <= c.to - 2; i++) {
+      const k = track[i], nm = c.foot + anchor;
+      if (!k || !has(k, nm)) continue;
+      const m = centreOfMass(k, sex); if (!m) continue;
+      t.push(ts[i]); x.push((m[0] - P(k, nm)[0]) * dir);
+    }
+    return t.length >= 4 ? slope(t, x) / pxPerM : NaN;
+  };
+  const toe = over('bigtoe'), heel = over('heel');
+  const toeSlid = Number.isFinite(toe) && Number.isFinite(heel) && heel > 0 && toe / heel < 0.95;
+  const v = toeSlid ? heel * 1.12 : Number.isFinite(toe) ? toe : NaN;
+  if (!(v >= 5 && v <= 11.5)) return { v: NaN, why: 'range' };
+  return { v, why: null, from: toeSlid ? 'heel' : 'toe' };
 }
