@@ -357,3 +357,63 @@ export function coaching(metrics = [], sex = 'male', { name, all = false } = {})
 
 // Title per fault id, for the what-if card.
 export const FAULT_INFO = Object.fromEntries(FAULTS.map(f => [f.id, { title: f.title, phase: f.phase, take: f.take, img: f.img ?? null }]));
+
+// ---------- One score for the jump (2026-11-25, Stanley: "jednotné skóre a keď nie je Freelap nech sa to
+// prispôsobí"; research the same day: speed and the touchdown carry almost all of the distance, posture
+// angles among finalists correlate with it at |r| <= 0.28, so a score of angles alone flattered) ----------
+// Two halves, each 0-100: what the jump produced (its flight time, frame-exact) against what was to be
+// expected, and the technique numbers against their norms (techniqueScore). Whichever is missing, the
+// other one is the score, and the score says so.
+// The expectation, best first:
+//  - with the approach speed (Freelap 1-11 m, or the video's) and 6+ of the athlete's own jumps with one:
+//    their own line flight time ~ speed (least squares), sigma its residual SD (floor 0.025 s)
+//  - without a speed, 5+ of their own jumps: their median flight time and its SD
+//  - with a speed and no history: the published distance line (Bayraktar & Cilli 2018, 73 men:
+//    D = 1.067 V - 3.184, SD 0.35 m; Bayraktar, Cilli & Ors 2021, 156 women: sqrt D = 0.7833 + 0.008058 age
+//    + 0.17031 V, SD 0.27 m, age taken as 25) turned into a flight time with T = (D - L1L3) / (0.845 V),
+//    L1+L3 1.0 / 0.8 m and vx at take-off 0.845 of the last stride (Berlin 2009) - derived, so 'orientačne'
+// 70 at the expectation, 20 points a standard deviation, 0-100.
+const med = a => { const s = [...a].sort((x, y) => x - y); return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : NaN; };
+const sd = a => { const m = a.reduce((s, x) => s + x, 0) / a.length; return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, a.length - 1)); };
+export function outcomeScore({ T, V = null, sex = 'male', history = [] }) {
+  if (!(T > 0.2 && T < 1.3)) return null;
+  const H = history.filter(h => h.T > 0.2 && h.T < 1.3);
+  const withV = H.filter(h => h.V > 4 && h.V < 12);
+  let Texp, sig, basis, n = 0;
+  if (V > 4 && withV.length >= 6) {
+    const mx = withV.reduce((s, h) => s + h.V, 0) / withV.length, my = withV.reduce((s, h) => s + h.T, 0) / withV.length;
+    const b = withV.reduce((s, h) => s + (h.V - mx) * (h.T - my), 0) / Math.max(1e-9, withV.reduce((s, h) => s + (h.V - mx) ** 2, 0));
+    Texp = my + b * (V - mx); sig = Math.max(0.025, sd(withV.map(h => h.T - (my + b * (h.V - mx))))); basis = 'speed-own'; n = withV.length;
+  } else if (H.length >= 5) {
+    Texp = med(H.map(h => h.T)); sig = Math.max(0.025, sd(H.map(h => h.T))); basis = 'own'; n = H.length;
+  } else if (V > 4) {
+    const D = sex === 'female' ? (0.7833 + 0.008058 * 25 + 0.17031 * V) ** 2 : 1.067 * V - 3.184;
+    Texp = (D - (sex === 'female' ? 0.8 : 1.0)) / (0.845 * V); sig = sex === 'female' ? 0.040 : 0.044; basis = 'population';
+  } else return null;
+  const z = (T - Texp) / sig;
+  return { score: Math.max(0, Math.min(100, 70 + 20 * z)), z, T, Texp, sigma: sig, basis, n, V: V ?? null };
+}
+
+// The jump's score object gets the two halves and their mix: technique = the phases as before.
+export function unifiedScore(jump, { sex = 'male', V = null, history = [] } = {}) {
+  if (!jump || jump.error || !jump.score) return jump;
+  const tech = jump.score.technique ?? jump.score.score;
+  const fl = (jump.metrics ?? []).find(m => m.key === 'flight' && m.status !== 'hidden');
+  const out = jump.kind === 'runthrough' ? null : outcomeScore({ T: fl ? fl.value / 1000 : null, V, sex, history });
+  const parts = [out?.score, tech].filter(x => x != null);
+  jump.score = { ...jump.score, technique: tech ?? null, outcome: out, score: parts.length ? parts.reduce((s, x) => s + x, 0) / parts.length : null };
+  return jump;
+}
+// The approach speed a jump brought: Freelap's 1-11 m (typed or heard), else the video's 1-11 m.
+export function approachSpeed(jump) {
+  if (jump?.split > 0.6 && jump.split < 2.5) return 10 / jump.split;
+  const m = (jump?.metrics ?? []).find(x => x.key === 'speedApproach' && x.status !== 'hidden');
+  return m?.value ?? null;
+}
+// A stored record as one point of the athlete's history.
+export function historyPoint(rec) {
+  const f = rec?.metrics?.flight, a = rec?.metrics?.speedApproach;
+  const T = f && f.s !== 'hidden' && f.v != null ? f.v / 1000 : null;
+  const V = rec?.split > 0.6 && rec.split < 2.5 ? 10 / rec.split : a && a.s !== 'hidden' ? a.v : null;
+  return { id: rec?.id, T, V };
+}

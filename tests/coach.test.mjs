@@ -284,3 +284,18 @@ test('a saved coaching text that today\'s numbers contradict is not kept', async
   assert.equal(coachFits(coach, []), false, 'no longer measured');
   assert.equal(coachFits(coach, [metric('hipDrop', 12, [5, 10], { unit: 'cm' })]), true, 'still out of it');
 });
+
+test('one score: the result against its expectation and the technique; a missing half leaves the other', async () => {
+  const { outcomeScore, unifiedScore } = await import('../js/analysis/coach.js');
+  const H = [0.70, 0.72, 0.71, 0.73, 0.70, 0.72].map((T, i) => ({ id: 'h' + i, T, V: null }));
+  const o = outcomeScore({ T: 0.742, history: H });
+  assert.equal(o.basis, 'own'); assert.ok(o.score > 80, String(o.score));
+  assert.ok(outcomeScore({ T: 0.68, history: H }).score < 55);
+  assert.equal(outcomeScore({ T: 0.7, history: [] }), null, 'no speed, no history: no result half');
+  const j = { metrics: [{ key: 'flight', value: 742, status: 'info' }], score: { score: 90, phases: [] }, kind: 'jump' };
+  unifiedScore(j, { history: H });
+  assert.equal(j.score.technique, 90); assert.ok(j.score.outcome && j.score.score > 85 && j.score.score < 100);
+  const k = { metrics: [], score: { score: 80, phases: [] }, kind: 'jump' };
+  unifiedScore(k, { history: H });
+  assert.equal(k.score.outcome, null); assert.equal(k.score.score, 80);
+});

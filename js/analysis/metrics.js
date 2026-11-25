@@ -51,7 +51,9 @@ export const NORMS = {
   trunkRotBoard: { label: 'Rotácia trupu na doske', unit: '°', m: [6, 13], f: [1, 15], info: true, ref: 'Berlín 2009', why: 'MS 2018 dáva iné čísla ako Berlín' },
   // Centre of mass at toe-off as % of standing height. Linthorne 2005 Table II: 63-69 %, but only 3 men
   // in training, and the app reads it at toe-off, which the phone gets 7-12 cm wrong: no grade, no band.
-  toHeight: { label: 'Výška ťažiska pri odraze', unit: '%', m: [62, 70], f: [62, 70], good: 'high', info: true, noRef: true, why: 'iba 3 skokani v štúdii a odraz špičky sa z mobilu nedá zmerať presne' },
+  // 2026-11-25: Shimizu 2018, 29 elite men 67.8 ± 2.1 %; women about 61-65 % (Campos 2013 8 finalists, PAN 2021 4).
+  // Still not graded: the phone reads the toe-off instant 7-12 cm off.
+  toHeight: { label: 'Výška ťažiska pri odraze', unit: '%', m: [65.7, 69.9], f: [60, 66], good: 'high', info: true, ref: { m: 'Shimizu 2018, 29 mužov', f: 'Campos 2013, PAN 2021' }, why: 'odraz špičky sa z mobilu nedá zmerať presne' },
   // Last step (penultimate to board, toe to toe) against the one before, %. WA17 men -9 % (-19 to
   // -1), women -10 %; WA18 women -12 % (-27 to -5); WA17 women −20 to +3; Berlin men 77-102 %, women
   // 80-98 % of the step before. Our earlier step is far from the board: ±0.15 m (7 % of a step), so not graded.
@@ -85,11 +87,16 @@ export const NORMS = {
   flexion: { label: 'Poddajnosť kolena na doske', unit: '°', m: [11, 49], f: [19, 43], info: true, why: 'najväčší ohyb kolena zakrýva švihová noha' },
   // Computed per finalist from WA17/WA18 (knee range of motion ÷ the mean knee speed from touchdown to the
   // deepest bend, Table 1's definition): men 35-80 ms, women 40-100. Not graded: the deepest bend is hidden.
-  braking: { label: 'Dotyk → najväčší ohyb', unit: 'ms', m: [35, 80], f: [40, 100], info: true, why: 'najväčší ohyb kolena zakrýva švihová noha' },
+  // 2026-11-25: measured directly in Campos et al. 2013 (NSA 28:115, 2008 World Indoor finals, 8 + 8, 3D 125 Hz,
+  // per athlete): men 45 ± 6 (40-56) / 77 ± 4 (72-80) ms, women 52 ± 6 (40-56) / 65 ± 7 (56-72).
+  braking: { label: 'Dotyk → najväčší ohyb', unit: 'ms', m: [40, 56], f: [40, 56], info: true, ref: 'Campos 2013, finalisti HMS', why: 'najväčší ohyb kolena zakrýva švihová noha' },
   // Board contact minus braking; no finalist source reports it (Wei 2026 only, 100 Hz national men).
-  propulsion: { label: 'Najväčší ohyb → odraz', unit: 'ms', m: [45, 75], f: [45, 75], info: true, noRef: true, why: 'žiadna štúdia finalistov to neuvádza' },
+  propulsion: { label: 'Najväčší ohyb → odraz', unit: 'ms', m: [72, 80], f: [56, 72], info: true, ref: 'Campos 2013, finalisti HMS', why: 'najväčší ohyb kolena zakrýva švihová noha' },
   // Only Wei 2026 (11 Chinese men, 8.0-8.2 m, 2D 100 Hz): 172.8 ± 6.4. No women's value, no finalist value.
-  kneeTO: { label: 'Koleno pri odraze', unit: '°', m: [166, 180], f: [166, 180], info: true, ref: 'Wei 2026, 11 mužov (ženy bez údajov)', why: 'jediná malá štúdia' },
+  // 2026-11-25: three sources for men - Shimizu 2018 (Tsukuba thesis, JAAF data: 9 world-class 163.8 ± 4.4,
+  // 10 Japanese elite 171.6 ± 2.6), Wei 2026 172.8 ± 6.4: the envelope of mean ± SD, 160-178. Women: only
+  // Panoutsakopoulos et al. 2021 (4 European indoor finalists, 2D 300 fps) 171.2 ± 4.7: shown, not graded.
+  kneeTO: { label: 'Koleno pri odraze', unit: '°', m: [160, 178], f: [166, 176], info: ['f'], ref: { m: 'Shimizu 2018, Wei 2026', f: 'Panoutsakopoulos 2021, 4 finalistky' }, why: { f: 'len 4 finalistky v jedinej štúdii' } },
   // Only Wei 2026: 195.4 ± 8.5, convention not stated; ours (same-side shoulder-hip-knee) moves it up to 11°.
   hipTO: { label: 'Vystretie bedra pri odraze', unit: '°', m: [185, 205], f: [185, 205], good: 'high', info: true, noRef: true, why: 'jediná štúdia a nevieme, ako uhol merali' },
   // WA17/WA18 men 13.5-22.7, women 12.6-23.7; measured to the toe, the contact at toe-off.

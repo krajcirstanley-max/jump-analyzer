@@ -6,7 +6,7 @@ import { Player } from './player.js';
 import { skeletonOverlay } from './pose/overlay.js';
 import { analyzeJump, cleanEdges } from './analysis/jump.js';
 import { expectedDistance } from './analysis/runup.js';
-import { coaching, coachFits } from './analysis/coach.js';
+import { coaching, coachFits, unifiedScore, approachSpeed, historyPoint } from './analysis/coach.js';
 import { jointLabels, idealOverlay, flightOverlay } from './analysis/labels.js';
 import { centreOfMass } from './analysis/kinematics.js';
 import { idealsFor } from './analysis/ideal.js';
@@ -29,7 +29,7 @@ import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.33.4';
+const APP_VERSION = '0.34.0';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -54,6 +54,14 @@ const profiles = {};
 for (const a of Object.keys(ATHLETES)) {
   profiles[a] = { pb: null, goal: ATHLETES[a].goal };
   try { Object.assign(profiles[a], JSON.parse(localStorage.getItem(profileKey(a)) || '{}')); } catch { /* storage blocked */ }
+}
+// Each athlete's earlier jumps as { id, T, V } for the jump score's expectation (coach.js unifiedScore).
+const outcomeHist = Object.fromEntries(Object.keys(ATHLETES).map(a => [a, []]));
+async function refreshOutcomeHist(a) {
+  try { outcomeHist[a] = (await hist.listAttempts(a)).map(historyPoint).filter(h => h.T != null); } catch { /* storage blocked */ }
+}
+function scoreJump(j, a, id) {
+  return unifiedScore(j, { sex: ATHLETES[a].sex, V: approachSpeed(j), history: outcomeHist[a].filter(h => h.id !== id) });
 }
 function saveProfile(a) {
   try { localStorage.setItem(profileKey(a), JSON.stringify(profiles[a])); } catch { /* storage blocked: kept for this session */ }
@@ -812,6 +820,7 @@ function showJump() {
   const fl = jump.error ? null : jumpRun(currentClip, a, player.ts?.[jump.takeoff.td] ?? null, self), split = runSplit(fl);
   if (split && self) runOwner.set(fl.key, self);
   if (split) { jump = analyzeJump(pose, who.sex, player.ts, { height: who.height, pb: profiles[a].pb, split }); if (!jump.error) { jump.split = split; jump.runKey = fl.key; } }
+  if (!jump.error) scoreJump(jump, a, self);
   setOverlays();
   player.refresh();
   if (jump.error) {
@@ -885,11 +894,13 @@ const typedSplit = j => (j?.split != null && !(Math.abs(j.split - (j.speed?.spli
 async function rejudge(id, v, force = false) {
   if (!pose || !jump || jump.error || (!force && (jump.runupJudged ?? null) === v)) return;
   const a = resultAthlete, who = ATHLETES[a];
+  if (!outcomeHist[a].length) await refreshOutcomeHist(a);
   const next = analyzeJump(pose, who.sex, player?.ts ?? null, { height: who.height, pb: profiles[a].pb, runup: v, tape: jump.measured, tapeFrom: jump.tapeFrom ?? null, split: typedSplit(jump), edges: jump.edges ?? null });
   if (next.error || id !== resultId) return;
   // the written coaching stays unless today's numbers contradict it; then the template speaks
   const coach = coachFits(jump.coach, next.metrics) || jump.coach == null ? jump.coach : coaching(next.metrics, who.sex, { name: who.name });
   jump = Object.assign(next, { coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v, edges: jump.edges ?? null });
+  scoreJump(jump, a, id);
   if (player) { setOverlays(); player.refresh(); }
   await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump });
   if (id === resultId) present(jump.feel ?? null);
@@ -1038,7 +1049,7 @@ async function openAttempt(id) {
 async function renderLists() {
   const ids = Object.keys(ATHLETES);
   const all = await Promise.all(ids.map(a => hist.listAttempts(a)));
-  ids.forEach((a, i) => { lastRunup[a] = all[i].findLast(r => r.runup != null)?.runup ?? null; });
+  ids.forEach((a, i) => { lastRunup[a] = all[i].findLast(r => r.runup != null)?.runup ?? null; outcomeHist[a] = all[i].map(historyPoint).filter(h => h.T != null); });
   const i = ids.indexOf(athlete);
   $('trends').innerHTML = trendsHtml({ who: athlete, name: ATHLETES[athlete].name, runs: freelapView.runs(), attempts: all[i], rsi: rsiView.records(), rozbeh: rozbehView.records() });
   const root = $('progress');
@@ -1412,6 +1423,7 @@ async function saveNumbers(ctx, result, jobId) {
   if (j.error) { bgSet(ctx.id, { stage: 'skok sa nenašiel · ťukni a skús znova', error: true }); return null; }
   j.coach = null;
   if (split) j.split = split;   // Freelap's time stands like a typed one
+  scoreJump(j, a, hist.attemptId(a, ctx.clip.file));
   const rec = hist.attemptRecord(j, { athlete: a, ...ctx.clip });
   if (split) rec.runKey = fl.key;
   // A re-analysis keeps what was typed for this jump (feel, run-up steps, the tape); the hand-moved

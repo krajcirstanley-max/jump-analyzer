@@ -280,17 +280,29 @@ export function showCoach(els, coach) {
   if (above) scrollBy(0, below.getBoundingClientRect().top - top0);
 }
 
+// What the one score is made of (coach.js unifiedScore): the jump's result against its expectation and the
+// technique, each with what it rests on; a half that could not be judged says why.
+const BASIS = { 'speed-own': n => `podľa tvojej rýchlosti a ${n} skokov`, own: n => `oproti tvojim ${n} skokom`, population: () => 'podľa rýchlosti, orientačne' };
+function scoreParts(sc) {
+  if (!sc || typeof sc !== 'object') return '';
+  const o = sc.outcome, t = sc.technique;
+  const res = o ? `<span class="score-part">Výsledok <b>${Math.round(o.score)}</b> · let ${num(o.T, 2)} s, čakané ${num(o.Texp, 2)} (${BASIS[o.basis](o.n)})</span>`
+    : '<span class="score-part">Výsledok bez hodnotenia: chýba čas letu alebo porovnanie</span>';
+  const tec = t != null ? `<span class="score-part">Technika <b>${Math.round(t)}</b> · z ${sc.graded ?? '?'} čísel, ${sc.phasesScored ?? '?'} z 5 fáz</span>`
+    : '<span class="score-part">Technika bez hodnotenia: málo zmeraných čísel</span>';
+  return res + tec;
+}
 // Score as a ring, the word for it, the feel and the distance estimate beside it.
 const WORD = s => (s == null ? '' : s >= 85 ? 'výborná' : s >= 70 ? 'dobrá' : s >= 55 ? 'priemerná' : 'slabá');
 function scoreHtml(jump, s, feel) {
   const r = 44, c = 2 * Math.PI * r, f = s == null ? 0 : Math.max(0, Math.min(1, s / 100));
   const est = (jump.metrics ?? []).find(m => m.key === 'estDistance' && shown(m));
   return `<div class="score">
-    <svg class="score-ring b-${band(s)}" viewBox="0 0 104 104" aria-label="Skóre techniky ${s == null ? '' : Math.round(s)} zo 100">
+    <svg class="score-ring b-${band(s)}" viewBox="0 0 104 104" aria-label="Skóre skoku ${s == null ? '' : Math.round(s)} zo 100">
       <circle cx="52" cy="52" r="${r}" class="track"/><circle cx="52" cy="52" r="${r}" class="fill" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 52 52)"/>
       <text x="52" y="58" class="n">${s == null ? '–' : Math.round(s)}</text><text x="52" y="76" class="of">/ 100</text></svg>
-    <div class="score-side"><span class="score-l">Technika</span><b>${WORD(s)}</b>
-      ${typeof jump.score === 'object' && jump.score?.graded != null ? `<span class="score-n">z ${jump.score.graded} čísel · ${jump.score.phasesScored} z 5 fáz</span>` : ''}
+    <div class="score-side"><span class="score-l">Skok</span><b>${WORD(s)}</b>
+      ${scoreParts(jump.score)}
       <span class="score-feel" data-feel-shown>${feel ? `Pocit ${feel}/5` : ''}</span>
       ${est ? `<span class="score-est">odhad dĺžky <b>≈ ${num(est.value, 2)} m</b></span>` : ''}</div>
   </div>`;

@@ -742,5 +742,5 @@ div.att-open { cursor: default; }
 .sp-bands .sp-i { min-width: 56px; white-space: nowrap; }
 .sp-bands .sp-n { min-width: 64px; }
 
-.score-n { font-size: 12px; color: var(--muted); }
+.score-part { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; }
 .tile-thin { display: block; font-size: 10px; color: var(--muted); font-weight: 400; }
