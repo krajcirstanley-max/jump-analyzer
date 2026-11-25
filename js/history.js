@@ -256,6 +256,11 @@ export async function dropIfOrphan(id) {
 // Typed arrays would otherwise serialise as objects with numeric keys.
 const poseBlob = pose => new Blob([JSON.stringify(pose, (k, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v))], { type: 'application/json' });
 
+// The stored pose alone (no clip), for reading a saved jump again with today's code.
+export async function loadPose(id) {
+  try { const raw = await getMedia(id, 'pose'); return raw ? fromWire(JSON.parse(await raw.text())) : null; } catch { return null; }
+}
+
 export async function loadMedia(id) {
   const [clip, raw] = await Promise.all([loadClip(id), getMedia(id, 'pose')]);
   let pose = null;

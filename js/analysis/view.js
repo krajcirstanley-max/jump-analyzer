@@ -83,7 +83,7 @@ function bandHtml(m) {
 function tile(p) {
   const s = p.score == null ? null : Math.round(p.score);
   return `<button class="tile b-${band(s)}" data-phase="${p.id}" aria-pressed="false">
-    <span class="tile-l">${p.id === 'pen' ? 'Predposl.' : esc(p.label)}</span><b>${s ?? '–'}</b>${p.thin ? '<small class="tile-thin">málo údajov</small>' : ''}
+    <span class="tile-l">${p.id === 'pen' ? 'Predposl.' : esc(p.label)}</span><b>${s ?? '–'}</b>${p.result ? '<small class="tile-thin">výsledok</small>' : ''}
   </button>`;
 }
 
@@ -288,7 +288,7 @@ function scoreParts(sc) {
   const o = sc.outcome, t = sc.technique;
   const res = o ? `<span class="score-part">Výsledok <b>${Math.round(o.score)}</b> · let ${num(o.T, 2)} s, čakané ${num(o.Texp, 2)} (${BASIS[o.basis](o.n)})</span>`
     : '<span class="score-part">Výsledok bez hodnotenia: chýba čas letu alebo porovnanie</span>';
-  const tec = t != null ? `<span class="score-part">Technika <b>${Math.round(t)}</b> · z ${sc.graded ?? '?'} čísel, ${sc.phasesScored ?? '?'} z 5 fáz</span>`
+  const tec = t != null ? `<span class="score-part">Technika <b>${Math.round(t)}</b> · z ${sc.graded ?? '?'} čísel</span>`
     : '<span class="score-part">Technika bez hodnotenia: málo zmeraných čísel</span>';
   return res + tec;
 }

@@ -29,7 +29,7 @@ import { burnAndSave } from './burn.js';
 import * as hist from './history.js';
 import { sessions, sessionPlace, skoky } from './sessions.js';
 
-const APP_VERSION = '0.34.2';
+const APP_VERSION = '0.34.4';
 let inBatch = false;   // a later clip of several picked at once: its screen does not open
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -835,6 +835,7 @@ function showJump() {
   $('res-empty').classList.add('hidden');
   $('res-msg').classList.add('hidden');
   const rec = hist.attemptRecord(jump, { athlete: resultAthlete, ...currentClip });
+  rec.algo = JUMP_ALGO;
   if (jump.runKey) rec.runKey = jump.runKey;
   rec.coachPending = awaitingCoach;
   rec.coachJob = awaitingCoach ? screenJob : null;
@@ -911,7 +912,7 @@ async function rejudge(id, v, force = false) {
   jump = Object.assign(next, { coach, feel: jump.feel, measured: jump.measured, split: jump.split, tapeFrom: jump.tapeFrom ?? null, runup: v, edges: jump.edges ?? null });
   scoreJump(jump, a, id);
   if (player) { setOverlays(); player.refresh(); }
-  await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump });
+  await hist.patchAttempt(id, { ...hist.attemptNumbers(jump), jump, algo: JUMP_ALGO });
   if (id === resultId) present(jump.feel ?? null);
   renderLists();
 }
@@ -1439,6 +1440,7 @@ async function saveNumbers(ctx, result, jobId) {
   if (split) j.split = split;   // Freelap's time stands like a typed one
   scoreJump(j, a, hist.attemptId(a, ctx.clip.file));
   const rec = hist.attemptRecord(j, { athlete: a, ...ctx.clip });
+  rec.algo = JUMP_ALGO;
   if (split) rec.runKey = fl.key;
   // A re-analysis keeps what was typed for this jump (feel, run-up steps, the tape); the hand-moved
   // contacts go, since redoing the reading is the point (2026-11-23, "Znovu analyzovať").
@@ -1664,4 +1666,39 @@ if (TABS.includes(window.__bootTab)) { tab = null; showTab(window.__bootTab); } 
 // Keep it about a second from launch so it reads as a loading screen.
 const splash = $('splash');
 if (splash) setTimeout(() => { splash.classList.add('gone'); setTimeout(() => splash.remove(), 300); }, Math.max(0, 1000 - performance.now()));
+// Saved jumps are read again with today's code from their stored pose, as Rozbeh does, so the list's
+// scores follow every fix without opening each jump (2026-11-25, Stanley: "znovu dať analýzy by malo
+// byť aj pri skokoch"). On the phone, from the stored pose: no server, no upload. Bumped with the reading.
+const JUMP_ALGO = 2;   // 2 (2026-11-25): the Let tile is the result, phases from 2 numbers; 1 (2026-11-25): one score, the board touchdown never moved later, Freelap at the take-off only
+async function rereadJumps() {
+  for (const a of Object.keys(ATHLETES)) {
+    const who = ATHLETES[a], list = (await hist.listAttempts(a)).filter(r => (r.algo ?? 0) < JUMP_ALGO && r.media?.pose && !r.jump?.error);
+    const done = [];
+    for (const r of list) {
+      const p = await hist.loadPose(r.id);
+      if (!p?.ts) continue;
+      const old = r.jump ?? {};
+      // a Freelap pairing that doesn't end at the take-off goes (0.34.1)
+      let split = r.split ?? null, runKey = r.runKey ?? null;
+      const run = runKey ? freelapView.runs().find(x => x.key === runKey) : null, t0 = Date.parse(r.recordedAt ?? '');
+      if (run && Number.isFinite(t0) && Number.isFinite(p.ts?.[old.takeoff?.td]) && !runFits(run, t0 + p.ts[old.takeoff.td] * 1000)) { runOwner.delete(runKey); split = null; runKey = null; }
+      let j;
+      try { j = analyzeJump(p, who.sex, p.ts, { height: who.height, pb: profiles[a].pb, runup: r.runup ?? null, tape: r.measured ?? null, tapeFrom: r.tapeFrom ?? null, split, edges: old.edges ?? null }); } catch { continue; }
+      if (j.error) continue;
+      const coach = coachFits(old.coach, j.metrics) || old.coach == null ? old.coach ?? null : coaching(j.metrics, who.sex, { name: who.name });
+      Object.assign(j, { coach, feel: old.feel ?? r.feel ?? null, measured: r.measured ?? null, split, runKey, tapeFrom: r.tapeFrom ?? null, runup: r.runup ?? null, edges: old.edges ?? null });
+      done.push({ r, j });
+      await new Promise(res => setTimeout(res, 0));   // let the screen breathe between jumps
+    }
+    if (!done.length) continue;
+    // each jump's result half against the athlete's other jumps, all read with today's code
+    outcomeHist[a] = [...done.map(({ r, j }) => historyPoint({ id: r.id, ...hist.attemptNumbers(j), split: j.split })), ...outcomeHist[a].filter(h => !done.some(d => d.r.id === h.id))].filter(h => h.T != null);
+    for (const { r, j } of done) {
+      scoreJump(j, a, r.id);
+      await hist.patchAttempt(r.id, { ...hist.attemptNumbers(j), jump: j, split: j.split, runKey: j.runKey, algo: JUMP_ALGO }).catch(() => {});
+    }
+  }
+  renderLists();
+}
+setTimeout(() => { rereadJumps().catch(e => console.warn('Re-reading saved jumps failed', e)); }, 2500);
 window.__appReady = true; // index.html shows a red bar if this line is never reached

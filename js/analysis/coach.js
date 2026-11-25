@@ -30,11 +30,13 @@ export const metricScore = scoreMetric;
 // A phase scored from fewer than 3 graded numbers gets no score and stays out of the total (2026-11-25,
 // Stanley: "skóre je príliš dobré, chýbajú tam údaje": the take-off phase scored 100 from the knee drive
 // and the trunk alone, its angle hidden without the runway; the flight phase from nothing).
-export const MIN_GRADED = 3;
+export const MIN_GRADED = 2;   // 3 left the women's take-off and a landing without the runway at 'málo údajov' (2026-11-25)
 export function techniqueScore(metrics) {
   const by = Object.fromEntries(metrics.filter(m => m.status !== 'hidden' && m.status !== 'info').map(m => [m.key, m]));
   let total = 0, wsum = 0, n = 0;
   const phases = PHASES.map(p => {
+    // the flight phase has no number with a published norm: its tile carries the jump's result (unifiedScore)
+    if (p.id === 'flight') return { ...p, score: null, graded: 0 };
     const ms = p.keys.map(k => by[k]).filter(Boolean);
     if (ms.length < MIN_GRADED) return { ...p, score: null, graded: ms.length, thin: true };
     n += ms.length;
@@ -402,6 +404,8 @@ export function unifiedScore(jump, { sex = 'male', V = null, history = [] } = {}
   const out = jump.kind === 'runthrough' ? null : outcomeScore({ T: fl ? fl.value / 1000 : null, V, sex, history });
   const parts = [out?.score, tech].filter(x => x != null);
   jump.score = { ...jump.score, technique: tech ?? null, outcome: out, score: parts.length ? parts.reduce((s, x) => s + x, 0) / parts.length : null };
+  // the Let tile: the jump's result
+  for (const ph of jump.phases ?? []) if (ph.id === 'flight') { ph.score = out ? out.score : null; ph.result = !!out; delete ph.thin; }
   return jump;
 }
 // The approach speed a jump brought: Freelap's 1-11 m (typed or heard), else the video's 1-11 m.
