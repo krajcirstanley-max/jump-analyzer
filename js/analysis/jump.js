@@ -3,6 +3,7 @@
 import { detectContacts, keyFrames, withEvents, approachToeOffs } from './events.js';
 import { countSteps } from './stepcount.js';
 import { adjustForRunup, judgedSteps, expectedDistance } from './runup.js';
+import { videoSplit } from './videosplit.js';
 import { measure, flightMetrics, scoreMetric, viewYaw, scaleReason, NORMS, bandStatus, infoFor, normMeta } from './metrics.js';
 import { flightAnalysis } from './flight.js';
 import { groundAnalysis } from './ground.js';
@@ -82,7 +83,7 @@ function withGround(f, g, hLand = NaN) {
   return {
     ...f, ground: g, scaleSource: 'board', scaleOk: true, scaleWhy: null, fitWhy: f.scaleWhy,
     vxTO: g.vxTO, speedLast: g.speedLast, speedLoss: g.speedLoss, speedLossTO: g.speedLossPct,
-    approach: g.approach ?? NaN, speedKeep: g.approach > 0 ? (g.speedLast / g.approach - 1) * 100 : NaN,
+    approach: g.approach ?? NaN, approachFrom: g.approachFrom ?? null, speedKeep: g.approach > 0 ? (g.speedLast / g.approach - 1) * 100 : NaN,
     vxTD: NaN, velocityLoss: NaN,
     // the two lowerings stay flightAnalysis's (leg angles x real lengths, its instants and unsure flags)
     // Vertical speed comes from the time to the apex (g x t, no scale), so with the runway's
@@ -201,6 +202,10 @@ function speedCard(flight, by, ev, track) {
   const c = speedCardOf(flight, by, ev, track);
   if (flight && !flight.error && by.speedLast?.from === 'body')
     c.note = `Rýchlosť v predposlednom kroku z veľkosti tela (tvoja výška): proti Freelapu na 6 skokoch ±3 %. ${c.note}`;
+  if (flight && !flight.error && flight.approachFrom === 'video' && flight.videoSplit?.s1to11 > 0) {
+    c.split1to11 = flight.videoSplit.s1to11; c.split11to21 = null; c.split6to11 = null; c.split1to6 = null;
+    c.note = `Čas 1–11 m z videa: kroky od dosky dozadu na mierke tvojho tela, s uhlom mobilu (${String(Math.round(flight.videoSplit.d)).replace('.', ',')} m od dráhy). Proti Freelapu na 5 skokoch 4× do ±1 %, raz +5 %. ${c.note}`;
+  }
   return c;
 }
 function speedCardOf(flight, by, ev, track) {
@@ -414,10 +419,17 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
   // the cones. It is its own measure, not the last step: IMG_4677 averaged 9.30 m/s over 1-11 m and
   // then ran its last two steps at 8.47 and 8.83, a slowdown into the board (Berlin 2009 finalists:
   // last stride / 11-1 m mean 0.998, so the speed is held).
-  const sUse = split > 0.8 && split < 2.5 ? split : ground && !ground.error ? ground.splits?.s1to11 ?? null : null;
-  if (sUse && ground && !ground.error) { ground.approach = 10 / sUse; ground.approachFrom = split ? 'freelap' : 'cones'; }
+  // Without Freelap the video's own 1-11 m on the body's scale (videosplit.js, ±1 % on 4 of 5 Freelap
+  // jumps) comes before the cones read off the runway (±15 % on Miška's 24 Nov clips: the 10.2 m cone
+  // is 6-10 px from a phone at the board).
+  const vsplit = air.error ? null : videoSplit(smooth, times, ev.contacts ?? contacts, ev.takeoff, { sex, dir, height });
+  const typedOk = split > 0.8 && split < 2.5, vOk = vsplit?.s1to11 > 0;
+  const sUse = typedOk ? split : vOk ? vsplit.s1to11 : ground && !ground.error ? ground.splits?.s1to11 ?? null : null;
+  const from = typedOk ? 'freelap' : vOk ? 'video' : 'cones';
+  if (sUse && ground && !ground.error) { ground.approach = 10 / sUse; ground.approachFrom = from; }
   // Gravity-scale clip (no board): a typed Freelap time still gives the approach and the hold.
-  const airOnly = sUse && !(ground && !ground.error) ? { ...air, approach: 10 / sUse, speedKeep: air.speedLast > 0 ? (air.speedLast * sUse / 10 - 1) * 100 : NaN } : air;
+  const speedL = Number.isFinite(air.speedLastBody) ? air.speedLastBody : air.speedLast;
+  const airOnly = sUse && !(ground && !ground.error) ? { ...air, approach: 10 / sUse, approachFrom: from, speedKeep: speedL > 0 ? (speedL * sUse / 10 - 1) * 100 : NaN } : air;
   // The centre of mass above the sand at the landing frame, in metres: feet on the sand, the body's
   // size there against the board's scale (the athlete is further from the phone by then).
   const hLand = (() => {
@@ -427,6 +439,7 @@ export function analyzeJump(result, sex, ts, { height = null, pb = null, runup =
     return c && feet.length ? (Math.max(...feet) - c[1]) / (ground.pxPerM * torsoLength(kp) / torsoLength(k0)) : NaN;
   })();
   const flight = ground && !ground.error ? withGround(air, ground, hLand) : airOnly;
+  if (!flight.error && vsplit) flight.videoSplit = vsplit;
   // Faster than any human jump (2026-11-17, a rerun of the sprint IMG_4866: the server named a
   // "take-off" mid-stride and it read vy 7.0, 66 m/s, a 5.8 m apex). Every checked jump leaves the
   // board at vy 1.6-2.7 and 6.6-8.6 m/s, so 4.5 and 13 sit far above any jump.

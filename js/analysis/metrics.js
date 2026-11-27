@@ -293,7 +293,9 @@ export function flightMetrics(f, ev, sex = 'male') {
     // Lowering in cm comes from the leg's angles and real segment lengths (heightAboveFoot). Hidden for
     // an hour on 2026-11-23 while image-scale versions gave 1-10 cm on IMG_5166; restored when the joints
     // were checked on its frames: the angles hold, only the image scale didn't.
-    const usable = !raisedBox && !plankDist && !noRunway && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk && !(f.fitSeconds < 0.3) : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
+    // a 1-11 m time from Freelap or the video's steps is its own measure, not the arc's or the runway's
+    const timed = key === 'speedApproach' && (f.approachFrom === 'freelap' || f.approachFrom === 'video');
+    const usable = timed || !raisedBox && !plankDist && !noRunway && (SCALE_FREE.has(key) || (key === 'takeoffAngle' ? f.angleOk && !(f.fitSeconds < 0.3) : fromApex ? f.apexOk || (!board && f.scaleOk) : f.scaleOk));
     const status = !usable ? 'hidden' : value < lo ? 'low' : value > hi ? 'high' : 'ok';
     const arc = board ? { ...f, scaleWhy: f.fitWhy } : f;
     const why = plankDist ? 'z debničky sa dĺžka skoku zatiaľ nemeria dosť presne (±0,2 m); rýchlosť a kroky áno'
